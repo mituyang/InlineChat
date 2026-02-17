@@ -19,11 +19,13 @@
 - `apps/widget-chat`: Widget 聊天窗（iframe）前端源码
 - `apps/demo-site`: 业务网站示例前端源码（已嵌入客服）
 - `apps/widget-sdk/inlinechat-widget.js`: 嵌入式 SDK 脚本源码
-- `services/gateway-service/public/customer`: 访客前端（静态页）
-- `services/gateway-service/public/agent`: 客服工作台前端（静态页）
-- `services/gateway-service/public/admin`: 管理后台前端（静态页）
+- `apps/*`: 前端单一源码目录（gateway 镜像构建时直接打包，无需同步双份目录）
 - `infra/docker/docker-compose.yml`: 本地编排
 - `.env.example`: 环境变量模板
+
+前端资源加载规则：
+- 容器内优先读取 `./public/*`（由镜像构建时从 `apps/*` 打包）。
+- 本地直接运行 `gateway-service` 时可自动回退读取 `apps/*`，无需同步脚本。
 
 ## 本地启动
 1. `cp .env.example .env`
@@ -72,14 +74,14 @@
 ## Makefile
 - `make build-local`: 本地先编译全部服务二进制（`linux` 目标）
 - `make image-build`: 使用本地二进制构建 Docker 镜像
-- `make sync-frontend`: 同步 `apps/*` 前端源码到 `gateway-service/public/*`
 - `make up`: 先本地编译、再构建镜像、最后后台启动全部服务
 - `make down`: 停止并删除容器
 - `make logs`: 跟随日志
 - `make migrate`: 执行全部迁移
 - `make test`: 运行后端测试
 - `make smoke`: 运行端到端冒烟（健康检查、登录、管理接口、会话与消息）
-- `make mvp-release`: 执行 MVP 验收流水（`sync-frontend + test + smoke`）
+- `make integration`: 运行系统集成检查（`smoke + etcd + mysql + websocket`）
+- `make mvp-release`: 执行 MVP 验收流水（`test + integration`）
 - `make fmt`: 统一 gofmt
 - `make proto`: 重新生成 gRPC 协议代码（chat/auth/admin/gateway/realtime）
 
@@ -90,7 +92,7 @@
   - `services/chat-service/internal/service/chat_service_test.go`
 - CI 流水线：`.github/workflows/ci.yml`
   - `test` Job：执行 `make test`
-  - `smoke` Job：执行 `cp .env.example .env && make up && make smoke`，并在结束后自动 `make down`
+  - `integration` Job：执行 `cp .env.example .env && make up && make integration`，并在结束后自动 `make down`
 
 ## 数据库迁移
 - 迁移目录：`services/chat-service/migrations`

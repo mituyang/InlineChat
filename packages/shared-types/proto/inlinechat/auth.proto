@@ -5,16 +5,8 @@ package inlinechat.auth.v1;
 option go_package = "inlinechat/packages/shared-types/proto/authv1";
 
 service AuthGatewayService {
-  rpc BootstrapAdmin(BootstrapAdminRequest) returns (AuthResult);
   rpc Login(LoginRequest) returns (AuthResult);
   rpc Me(MeRequest) returns (MeResponse);
-}
-
-message BootstrapAdminRequest {
-  string email = 1;
-  string password = 2;
-  string display_name = 3;
-  string bootstrap_token = 4;
 }
 
 message LoginRequest {

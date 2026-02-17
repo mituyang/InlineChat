@@ -9,14 +9,13 @@ GO_BUILD_ARCH ?= $(shell go env GOARCH)
 GO_BUILD_OUTPUT := .bin/server
 GO_PROXY ?= https://proxy.golang.org,direct
 
-.PHONY: help ensure-env config sync-frontend up up-fg down restart logs ps migrate migrate-chat migrate-auth migrate-admin fmt test proto build-local image-build smoke mvp-release
+.PHONY: help ensure-env config up up-fg down restart logs ps migrate migrate-chat migrate-auth migrate-admin fmt test proto build-local image-build smoke integration mvp-release
 
 help:
 	@echo "可用命令:"
 	@echo "  make up             使用 .env 后台启动全部服务"
 	@echo "  make build-local    本地编译全部服务二进制（Linux）"
 	@echo "  make image-build    基于本地二进制构建 Docker 镜像"
-	@echo "  make sync-frontend  同步 apps 前端到 gateway 静态目录"
 	@echo "  make down           停止并删除容器"
 	@echo "  make logs           查看服务日志"
 	@echo "  make ps             查看服务状态"
@@ -24,7 +23,8 @@ help:
 	@echo "  make migrate        执行全部迁移任务"
 	@echo "  make test           运行后端 Go 测试"
 	@echo "  make smoke          运行端到端冒烟（登录/管理/会话/消息）"
-	@echo "  make mvp-release    执行 MVP 验收流水（sync-frontend + test + smoke）"
+	@echo "  make integration    运行系统集成检查（smoke + etcd + mysql + websocket）"
+	@echo "  make mvp-release    执行 MVP 验收流水（test + integration）"
 	@echo "  make fmt            对后端 Go 代码执行 gofmt"
 	@echo "  make proto          基于 proto 定义生成 gRPC 代码"
 
@@ -37,9 +37,6 @@ ensure-env:
 config:
 	docker compose -f $(COMPOSE_FILE) --env-file .env.example config >/tmp/inlinechat-compose-check.txt
 	@echo "compose 配置校验通过"
-
-sync-frontend:
-	./scripts/sync-frontends.sh
 
 build-local:
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
@@ -59,10 +56,10 @@ build-local:
 image-build: ensure-env
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) build
 
-up: ensure-env sync-frontend build-local image-build
+up: ensure-env build-local image-build
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d
 
-up-fg: ensure-env sync-frontend build-local image-build
+up-fg: ensure-env build-local image-build
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up
 
 down: ensure-env
@@ -110,8 +107,11 @@ test:
 smoke: ensure-env
 	ENV_FILE=$(ENV_FILE) ./scripts/smoke-e2e.sh
 
-mvp-release: ensure-env sync-frontend test smoke
-	@echo "MVP 验收通过（sync-frontend + test + smoke）"
+integration: ensure-env
+	ENV_FILE=$(ENV_FILE) ./scripts/integration-system.sh
+
+mvp-release: ensure-env test integration
+	@echo "MVP 验收通过（test + integration）"
 
 proto:
 	./scripts/gen-proto.sh

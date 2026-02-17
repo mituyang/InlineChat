@@ -22,11 +22,6 @@ func New(authService *service.AuthService) *AuthGatewayServer {
 	return &AuthGatewayServer{authService: authService}
 }
 
-func (s *AuthGatewayServer) BootstrapAdmin(ctx context.Context, req *authv1.BootstrapAdminRequest) (*authv1.AuthResult, error) {
-	_, _ = ctx, req
-	return nil, status.Error(codes.PermissionDenied, service.ErrBootstrapDisabled.Error())
-}
-
 func (s *AuthGatewayServer) Login(ctx context.Context, req *authv1.LoginRequest) (*authv1.AuthResult, error) {
 	if strings.TrimSpace(req.GetEmail()) == "" || strings.TrimSpace(req.GetPassword()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "email and password are required")
@@ -69,8 +64,6 @@ func (s *AuthGatewayServer) Me(_ context.Context, req *authv1.MeRequest) (*authv
 
 func mapError(err error) error {
 	switch err {
-	case service.ErrBootstrapDisabled:
-		return status.Error(codes.PermissionDenied, err.Error())
 	case service.ErrForbidden:
 		return status.Error(codes.PermissionDenied, err.Error())
 	case service.ErrConflict:

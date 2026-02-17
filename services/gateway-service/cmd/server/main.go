@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -110,13 +112,14 @@ func main() {
 	r.GET("/app/demo", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/app/demo/")
 	})
-	r.StaticFS("/app/customer", gin.Dir("./public/customer", false))
-	r.StaticFS("/app/agent", gin.Dir("./public/agent", false))
-	r.StaticFS("/app/staff-login", gin.Dir("./public/staff-login", false))
-	r.StaticFS("/app/widget", gin.Dir("./public/widget", false))
-	r.StaticFS("/app/admin", gin.Dir("./public/admin", false))
-	r.StaticFS("/app/demo", gin.Dir("./public/demo", false))
-	r.StaticFS("/sdk", gin.Dir("./public/sdk", false))
+
+	registerStaticRoute(r, appLogger, "/app/customer", []string{"./public/customer", "./apps/customer-console", "../../apps/customer-console"})
+	registerStaticRoute(r, appLogger, "/app/agent", []string{"./public/agent", "./apps/agent-console", "../../apps/agent-console"})
+	registerStaticRoute(r, appLogger, "/app/staff-login", []string{"./public/staff-login", "./apps/staff-login", "../../apps/staff-login"})
+	registerStaticRoute(r, appLogger, "/app/widget", []string{"./public/widget", "./apps/widget-chat", "../../apps/widget-chat"})
+	registerStaticRoute(r, appLogger, "/app/admin", []string{"./public/admin", "./apps/admin-console", "../../apps/admin-console"})
+	registerStaticRoute(r, appLogger, "/app/demo", []string{"./public/demo", "./apps/demo-site", "../../apps/demo-site"})
+	registerStaticRoute(r, appLogger, "/sdk", []string{"./public/sdk", "./apps/widget-sdk", "../../apps/widget-sdk"})
 
 	httpHandler.RegisterRoutes(r)
 
@@ -147,4 +150,33 @@ func resolveWithRetry(resolver *discovery.Resolver, serviceName string, protocol
 		time.Sleep(500 * time.Millisecond)
 	}
 	return "", fmt.Errorf("resolve %s/%s timeout: %w", serviceName, protocol, lastErr)
+}
+
+func registerStaticRoute(r *gin.Engine, appLogger *zap.Logger, route string, candidates []string) {
+	dir, err := resolveStaticDir(candidates...)
+	if err != nil {
+		appLogger.Warn("static route disabled due to missing directory", zap.String("route", route), zap.Error(err))
+		return
+	}
+
+	absDir := dir
+	if v, err := filepath.Abs(dir); err == nil {
+		absDir = v
+	}
+
+	appLogger.Info("static route mounted", zap.String("route", route), zap.String("dir", absDir))
+	r.StaticFS(route, gin.Dir(dir, false))
+}
+
+func resolveStaticDir(candidates ...string) (string, error) {
+	for _, dir := range candidates {
+		info, err := os.Stat(dir)
+		if err != nil {
+			continue
+		}
+		if info.IsDir() {
+			return dir, nil
+		}
+	}
+	return "", fmt.Errorf("no static directory matched candidates=%v", candidates)
 }

@@ -206,8 +206,8 @@ services:
 
   gateway-service:
     build:
-      context: ../../services/gateway-service
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: services/gateway-service/Dockerfile
     restart: unless-stopped
     depends_on:
       chat-service:

@@ -22,7 +22,6 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AuthGatewayServiceClient interface {
-	BootstrapAdmin(ctx context.Context, in *BootstrapAdminRequest, opts ...grpc.CallOption) (*AuthResult, error)
 	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*AuthResult, error)
 	Me(ctx context.Context, in *MeRequest, opts ...grpc.CallOption) (*MeResponse, error)
 }
@@ -33,15 +32,6 @@ type authGatewayServiceClient struct {
 
 func NewAuthGatewayServiceClient(cc grpc.ClientConnInterface) AuthGatewayServiceClient {
 	return &authGatewayServiceClient{cc}
-}
-
-func (c *authGatewayServiceClient) BootstrapAdmin(ctx context.Context, in *BootstrapAdminRequest, opts ...grpc.CallOption) (*AuthResult, error) {
-	out := new(AuthResult)
-	err := c.cc.Invoke(ctx, "/inlinechat.auth.v1.AuthGatewayService/BootstrapAdmin", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *authGatewayServiceClient) Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*AuthResult, error) {
@@ -66,7 +56,6 @@ func (c *authGatewayServiceClient) Me(ctx context.Context, in *MeRequest, opts .
 // All implementations must embed UnimplementedAuthGatewayServiceServer
 // for forward compatibility
 type AuthGatewayServiceServer interface {
-	BootstrapAdmin(context.Context, *BootstrapAdminRequest) (*AuthResult, error)
 	Login(context.Context, *LoginRequest) (*AuthResult, error)
 	Me(context.Context, *MeRequest) (*MeResponse, error)
 	mustEmbedUnimplementedAuthGatewayServiceServer()
@@ -76,9 +65,6 @@ type AuthGatewayServiceServer interface {
 type UnimplementedAuthGatewayServiceServer struct {
 }
 
-func (UnimplementedAuthGatewayServiceServer) BootstrapAdmin(context.Context, *BootstrapAdminRequest) (*AuthResult, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method BootstrapAdmin not implemented")
-}
 func (UnimplementedAuthGatewayServiceServer) Login(context.Context, *LoginRequest) (*AuthResult, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Login not implemented")
 }
@@ -96,24 +82,6 @@ type UnsafeAuthGatewayServiceServer interface {
 
 func RegisterAuthGatewayServiceServer(s grpc.ServiceRegistrar, srv AuthGatewayServiceServer) {
 	s.RegisterService(&AuthGatewayService_ServiceDesc, srv)
-}
-
-func _AuthGatewayService_BootstrapAdmin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(BootstrapAdminRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AuthGatewayServiceServer).BootstrapAdmin(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/inlinechat.auth.v1.AuthGatewayService/BootstrapAdmin",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AuthGatewayServiceServer).BootstrapAdmin(ctx, req.(*BootstrapAdminRequest))
-	}
-	return interceptor(ctx, in, info, handler)
 }
 
 func _AuthGatewayService_Login_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -159,10 +127,6 @@ var AuthGatewayService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "inlinechat.auth.v1.AuthGatewayService",
 	HandlerType: (*AuthGatewayServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "BootstrapAdmin",
-			Handler:    _AuthGatewayService_BootstrapAdmin_Handler,
-		},
 		{
 			MethodName: "Login",
 			Handler:    _AuthGatewayService_Login_Handler,

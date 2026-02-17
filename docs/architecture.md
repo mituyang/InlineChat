@@ -15,12 +15,13 @@
 - `etcd`: 服务注册与发现中心，gateway/realtime 通过它解析上游地址。
 
 ## 前端目录
-- `apps/agent-console`: 客服工作台源码目录（通过脚本同步到 `services/gateway-service/public/agent`）。
-- `apps/admin-console`: 管理后台源码目录（通过脚本同步到 `services/gateway-service/public/admin`）。
-- `apps/customer-console`: 访客调试页源码目录（同步到 `services/gateway-service/public/customer`）。
-- `apps/widget-chat`: Widget 聊天窗（iframe）源码目录（同步到 `services/gateway-service/public/widget`）。
-- `apps/demo-site`: 业务网站示例源码目录（同步到 `services/gateway-service/public/demo`）。
-- `apps/widget-sdk/inlinechat-widget.js`: 嵌入脚本源码（同步到 `services/gateway-service/public/sdk/inlinechat-widget.js`）。
+- `apps/agent-console`: 客服工作台源码目录。
+- `apps/admin-console`: 管理后台源码目录。
+- `apps/customer-console`: 访客调试页源码目录。
+- `apps/widget-chat`: Widget 聊天窗（iframe）源码目录。
+- `apps/demo-site`: 业务网站示例源码目录。
+- `apps/widget-sdk/inlinechat-widget.js`: 嵌入脚本源码。
+- `apps/*` 是唯一前端源码来源。`gateway-service` 镜像构建时直接打包这些目录到容器内 `public/*`，不再维护仓库内的前端副本目录。
 
 ## MVP 数据流
 0. `chat-migrate`、`auth-migrate`、`admin-migrate` 在服务启动前执行 SQL 迁移。

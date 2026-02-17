@@ -17,7 +17,6 @@ var (
 	ErrForbidden         = errors.New("forbidden")
 	ErrConflict          = errors.New("conflict")
 	ErrInvalidCredential = errors.New("invalid credentials")
-	ErrBootstrapDisabled = errors.New("bootstrap admin is disabled")
 )
 
 type AuthService struct {

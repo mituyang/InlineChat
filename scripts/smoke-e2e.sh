@@ -92,6 +92,26 @@ http_json() {
   curl "${args[@]}"
 }
 
+wait_gateway_ready() {
+  local max_retry="${1:-40}"
+  local interval_sec="${2:-2}"
+  local attempt=1
+
+  while [ "$attempt" -le "$max_retry" ]; do
+    if curl -fsS "${GATEWAY_URL}/healthz" >/dev/null 2>&1; then
+      return 0
+    fi
+    echo "  网关未就绪，等待重试 (${attempt}/${max_retry})..."
+    sleep "$interval_sec"
+    attempt=$((attempt + 1))
+  done
+
+  echo "  网关超时未就绪: ${GATEWAY_URL}/healthz"
+  return 1
+}
+
+wait_gateway_ready 40 2
+
 echo "[1/9] 健康检查: ${GATEWAY_URL}/healthz"
 health_resp="$(curl -fsS "${GATEWAY_URL}/healthz")"
 echo "  ${health_resp}"
