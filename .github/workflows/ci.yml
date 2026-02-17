@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    name: 后端测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+
+      - name: 运行单元测试
+        run: make test
+
+  smoke:
+    name: 端到端冒烟
+    runs-on: ubuntu-latest
+    needs: test
+    timeout-minutes: 45
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.x'
+
+      - name: 准备环境变量
+        run: cp .env.example .env
+
+      - name: 启动服务
+        run: make up
+
+      - name: 执行冒烟
+        run: make smoke
+
+      - name: 打印容器状态
+        if: always()
+        run: make ps
+
+      - name: 停止服务
+        if: always()
+        run: make down

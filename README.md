@@ -83,6 +83,15 @@
 - `make fmt`: 统一 gofmt
 - `make proto`: 重新生成 gRPC 协议代码（chat/auth/admin/gateway/realtime）
 
+## 测试与 CI
+- 已补充核心业务单元测试：
+  - `services/auth-service/internal/service/auth_service_test.go`
+  - `services/admin-service/internal/service/admin_service_test.go`
+  - `services/chat-service/internal/service/chat_service_test.go`
+- CI 流水线：`.github/workflows/ci.yml`
+  - `test` Job：执行 `make test`
+  - `smoke` Job：执行 `cp .env.example .env && make up && make smoke`，并在结束后自动 `make down`
+
 ## 数据库迁移
 - 迁移目录：`services/chat-service/migrations`
 - 编排会自动执行 `chat-migrate`、`auth-migrate`、`admin-migrate`
