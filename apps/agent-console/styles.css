@@ -61,7 +61,8 @@
 html,
 body {
   margin: 0;
-  min-height: 100%;
+  height: 100%;
+  overflow: hidden;
 }
 
 body {
@@ -70,6 +71,8 @@ body {
   background: radial-gradient(circle at 8% 6%, rgba(11, 111, 184, 0.16), transparent 36%),
     radial-gradient(circle at 92% 2%, rgba(14, 165, 233, 0.1), transparent 40%),
     linear-gradient(140deg, var(--bg-0), var(--bg-1));
+  font-size: 14px;
+  line-height: 1.45;
 }
 
 :root[data-theme="dark"] body {
@@ -83,10 +86,12 @@ body.auth-guard .shell {
 }
 
 .shell {
-  min-height: 100vh;
-  padding: 18px;
+  height: 100vh;
+  padding: 12px;
   display: grid;
-  gap: 14px;
+  gap: 8px;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
 }
 
 .card {
@@ -97,29 +102,29 @@ body.auth-guard .shell {
 }
 
 .topbar {
-  padding: 16px 18px;
+  padding: 14px 16px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .topbar-main h1 {
   margin: 0;
-  font-size: clamp(22px, 3vw, 30px);
-  letter-spacing: 0.3px;
+  font-size: clamp(18px, 2.2vw, 26px);
+  line-height: 1.2;
 }
 
 .topbar-main p {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--text-sub);
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .topbar-side {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
   justify-content: flex-end;
 }
@@ -129,10 +134,10 @@ body.auth-guard .shell {
   align-items: center;
   gap: 8px;
   border-radius: 999px;
-  padding: 8px 12px;
+  padding: 7px 10px;
   background: var(--ok-bg);
   color: var(--ok-text);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -164,11 +169,11 @@ body.auth-guard .shell {
 }
 
 .user-box {
-  padding: 8px 12px;
+  padding: 7px 10px;
   border-radius: 10px;
   background: #eff6ff;
   color: #1e3a8a;
-  font-size: 12px;
+  font-size: 11px;
   white-space: nowrap;
 }
 
@@ -180,13 +185,13 @@ body.auth-guard .shell {
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .stat-card {
-  padding: 10px 12px;
+  padding: 8px 10px;
   display: grid;
-  gap: 4px;
+  gap: 3px;
   background: linear-gradient(180deg, #ffffff, #f9fbff);
 }
 
@@ -196,32 +201,34 @@ body.auth-guard .shell {
 
 .stat-card span {
   color: var(--text-sub);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .stat-card strong {
-  font-size: 24px;
+  font-size: 17px;
   line-height: 1.1;
 }
 
 .workspace {
   display: grid;
-  grid-template-columns: 340px minmax(0, 1fr) 312px;
-  gap: 12px;
-  min-height: calc(100vh - 286px);
+  grid-template-columns: 316px minmax(0, 1fr) 324px;
+  gap: 10px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .queue-panel,
 .chat-panel,
 .assist-panel {
-  padding: 12px;
+  padding: 10px;
   display: grid;
-  gap: 10px;
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .queue-panel {
   grid-template-rows: auto auto auto auto auto 1fr;
-  min-height: 560px;
 }
 
 .queue-head,
@@ -236,6 +243,8 @@ body.auth-guard .shell {
 .chat-toolbar h2,
 .assist-panel h3 {
   margin: 0;
+  font-size: 17px;
+  line-height: 1.2;
 }
 
 .queue-shortcuts {
@@ -249,8 +258,8 @@ body.auth-guard .shell {
   border-radius: 10px;
   background: #f7fbff;
   color: #243b53;
-  padding: 8px 10px;
-  font-size: 12px;
+  padding: 7px 10px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -282,8 +291,8 @@ body.auth-guard .shell {
   border-radius: 10px;
   background: #f8fafd;
   color: #334155;
-  padding: 8px 10px;
-  font-size: 12px;
+  padding: 7px 10px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -307,7 +316,7 @@ body.auth-guard .shell {
 .field-inline {
   display: grid;
   gap: 6px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-sub);
 }
 
@@ -315,7 +324,7 @@ body.auth-guard .shell {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-sub);
 }
 
@@ -328,7 +337,7 @@ body.auth-guard .shell {
   display: flex !important;
   align-items: center;
   gap: 8px;
-  min-height: 40px;
+  min-height: 36px;
 }
 
 .conversation-list {
@@ -336,20 +345,20 @@ body.auth-guard .shell {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--panel-soft);
-  padding: 8px;
+  padding: 6px;
   display: grid;
   align-content: start;
-  gap: 8px;
+  gap: 6px;
 }
 
 .conversation-item {
   border: 1px solid #dbe5f0;
   border-radius: 10px;
-  padding: 9px 10px;
+  padding: 8px 9px;
   background: #ffffff;
   cursor: pointer;
   display: grid;
-  gap: 4px;
+  gap: 3px;
   transition: border-color 0.15s ease, transform 0.15s ease, background 0.2s ease;
 }
 
@@ -375,7 +384,7 @@ body.auth-guard .shell {
 
 .conversation-item .meta {
   color: var(--text-sub);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .conversation-title-row {
@@ -387,8 +396,8 @@ body.auth-guard .shell {
 
 .status-chip {
   border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 11px;
+  padding: 2px 7px;
+  font-size: 10px;
   font-weight: 600;
 }
 
@@ -413,20 +422,19 @@ body.auth-guard .shell {
 }
 
 .unread-badge {
-  min-width: 20px;
-  height: 20px;
+  min-width: 18px;
+  height: 18px;
   border-radius: 999px;
   background: var(--badge);
   color: #ffffff;
-  font-size: 12px;
-  line-height: 20px;
+  font-size: 11px;
+  line-height: 18px;
   text-align: center;
   padding: 0 6px;
 }
 
 .chat-panel {
   grid-template-rows: auto minmax(0, 1fr) auto;
-  min-height: 560px;
 }
 
 .chat-toolbar {
@@ -437,15 +445,15 @@ body.auth-guard .shell {
 }
 
 .chat-toolbar p {
-  margin: 6px 0 0;
+  margin: 4px 0 0;
   color: var(--text-sub);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .chat-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
 }
 
@@ -455,19 +463,19 @@ body.auth-guard .shell {
 }
 
 .transfer-box input {
-  width: 124px;
+  width: 118px;
 }
 
 .messages {
   border: 1px solid var(--line);
   border-radius: 12px;
   background: #f8fafc;
-  padding: 12px;
+  padding: 10px;
   overflow: auto;
   display: grid;
   align-content: start;
-  gap: 8px;
-  min-height: 360px;
+  gap: 7px;
+  min-height: 0;
 }
 
 :root[data-theme="dark"] .messages {
@@ -477,9 +485,9 @@ body.auth-guard .shell {
 .message {
   max-width: 80%;
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 9px 11px;
   display: grid;
-  gap: 6px;
+  gap: 5px;
 }
 
 .message.mine {
@@ -493,26 +501,26 @@ body.auth-guard .shell {
 
 .message .meta {
   color: var(--text-sub);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .send-form {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 10px;
+  gap: 8px;
   align-items: end;
   border-top: 1px solid var(--line);
-  padding-top: 10px;
+  padding-top: 8px;
 }
 
 .send-form textarea {
-  min-height: 86px;
+  min-height: 74px;
+  max-height: 140px;
   resize: vertical;
 }
 
 .assist-panel {
   grid-template-rows: auto auto 1fr;
-  min-height: 560px;
 }
 
 .conversation-info,
@@ -520,14 +528,16 @@ body.auth-guard .shell {
 .playbook-panel {
   border: 1px solid var(--line);
   border-radius: 12px;
-  padding: 10px;
+  padding: 9px;
   background: var(--panel-soft);
+  min-height: 0;
+  overflow: auto;
 }
 
 .info-list {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .info-list div {
@@ -535,7 +545,7 @@ body.auth-guard .shell {
   justify-content: space-between;
   gap: 8px;
   border-bottom: 1px dashed #d8e4f0;
-  padding-bottom: 6px;
+  padding-bottom: 5px;
 }
 
 :root[data-theme="dark"] .info-list div {
@@ -544,12 +554,12 @@ body.auth-guard .shell {
 
 .info-list dt {
   color: var(--text-sub);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .info-list dd {
   margin: 0;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -561,19 +571,21 @@ body.auth-guard .shell {
 }
 
 .quick-reply-list {
-  margin-top: 10px;
+  margin-top: 8px;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
+  max-height: 154px;
+  overflow: auto;
 }
 
 .quick-reply-chip {
   border: 1px solid #c8d7ea;
   border-radius: 999px;
-  padding: 7px 10px;
+  padding: 6px 9px;
   background: #ffffff;
   color: #334155;
-  font-size: 12px;
+  font-size: 11px;
   cursor: pointer;
 }
 
@@ -589,26 +601,26 @@ body.auth-guard .shell {
 }
 
 .quick-reply-form {
-  margin-top: 10px;
+  margin-top: 8px;
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 8px;
+  gap: 6px;
 }
 
 .playbook-panel ul {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   padding-left: 18px;
   display: grid;
-  gap: 8px;
+  gap: 6px;
   color: var(--text-sub);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .empty {
   color: var(--text-sub);
   text-align: center;
-  padding: 20px 0;
-  font-size: 13px;
+  padding: 16px 0;
+  font-size: 12px;
 }
 
 .status-line {
@@ -616,8 +628,8 @@ body.auth-guard .shell {
   border-radius: 12px;
   background: #f8fafc;
   color: #334155;
-  padding: 10px 12px;
-  font-size: 13px;
+  padding: 9px 10px;
+  font-size: 12px;
 }
 
 :root[data-theme="dark"] .status-line {
@@ -644,7 +656,8 @@ select,
 textarea {
   border: 1px solid #c9d7e6;
   border-radius: 10px;
-  padding: 8px 10px;
+  padding: 7px 9px;
+  min-height: 36px;
   background: #ffffff;
 }
 
@@ -659,10 +672,12 @@ textarea {
 button {
   border: 0;
   border-radius: 10px;
-  padding: 9px 12px;
+  padding: 8px 12px;
   cursor: pointer;
   color: #ffffff;
   background: var(--brand);
+  min-height: 36px;
+  font-size: 13px;
 }
 
 button:hover {
@@ -692,17 +707,24 @@ button:disabled {
   }
 
   .workspace {
-    grid-template-columns: 320px minmax(0, 1fr);
+    grid-template-columns: 292px minmax(0, 1fr);
   }
 
   .assist-panel {
     grid-column: 1 / -1;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     grid-template-rows: none;
+    overflow: hidden;
   }
 }
 
 @media (max-width: 1080px) {
+  html,
+  body {
+    height: auto;
+    overflow: auto;
+  }
+
   .topbar {
     flex-direction: column;
     align-items: flex-start;
@@ -719,17 +741,25 @@ button:disabled {
 
   .workspace {
     grid-template-columns: 1fr;
-    min-height: auto;
+    min-height: 0;
+    overflow: visible;
   }
 
   .queue-panel,
   .chat-panel,
   .assist-panel {
-    min-height: 0;
+    overflow: visible;
   }
 
   .assist-panel {
     grid-template-columns: 1fr;
+  }
+
+  .shell {
+    height: auto;
+    min-height: 100vh;
+    grid-template-rows: none;
+    overflow: visible;
   }
 }
 
