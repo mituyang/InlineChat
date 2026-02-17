@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>青禾家居 - 官方商城</title>
+    <style>
+      :root {
+        --bg: #f5f7fb;
+        --card: #ffffff;
+        --line: #e2e8f0;
+        --text: #0f172a;
+        --sub: #475569;
+        --primary: #1d4ed8;
+        --primary-2: #0ea5e9;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: radial-gradient(circle at 85% 0%, rgba(14, 165, 233, 0.2), transparent 42%),
+          radial-gradient(circle at 0% 10%, rgba(29, 78, 216, 0.16), transparent 45%),
+          var(--bg);
+        color: var(--text);
+        font-family: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+      }
+
+      .container {
+        width: min(1120px, calc(100% - 32px));
+        margin: 0 auto;
+      }
+
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        backdrop-filter: blur(8px);
+        background: rgba(245, 247, 251, 0.86);
+        border-bottom: 1px solid rgba(226, 232, 240, 0.8);
+      }
+
+      .nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 14px 0;
+      }
+
+      .brand {
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      .brand span {
+        color: var(--primary);
+      }
+
+      .nav ul {
+        display: flex;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        gap: 18px;
+        color: var(--sub);
+      }
+
+      .hero {
+        padding: 58px 0 42px;
+        display: grid;
+        gap: 18px;
+      }
+
+      .hero h1 {
+        margin: 0;
+        font-size: clamp(30px, 6vw, 54px);
+        line-height: 1.12;
+      }
+
+      .hero p {
+        margin: 0;
+        max-width: 740px;
+        line-height: 1.8;
+        color: var(--sub);
+      }
+
+      .hero .actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+
+      .btn {
+        border: 0;
+        border-radius: 999px;
+        padding: 11px 18px;
+        cursor: pointer;
+        font: inherit;
+      }
+
+      .btn.primary {
+        color: #fff;
+        background: linear-gradient(120deg, var(--primary), var(--primary-2));
+      }
+
+      .btn.ghost {
+        color: #0f172a;
+        background: #fff;
+        border: 1px solid var(--line);
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+        padding-bottom: 24px;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        overflow: hidden;
+      }
+
+      .thumb {
+        height: 180px;
+        background: linear-gradient(135deg, #dbeafe, #e0f2fe);
+      }
+
+      .content {
+        padding: 14px;
+        display: grid;
+        gap: 8px;
+      }
+
+      .title {
+        font-size: 18px;
+        font-weight: 600;
+      }
+
+      .desc {
+        color: var(--sub);
+        line-height: 1.6;
+      }
+
+      .price {
+        color: #b45309;
+        font-size: 20px;
+        font-weight: 700;
+      }
+
+      .feature {
+        margin: 30px 0 60px;
+        padding: 20px;
+        border-radius: 18px;
+        background: #fff;
+        border: 1px solid var(--line);
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .feature-item {
+        padding: 12px;
+        border-radius: 12px;
+        background: #f8fafc;
+      }
+
+      .feature-item strong {
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .feature-item p {
+        margin: 0;
+        color: var(--sub);
+        line-height: 1.6;
+      }
+
+      footer {
+        padding: 22px 0 34px;
+        color: #64748b;
+        font-size: 14px;
+      }
+
+      @media (max-width: 980px) {
+        .grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .feature {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 640px) {
+        .nav ul {
+          display: none;
+        }
+
+        .grid,
+        .feature {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="container nav">
+        <div class="brand">青禾<span>家居</span></div>
+        <ul>
+          <li>首页</li>
+          <li>新品</li>
+          <li>爆款</li>
+          <li>企业采购</li>
+          <li>会员中心</li>
+        </ul>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="hero">
+        <h1>把家的舒适，装进每一个日常细节</h1>
+        <p>
+          青禾家居专注于高性价比家居产品，覆盖卧室、客厅、厨房、收纳全场景。
+          支持 48 小时极速发货与 30 天无忧退换，企业客户支持专属报价与一对一顾问服务。
+        </p>
+        <div class="actions">
+          <button class="btn primary">立即选购</button>
+          <button class="btn ghost">领取新人优惠券</button>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <div class="thumb"></div>
+          <div class="content">
+            <div class="title">云感记忆棉枕</div>
+            <div class="desc">慢回弹承托，贴合颈椎曲线，提升睡眠质量。</div>
+            <div class="price">¥159</div>
+          </div>
+        </article>
+        <article class="card">
+          <div class="thumb" style="background: linear-gradient(135deg, #e9d5ff, #ede9fe)"></div>
+          <div class="content">
+            <div class="title">极简落地灯</div>
+            <div class="desc">三档亮度调节，阅读与氛围照明一灯兼顾。</div>
+            <div class="price">¥239</div>
+          </div>
+        </article>
+        <article class="card">
+          <div class="thumb" style="background: linear-gradient(135deg, #dcfce7, #d1fae5)"></div>
+          <div class="content">
+            <div class="title">可折叠收纳柜</div>
+            <div class="desc">即装即用，多规格可选，租房和家庭都适配。</div>
+            <div class="price">¥199</div>
+          </div>
+        </article>
+      </section>
+
+      <section class="feature">
+        <div class="feature-item">
+          <strong>极速发货</strong>
+          <p>工作日下单 48 小时内发货，全国多仓就近配送。</p>
+        </div>
+        <div class="feature-item">
+          <strong>企业采购</strong>
+          <p>支持公司对公付款、专票开具、批量采购折扣。</p>
+        </div>
+        <div class="feature-item">
+          <strong>安装指导</strong>
+          <p>客服在线答疑，复杂品类提供图文视频安装指南。</p>
+        </div>
+        <div class="feature-item">
+          <strong>售后无忧</strong>
+          <p>30 天无忧退换，7x12 小时人工客服在线服务。</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="container">© 2026 青禾家居（示例业务网站）</footer>
+
+    <script
+      src="/sdk/inlinechat-widget.js"
+      data-site-id="site_demo"
+      data-title="青禾在线客服"
+      data-primary-color="#2f343c"
+      data-bottom="24"
+      data-right="24"
+      defer
+    ></script>
+  </body>
+</html>

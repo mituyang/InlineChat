@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>InlineChat 访客端</title>
+    <link rel="stylesheet" href="/app/customer/styles.css" />
+  </head>
+  <body>
+    <main class="page">
+      <section class="card">
+        <header class="card-header">
+          <div>
+            <h1>InlineChat 访客端</h1>
+            <p>匿名访客实时会话（MVP 调试页）</p>
+          </div>
+          <span id="wsBadge" class="badge offline">WebSocket 未连接</span>
+        </header>
+
+        <section class="panel panel-grid">
+          <label>
+            Site ID
+            <input id="siteIdInput" type="text" placeholder="例如 site_demo" />
+          </label>
+          <label>
+            Visitor Token
+            <input id="visitorTokenInput" type="text" readonly />
+          </label>
+          <label>
+            会话 ID
+            <input id="conversationIdInput" type="text" readonly />
+          </label>
+          <div class="actions">
+            <button id="startBtn" type="button">进入会话</button>
+            <button id="newBtn" type="button" class="secondary">新建会话</button>
+          </div>
+        </section>
+
+        <section class="panel messages-panel">
+          <div id="messages" class="messages"></div>
+          <form id="sendForm" class="send-form">
+            <textarea id="contentInput" placeholder="输入消息，回车发送（Shift+回车换行）" rows="3"></textarea>
+            <button id="sendBtn" type="submit">发送</button>
+          </form>
+        </section>
+
+        <footer class="card-footer" id="statusLine">尚未进入会话</footer>
+      </section>
+    </main>
+
+    <script src="/app/customer/app.js" defer></script>
+  </body>
+</html>

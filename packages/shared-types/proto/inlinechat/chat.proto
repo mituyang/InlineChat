@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package inlinechat.chat.v1;
+
+option go_package = "inlinechat/packages/shared-types/proto/chatv1";
+
+service ChatInternalService {
+  rpc CreateMessage(CreateMessageRequest) returns (CreateMessageResponse);
+}
+
+service ChatGatewayService {
+  rpc CreateConversation(CreateConversationRequest) returns (Conversation);
+  rpc ListConversations(ListConversationsRequest) returns (ListConversationsResponse);
+  rpc GetConversation(GetConversationRequest) returns (Conversation);
+  rpc CreateMessage(CreateMessageRequest) returns (Message);
+  rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
+  rpc ClaimConversation(ClaimConversationRequest) returns (Conversation);
+  rpc TransferConversation(TransferConversationRequest) returns (Conversation);
+  rpc CloseConversation(CloseConversationRequest) returns (Conversation);
+}
+
+message Conversation {
+  uint64 id = 1;
+  string site_id = 2;
+  string visitor_token = 3;
+  string status = 4;
+  string created_at = 5;
+  string updated_at = 6;
+  uint64 assigned_agent_id = 7;
+  string closed_at = 8;
+  uint64 closed_by_agent_id = 9;
+}
+
+message Message {
+  uint64 id = 1;
+  uint64 conversation_id = 2;
+  string sender_type = 3;
+  string sender_id = 4;
+  string content = 5;
+  string client_msg_id = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}
+
+message CreateConversationRequest {
+  string site_id = 1;
+  string visitor_token = 2;
+}
+
+message GetConversationRequest {
+  uint64 id = 1;
+}
+
+message ListConversationsRequest {
+  string status = 1;
+  uint64 assigned_agent_id = 2;
+  bool unassigned_only = 3;
+  string site_id = 4;
+  int32 limit = 5;
+  int32 offset = 6;
+}
+
+message ListConversationsResponse {
+  repeated Conversation items = 1;
+}
+
+message ClaimConversationRequest {
+  uint64 conversation_id = 1;
+  uint64 agent_id = 2;
+}
+
+message TransferConversationRequest {
+  uint64 conversation_id = 1;
+  uint64 actor_agent_id = 2;
+  string actor_role = 3;
+  uint64 to_agent_id = 4;
+}
+
+message CloseConversationRequest {
+  uint64 conversation_id = 1;
+  uint64 actor_agent_id = 2;
+  string actor_role = 3;
+}
+
+message CreateMessageRequest {
+  uint64 conversation_id = 1;
+  string sender_type = 2;
+  string sender_id = 3;
+  string content = 4;
+  string client_msg_id = 5;
+  string visitor_token = 6;
+}
+
+message CreateMessageResponse {
+  uint64 id = 1;
+  uint64 conversation_id = 2;
+  string sender_type = 3;
+  string sender_id = 4;
+  string content = 5;
+  string client_msg_id = 6;
+  string created_at = 7;
+  string updated_at = 8;
+}
+
+message ListMessagesRequest {
+  uint64 conversation_id = 1;
+  int32 limit = 2;
+  uint64 before_id = 3;
+}
+
+message ListMessagesResponse {
+  repeated Message items = 1;
+}

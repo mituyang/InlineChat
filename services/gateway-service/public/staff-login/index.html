@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>InlineChat 员工登录</title>
+    <link rel="stylesheet" href="/app/staff-login/styles.css" />
+  </head>
+  <body>
+    <main class="login-shell">
+      <section class="login-card">
+        <header class="login-head">
+          <h1>InlineChat 员工登录</h1>
+          <p>客服与超级管理员共用登录入口</p>
+        </header>
+
+        <form id="loginForm" class="login-form">
+          <label>
+            邮箱
+            <input id="emailInput" type="email" autocomplete="username" placeholder="name@example.com" required />
+          </label>
+          <label>
+            密码
+            <input id="passwordInput" type="password" autocomplete="current-password" required />
+          </label>
+          <button id="loginBtn" type="submit">登录</button>
+        </form>
+
+        <div class="links">
+          <a href="/app/agent/">进入客服工作台</a>
+          <a href="/app/admin/">进入管理后台</a>
+        </div>
+
+        <footer id="statusLine" class="status-line">请输入账号密码登录</footer>
+      </section>
+    </main>
+
+    <script src="/app/staff-login/app.js" defer></script>
+  </body>
+</html>

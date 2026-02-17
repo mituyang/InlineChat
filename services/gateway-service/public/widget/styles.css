@@ -1,0 +1,151 @@
+:root {
+  --bg: #f8fafc;
+  --line: #dbe2ea;
+  --text: #0f172a;
+  --sub: #64748b;
+  --primary: #0f766e;
+  --primary-hover: #115e59;
+  --self: #dcfce7;
+  --other: #eef2ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  font-family: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  color: var(--text);
+  background: #fff;
+}
+
+.chat-shell {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+}
+
+.chat-header h1 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.chat-header p {
+  margin: 5px 0 0;
+  font-size: 12px;
+  color: var(--sub);
+}
+
+#closeBtn {
+  border: 0;
+  border-radius: 10px;
+  background: #e2e8f0;
+  color: #334155;
+  width: 34px;
+  height: 34px;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+#closeBtn:hover {
+  background: #cbd5e1;
+}
+
+.messages {
+  overflow-y: auto;
+  padding: 12px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  background: #fff;
+}
+
+.empty {
+  color: var(--sub);
+  font-size: 13px;
+  text-align: center;
+  padding: 30px 0;
+}
+
+.message {
+  max-width: 84%;
+  border-radius: 12px;
+  padding: 9px 11px;
+  display: grid;
+  gap: 5px;
+}
+
+.message.self {
+  margin-left: auto;
+  background: var(--self);
+}
+
+.message.other {
+  background: var(--other);
+}
+
+.meta {
+  color: var(--sub);
+  font-size: 11px;
+}
+
+.send-form {
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  padding: 10px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: end;
+}
+
+textarea,
+button {
+  font: inherit;
+}
+
+textarea {
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  resize: none;
+  padding: 8px 10px;
+  min-height: 44px;
+  max-height: 140px;
+}
+
+textarea:focus {
+  outline: none;
+  border-color: #14b8a6;
+  box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.16);
+}
+
+button[type="submit"] {
+  border: 0;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
+  padding: 10px 12px;
+}
+
+button[type="submit"]:hover {
+  background: var(--primary-hover);
+}
+
+button[type="submit"]:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

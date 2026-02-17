@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package inlinechat.auth.v1;
+
+option go_package = "inlinechat/packages/shared-types/proto/authv1";
+
+service AuthGatewayService {
+  rpc BootstrapAdmin(BootstrapAdminRequest) returns (AuthResult);
+  rpc Login(LoginRequest) returns (AuthResult);
+  rpc Me(MeRequest) returns (MeResponse);
+}
+
+message BootstrapAdminRequest {
+  string email = 1;
+  string password = 2;
+  string display_name = 3;
+  string bootstrap_token = 4;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message MeRequest {
+  string authorization = 1;
+}
+
+message Agent {
+  uint64 id = 1;
+  string email = 2;
+  string display_name = 3;
+  string role = 4;
+  string status = 5;
+  string created_at = 6;
+  string updated_at = 7;
+}
+
+message AuthResult {
+  string token = 1;
+  Agent agent = 2;
+}
+
+message MeResponse {
+  uint64 agent_id = 1;
+  string email = 2;
+  string role = 3;
+  int64 exp = 4;
+}

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>InlineChat Widget Demo Host</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+        background: linear-gradient(135deg, #f8fafc, #e2e8f0);
+        color: #0f172a;
+        display: grid;
+        place-items: center;
+      }
+
+      main {
+        width: min(760px, calc(100% - 32px));
+        border: 1px solid #dbe2ea;
+        border-radius: 16px;
+        background: #fff;
+        padding: 18px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+      }
+
+      p {
+        line-height: 1.6;
+      }
+
+      code {
+        background: #f1f5f9;
+        padding: 2px 6px;
+        border-radius: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>InlineChat Widget Demo</h1>
+      <p>这是一个宿主页面示例。右下角会出现客服图标，点击后可打开聊天窗并与客服实时会话。</p>
+      <p>你可以修改页面底部脚本的 <code>data-site-id</code> 或样式参数进行调试。</p>
+    </main>
+
+    <script
+      src="http://localhost:8200/sdk/inlinechat-widget.js"
+      data-site-id="site_widget_demo"
+      data-title="在线客服"
+      defer
+    ></script>
+  </body>
+</html>

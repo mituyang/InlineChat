@@ -1,0 +1,242 @@
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  etcd:
+    image: bitnamilegacy/etcd:3.5
+    restart: unless-stopped
+    environment:
+      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+    ports:
+      - "2379:2379"
+    volumes:
+      - etcd_data:/bitnami/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "--endpoints=http://127.0.0.1:2379", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  chat-service:
+    build:
+      context: ../../services/chat-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      chat-migrate:
+        condition: service_completed_successfully
+      etcd:
+        condition: service_healthy
+    environment:
+      HTTP_PORT: ${CHAT_HTTP_PORT}
+      GRPC_PORT: ${CHAT_GRPC_PORT}
+      LOG_LEVEL: ${CHAT_LOG_LEVEL}
+      MYSQL_DSN: ${CHAT_MYSQL_DSN}
+      REDIS_ADDR: ${REDIS_ADDR}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: ${REDIS_DB}
+      ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
+      ETCD_DIAL_TIMEOUT_SEC: ${ETCD_DIAL_TIMEOUT_SEC}
+      ETCD_REGISTER_TTL_SEC: ${ETCD_REGISTER_TTL_SEC}
+      DISCOVERY_PREFIX: ${DISCOVERY_PREFIX}
+      SERVICE_NAME: ${CHAT_SERVICE_NAME}
+      SERVICE_ADVERTISE_GRPC_ENDPOINT: ${CHAT_SERVICE_ADVERTISE_GRPC_ENDPOINT}
+    ports:
+      - "${CHAT_HTTP_PORT}:${CHAT_HTTP_PORT}"
+      - "${CHAT_GRPC_PORT}:${CHAT_GRPC_PORT}"
+
+  chat-migrate:
+    image: migrate/migrate:v4.17.1
+    restart: "no"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["-path=/migrations", "-database=${CHAT_MYSQL_MIGRATE_URL}", "up"]
+    volumes:
+      - ../../services/chat-service/migrations:/migrations:ro
+
+  realtime-service:
+    build:
+      context: ../../services/realtime-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      chat-service:
+        condition: service_started
+      etcd:
+        condition: service_healthy
+    environment:
+      HTTP_PORT: ${REALTIME_HTTP_PORT}
+      LOG_LEVEL: ${REALTIME_LOG_LEVEL}
+      REDIS_ADDR: ${REDIS_ADDR}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: ${REDIS_DB}
+      CHAT_GRPC_DIAL_TIMEOUT_SEC: ${CHAT_GRPC_DIAL_TIMEOUT_SEC}
+      CHAT_GRPC_CALL_TIMEOUT_SEC: ${CHAT_GRPC_CALL_TIMEOUT_SEC}
+      WS_ALLOWED_ORIGINS: ${WS_ALLOWED_ORIGINS}
+      ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
+      ETCD_DIAL_TIMEOUT_SEC: ${ETCD_DIAL_TIMEOUT_SEC}
+      ETCD_REGISTER_TTL_SEC: ${ETCD_REGISTER_TTL_SEC}
+      DISCOVERY_PREFIX: ${DISCOVERY_PREFIX}
+      CHAT_SERVICE_NAME: ${CHAT_SERVICE_NAME}
+      SERVICE_NAME: ${REALTIME_SERVICE_NAME}
+      SERVICE_ADVERTISE_HTTP_ENDPOINT: ${REALTIME_SERVICE_ADVERTISE_HTTP_ENDPOINT}
+    ports:
+      - "${REALTIME_HTTP_PORT}:${REALTIME_HTTP_PORT}"
+
+  auth-service:
+    build:
+      context: ../../services/auth-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      auth-migrate:
+        condition: service_completed_successfully
+      etcd:
+        condition: service_healthy
+    environment:
+      HTTP_PORT: ${AUTH_HTTP_PORT}
+      GRPC_PORT: ${AUTH_GRPC_PORT}
+      LOG_LEVEL: ${AUTH_LOG_LEVEL}
+      MYSQL_DSN: ${AUTH_MYSQL_DSN}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER}
+      JWT_EXPIRE: ${JWT_EXPIRE}
+      BCRYPT_COST: ${BCRYPT_COST}
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL}
+      SUPER_ADMIN_PASSWORD: ${SUPER_ADMIN_PASSWORD}
+      SUPER_ADMIN_DISPLAY_NAME: ${SUPER_ADMIN_DISPLAY_NAME}
+      ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
+      ETCD_DIAL_TIMEOUT_SEC: ${ETCD_DIAL_TIMEOUT_SEC}
+      ETCD_REGISTER_TTL_SEC: ${ETCD_REGISTER_TTL_SEC}
+      DISCOVERY_PREFIX: ${DISCOVERY_PREFIX}
+      SERVICE_NAME: ${AUTH_SERVICE_NAME}
+      SERVICE_ADVERTISE_GRPC_ENDPOINT: ${AUTH_SERVICE_ADVERTISE_GRPC_ENDPOINT}
+    ports:
+      - "${AUTH_HTTP_PORT}:${AUTH_HTTP_PORT}"
+      - "${AUTH_GRPC_PORT}:${AUTH_GRPC_PORT}"
+
+  auth-migrate:
+    image: migrate/migrate:v4.17.1
+    restart: "no"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["-path=/migrations", "-database=${AUTH_MYSQL_MIGRATE_URL}", "up"]
+    volumes:
+      - ../../services/auth-service/migrations:/migrations:ro
+
+  admin-service:
+    build:
+      context: ../../services/admin-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      auth-migrate:
+        condition: service_completed_successfully
+      admin-migrate:
+        condition: service_completed_successfully
+      etcd:
+        condition: service_healthy
+    environment:
+      HTTP_PORT: ${ADMIN_HTTP_PORT}
+      GRPC_PORT: ${ADMIN_GRPC_PORT}
+      LOG_LEVEL: ${ADMIN_LOG_LEVEL}
+      MYSQL_DSN: ${ADMIN_MYSQL_DSN}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${JWT_ISSUER}
+      BCRYPT_COST: ${BCRYPT_COST}
+      ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
+      ETCD_DIAL_TIMEOUT_SEC: ${ETCD_DIAL_TIMEOUT_SEC}
+      ETCD_REGISTER_TTL_SEC: ${ETCD_REGISTER_TTL_SEC}
+      DISCOVERY_PREFIX: ${DISCOVERY_PREFIX}
+      SERVICE_NAME: ${ADMIN_SERVICE_NAME}
+      SERVICE_ADVERTISE_GRPC_ENDPOINT: ${ADMIN_SERVICE_ADVERTISE_GRPC_ENDPOINT}
+    ports:
+      - "${ADMIN_HTTP_PORT}:${ADMIN_HTTP_PORT}"
+      - "${ADMIN_GRPC_PORT}:${ADMIN_GRPC_PORT}"
+
+  admin-migrate:
+    image: migrate/migrate:v4.17.1
+    restart: "no"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: ["-path=/migrations", "-database=${ADMIN_MYSQL_MIGRATE_URL}", "up"]
+    volumes:
+      - ../../services/admin-service/migrations:/migrations:ro
+
+  gateway-service:
+    build:
+      context: ../../services/gateway-service
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      chat-service:
+        condition: service_started
+      realtime-service:
+        condition: service_started
+      auth-service:
+        condition: service_started
+      admin-service:
+        condition: service_started
+      etcd:
+        condition: service_healthy
+    environment:
+      HTTP_PORT: ${GATEWAY_HTTP_PORT}
+      LOG_LEVEL: ${GATEWAY_LOG_LEVEL}
+      REQUEST_ID_HEADER: ${GATEWAY_REQUEST_ID_HEADER}
+      ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
+      ETCD_DIAL_TIMEOUT_SEC: ${ETCD_DIAL_TIMEOUT_SEC}
+      DISCOVERY_PREFIX: ${DISCOVERY_PREFIX}
+      CHAT_SERVICE_NAME: ${CHAT_SERVICE_NAME}
+      AUTH_SERVICE_NAME: ${AUTH_SERVICE_NAME}
+      ADMIN_SERVICE_NAME: ${ADMIN_SERVICE_NAME}
+      REALTIME_SERVICE_NAME: ${REALTIME_SERVICE_NAME}
+      GRPC_DIAL_TIMEOUT_SEC: ${GRPC_DIAL_TIMEOUT_SEC}
+      GRPC_CALL_TIMEOUT_SEC: ${GRPC_CALL_TIMEOUT_SEC}
+    ports:
+      - "${GATEWAY_HTTP_PORT}:${GATEWAY_HTTP_PORT}"
+
+volumes:
+  mysql_data:
+  redis_data:
+  etcd_data:
