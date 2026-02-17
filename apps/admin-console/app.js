@@ -4,43 +4,62 @@ const LOGIN_PAGE_URL = "/app/staff-login/";
 const ADMIN_HOME_URL = "/app/admin/";
 const AGENT_HOME_URL = "/app/agent/";
 const ADMIN_ALLOWED_ROLES = new Set(["admin", "super_admin"]);
+const THEME_STORAGE_KEY = "inlinechat.ui.theme";
 
 const state = {
   token: "",
   me: null,
+  theme: "light",
   sites: [],
   agents: [],
+  siteSearch: "",
+  agentSearch: "",
+  agentStatusFilter: "all",
+  operationFeed: [],
 };
 
 const els = {
+  roleTag: document.getElementById("roleTag"),
   userBox: document.getElementById("userBox"),
+  themeToggleBtn: document.getElementById("themeToggleBtn"),
   statusLine: document.getElementById("statusLine"),
   logoutBtn: document.getElementById("logoutBtn"),
 
   siteCount: document.getElementById("siteCount"),
   agentCount: document.getElementById("agentCount"),
+  agentActiveCount: document.getElementById("agentActiveCount"),
+  agentInactiveCount: document.getElementById("agentInactiveCount"),
+  lastSyncAt: document.getElementById("lastSyncAt"),
 
   refreshSitesBtn: document.getElementById("refreshSitesBtn"),
+  siteSearchInput: document.getElementById("siteSearchInput"),
   createSiteForm: document.getElementById("createSiteForm"),
   siteNameInput: document.getElementById("siteNameInput"),
   siteDomainInput: document.getElementById("siteDomainInput"),
   siteList: document.getElementById("siteList"),
 
   refreshAgentsBtn: document.getElementById("refreshAgentsBtn"),
+  agentSearchInput: document.getElementById("agentSearchInput"),
+  agentStatusFilter: document.getElementById("agentStatusFilter"),
   createAgentForm: document.getElementById("createAgentForm"),
   agentEmailInput: document.getElementById("agentEmailInput"),
   agentPasswordInput: document.getElementById("agentPasswordInput"),
   agentDisplayNameInput: document.getElementById("agentDisplayNameInput"),
   agentList: document.getElementById("agentList"),
+
+  clearFeedBtn: document.getElementById("clearFeedBtn"),
+  operationFeed: document.getElementById("operationFeed"),
 };
 
 init();
 
 async function init() {
+  initTheme();
   bindEvents();
   renderSites([]);
   renderAgents([]);
   renderStats();
+  renderOperationFeed();
 
   const savedToken = readStaffToken();
   if (!savedToken) {
@@ -71,6 +90,10 @@ async function init() {
 }
 
 function bindEvents() {
+  els.themeToggleBtn?.addEventListener("click", () => {
+    toggleTheme();
+  });
+
   els.logoutBtn?.addEventListener("click", () => {
     clearAuth();
     redirectToLogin("已退出登录");
@@ -78,10 +101,27 @@ function bindEvents() {
 
   els.refreshSitesBtn?.addEventListener("click", async () => {
     await refreshSites();
+    appendFeed("手动刷新站点列表");
   });
 
   els.refreshAgentsBtn?.addEventListener("click", async () => {
     await refreshAgents();
+    appendFeed("手动刷新坐席列表");
+  });
+
+  els.siteSearchInput?.addEventListener("input", () => {
+    state.siteSearch = (els.siteSearchInput.value || "").trim().toLowerCase();
+    renderSites(state.sites);
+  });
+
+  els.agentSearchInput?.addEventListener("input", () => {
+    state.agentSearch = (els.agentSearchInput.value || "").trim().toLowerCase();
+    renderAgents(state.agents);
+  });
+
+  els.agentStatusFilter?.addEventListener("change", () => {
+    state.agentStatusFilter = String(els.agentStatusFilter.value || "all");
+    renderAgents(state.agents);
   });
 
   els.createSiteForm?.addEventListener("submit", async (event) => {
@@ -107,27 +147,42 @@ function bindEvents() {
 
     try {
       await copyText(buildEmbedSnippet(siteID));
+      appendFeed(`复制嵌入脚本：${siteID}`);
       setStatus(`站点 ${siteID} 的嵌入脚本已复制`);
     } catch (error) {
       setStatus(error.message || "复制嵌入脚本失败", true);
     }
+  });
+
+  els.clearFeedBtn?.addEventListener("click", () => {
+    state.operationFeed = [];
+    renderOperationFeed();
+    setStatus("操作动态已清空");
   });
 }
 
 function applyAuthUI(loggedIn) {
   if (!loggedIn) {
     els.userBox.textContent = "未登录";
+    if (els.roleTag) {
+      els.roleTag.textContent = "管理角色";
+    }
     state.sites = [];
     state.agents = [];
+    state.operationFeed = [];
     renderSites([]);
     renderAgents([]);
     renderStats();
+    renderOperationFeed();
     document.body.classList.add("auth-guard");
     return;
   }
 
   if (state.me) {
     els.userBox.textContent = `${state.me.email} (${state.me.role})`;
+    if (els.roleTag) {
+      els.roleTag.textContent = state.me.role === "super_admin" ? "超级管理员" : "管理员";
+    }
   }
   document.body.classList.remove("auth-guard");
 }
@@ -176,8 +231,52 @@ function redirectToLogin(message = "") {
   window.location.replace(target);
 }
 
+function initTheme() {
+  const theme = resolveInitialTheme();
+  applyTheme(theme, false);
+}
+
+function resolveInitialTheme() {
+  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  if (stored === "dark" || stored === "light") {
+    return stored;
+  }
+
+  const prefersDark =
+    typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  return prefersDark ? "dark" : "light";
+}
+
+function toggleTheme() {
+  const next = state.theme === "dark" ? "light" : "dark";
+  applyTheme(next, true);
+  appendFeed(`切换主题：${next === "dark" ? "暗色" : "亮色"}`);
+  setStatus(`已切换为${next === "dark" ? "暗色" : "亮色"}模式`);
+}
+
+function applyTheme(theme, persist) {
+  const normalized = theme === "dark" ? "dark" : "light";
+  state.theme = normalized;
+  document.documentElement.setAttribute("data-theme", normalized);
+  if (persist) {
+    localStorage.setItem(THEME_STORAGE_KEY, normalized);
+  }
+  updateThemeToggleLabel();
+}
+
+function updateThemeToggleLabel() {
+  if (!els.themeToggleBtn) {
+    return;
+  }
+  els.themeToggleBtn.textContent = state.theme === "dark" ? "亮色模式" : "暗色模式";
+}
+
 async function refreshAll() {
   await Promise.all([refreshSites(), refreshAgents()]);
+  if (els.lastSyncAt) {
+    els.lastSyncAt.textContent = formatTime(Date.now());
+  }
+  appendFeed("完成一次全量同步");
 }
 
 async function refreshSites() {
@@ -188,6 +287,9 @@ async function refreshSites() {
   state.sites = Array.isArray(data.items) ? data.items : [];
   renderSites(state.sites);
   renderStats();
+  if (els.lastSyncAt) {
+    els.lastSyncAt.textContent = formatTime(Date.now());
+  }
 }
 
 async function refreshAgents() {
@@ -198,6 +300,9 @@ async function refreshAgents() {
   state.agents = Array.isArray(data.items) ? data.items : [];
   renderAgents(state.agents);
   renderStats();
+  if (els.lastSyncAt) {
+    els.lastSyncAt.textContent = formatTime(Date.now());
+  }
 }
 
 async function createSite() {
@@ -217,6 +322,7 @@ async function createSite() {
     els.siteNameInput.value = "";
     els.siteDomainInput.value = "";
     await refreshSites();
+    appendFeed(`创建站点：${name} (${domain})`);
     setStatus("站点创建成功");
   } catch (error) {
     setStatus(error.message || "创建站点失败", true);
@@ -247,6 +353,7 @@ async function createAgent() {
     els.agentPasswordInput.value = "";
     els.agentDisplayNameInput.value = "";
     await refreshAgents();
+    appendFeed(`创建坐席：${email}`);
     setStatus("坐席创建成功");
   } catch (error) {
     setStatus(error.message || "创建坐席失败", true);
@@ -254,18 +361,57 @@ async function createAgent() {
 }
 
 function renderStats() {
+  const active = state.agents.filter((agent) => String(agent.status || "") === "active").length;
+  const inactive = state.agents.length - active;
+
   els.siteCount.textContent = String(state.sites.length || 0);
   els.agentCount.textContent = String(state.agents.length || 0);
+  if (els.agentActiveCount) {
+    els.agentActiveCount.textContent = String(active);
+  }
+  if (els.agentInactiveCount) {
+    els.agentInactiveCount.textContent = String(inactive);
+  }
+}
+
+function filteredSites(items) {
+  const list = Array.isArray(items) ? items : [];
+  if (!state.siteSearch) {
+    return list;
+  }
+  return list.filter((site) => {
+    const name = String(site.name || "").toLowerCase();
+    const siteID = String(site.site_id || "").toLowerCase();
+    const domain = String(site.domain || "").toLowerCase();
+    return name.includes(state.siteSearch) || siteID.includes(state.siteSearch) || domain.includes(state.siteSearch);
+  });
+}
+
+function filteredAgents(items) {
+  let list = Array.isArray(items) ? items : [];
+  if (state.agentStatusFilter !== "all") {
+    list = list.filter((agent) => String(agent.status || "").toLowerCase() === state.agentStatusFilter);
+  }
+  if (!state.agentSearch) {
+    return list;
+  }
+  return list.filter((agent) => {
+    const id = String(agent.id || "").toLowerCase();
+    const email = String(agent.email || "").toLowerCase();
+    const displayName = String(agent.display_name || "").toLowerCase();
+    return id.includes(state.agentSearch) || email.includes(state.agentSearch) || displayName.includes(state.agentSearch);
+  });
 }
 
 function renderSites(items) {
-  if (!Array.isArray(items) || items.length === 0) {
+  const list = filteredSites(items);
+  if (list.length === 0) {
     els.siteList.innerHTML = '<div class="empty">暂无站点</div>';
     return;
   }
 
   els.siteList.innerHTML = "";
-  for (const site of items) {
+  for (const site of list) {
     const siteID = String(site.site_id || "");
     const snippet = buildEmbedSnippet(siteID);
     const node = document.createElement("article");
@@ -285,13 +431,14 @@ function renderSites(items) {
 }
 
 function renderAgents(items) {
-  if (!Array.isArray(items) || items.length === 0) {
+  const list = filteredAgents(items);
+  if (list.length === 0) {
     els.agentList.innerHTML = '<div class="empty">暂无坐席</div>';
     return;
   }
 
   els.agentList.innerHTML = "";
-  for (const agent of items) {
+  for (const agent of list) {
     const node = document.createElement("article");
     node.className = "item";
     node.innerHTML = `
@@ -301,6 +448,47 @@ function renderAgents(items) {
     `;
     els.agentList.appendChild(node);
   }
+}
+
+function appendFeed(title) {
+  if (!title) {
+    return;
+  }
+  state.operationFeed.unshift({
+    title: String(title),
+    createdAt: Date.now(),
+  });
+  state.operationFeed = state.operationFeed.slice(0, 30);
+  renderOperationFeed();
+}
+
+function renderOperationFeed() {
+  if (!els.operationFeed) {
+    return;
+  }
+
+  if (!Array.isArray(state.operationFeed) || state.operationFeed.length === 0) {
+    els.operationFeed.innerHTML = '<li class="empty">暂无操作记录</li>';
+    return;
+  }
+
+  els.operationFeed.innerHTML = "";
+  for (const item of state.operationFeed) {
+    const node = document.createElement("li");
+    node.innerHTML = `
+      <div class="operation-title">${escapeHTML(item.title)}</div>
+      <div class="operation-time">${escapeHTML(formatTime(item.createdAt))}</div>
+    `;
+    els.operationFeed.appendChild(node);
+  }
+}
+
+function formatTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "--";
+  }
+  return date.toLocaleString("zh-CN", { hour12: false });
 }
 
 function setStatus(text, isError = false) {

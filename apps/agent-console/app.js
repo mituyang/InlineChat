@@ -16,11 +16,14 @@ const LOGIN_PAGE_URL = "/app/staff-login/";
 const AGENT_HOME_URL = "/app/agent/";
 const ADMIN_HOME_URL = "/app/admin/";
 const ALLOWED_ROLES = new Set(["agent"]);
+const THEME_STORAGE_KEY = "inlinechat.ui.theme";
 
 const state = {
   token: "",
   me: null,
+  theme: "light",
   queueMode: "all",
+  queueShortcut: "all",
   conversationSearch: "",
   conversations: [],
   activeConversationId: "",
@@ -40,15 +43,20 @@ const state = {
 
 const els = {
   userBox: document.getElementById("userBox"),
+  wsStateBadge: document.getElementById("wsStateBadge"),
+  themeToggleBtn: document.getElementById("themeToggleBtn"),
   statusLine: document.getElementById("statusLine"),
   logoutBtn: document.getElementById("logoutBtn"),
 
   statTotal: document.getElementById("statTotal"),
   statOpen: document.getElementById("statOpen"),
+  statWaiting: document.getElementById("statWaiting"),
+  statMineOpen: document.getElementById("statMineOpen"),
   statClosed: document.getElementById("statClosed"),
   statUnassigned: document.getElementById("statUnassigned"),
   statUnread: document.getElementById("statUnread"),
 
+  queueShortcuts: document.getElementById("queueShortcuts"),
   queueTabs: document.getElementById("queueTabs"),
   queueTabAll: document.getElementById("queueTabAll"),
   queueTabOpen: document.getElementById("queueTabOpen"),
@@ -74,6 +82,9 @@ const els = {
   detailStatus: document.getElementById("detailStatus"),
   detailSiteId: document.getElementById("detailSiteId"),
   detailAssigned: document.getElementById("detailAssigned"),
+  detailUpdatedAt: document.getElementById("detailUpdatedAt"),
+  detailWaitingDuration: document.getElementById("detailWaitingDuration"),
+  detailWsState: document.getElementById("detailWsState"),
 
   agentMessages: document.getElementById("agentMessages"),
   agentSendForm: document.getElementById("agentSendForm"),
@@ -89,13 +100,16 @@ const els = {
 init();
 
 async function init() {
+  initTheme();
   bindEvents();
   renderConversations([]);
   renderMessages([]);
   renderStats();
   renderQuickReplies();
   renderQueueTabsMeta();
+  renderQueueShortcuts();
   resetConversationDetail();
+  setWsIndicator("warn", "实时通道：待连接");
 
   const savedToken = readStaffToken();
   if (!savedToken) {
@@ -129,6 +143,10 @@ async function init() {
 }
 
 function bindEvents() {
+  els.themeToggleBtn?.addEventListener("click", () => {
+    toggleTheme();
+  });
+
   els.logoutBtn?.addEventListener("click", () => {
     clearAuth();
     redirectToLogin("已退出登录");
@@ -139,6 +157,8 @@ function bindEvents() {
   });
 
   els.filterForm?.addEventListener("change", async () => {
+    state.queueShortcut = "all";
+    renderQueueShortcuts();
     await refreshConversations();
   });
 
@@ -152,7 +172,19 @@ function bindEvents() {
       return;
     }
     state.queueMode = mode;
+    state.queueShortcut = "all";
+    renderQueueShortcuts();
     renderQueueTabsMeta();
+    await refreshConversations();
+  });
+
+  els.queueShortcuts?.addEventListener("click", async (event) => {
+    const target = event.target.closest("button.queue-shortcut");
+    if (!target) {
+      return;
+    }
+    const shortcut = String(target.dataset.shortcut || "all");
+    applyQueueShortcut(shortcut);
     await refreshConversations();
   });
 
@@ -207,6 +239,54 @@ function bindEvents() {
   });
 }
 
+function applyQueueShortcut(shortcut) {
+  state.queueShortcut = shortcut;
+
+  if (shortcut === "unassigned-open") {
+    state.queueMode = "open";
+    els.statusFilter.value = "";
+    els.unassignedOnlyCheckbox.checked = true;
+    els.mineOnlyCheckbox.checked = false;
+  } else if (shortcut === "mine-open") {
+    state.queueMode = "open";
+    els.statusFilter.value = "";
+    els.unassignedOnlyCheckbox.checked = false;
+    els.mineOnlyCheckbox.checked = true;
+  } else {
+    state.queueMode = "all";
+    els.statusFilter.value = "";
+    els.unassignedOnlyCheckbox.checked = false;
+    els.mineOnlyCheckbox.checked = true;
+    state.queueShortcut = "all";
+  }
+
+  renderQueueShortcuts();
+  renderQueueTabsMeta();
+}
+
+function renderQueueShortcuts() {
+  const buttons = els.queueShortcuts?.querySelectorAll("button.queue-shortcut") || [];
+  for (const button of buttons) {
+    const shortcut = String(button.dataset.shortcut || "all");
+    button.classList.toggle("active", shortcut === state.queueShortcut);
+  }
+}
+
+function resolveQueueShortcutFromFilters() {
+  const explicitStatus = (els.statusFilter.value || "").trim();
+  const status = explicitStatus || state.queueMode;
+  const unassignedOnly = Boolean(els.unassignedOnlyCheckbox.checked);
+  const mineOnly = Boolean(els.mineOnlyCheckbox.checked);
+
+  if (status === "open" && unassignedOnly) {
+    return "unassigned-open";
+  }
+  if (status === "open" && !unassignedOnly && mineOnly) {
+    return "mine-open";
+  }
+  return "all";
+}
+
 function applyAuthUI(loggedIn) {
   els.claimBtn.disabled = !loggedIn;
   els.transferBtn.disabled = !loggedIn;
@@ -220,10 +300,12 @@ function applyAuthUI(loggedIn) {
     state.messages = [];
     state.unreadMap = {};
     state.readCursor = {};
+    state.queueShortcut = "all";
     renderConversations([]);
     renderMessages([]);
     renderStats();
     renderQueueTabsMeta();
+    renderQueueShortcuts();
     resetConversationDetail();
     closeWebSocket();
     stopPolling();
@@ -297,6 +379,72 @@ function redirectToAdmin(message = "") {
   window.location.replace(ADMIN_HOME_URL);
 }
 
+function initTheme() {
+  const theme = resolveInitialTheme();
+  applyTheme(theme, false);
+}
+
+function resolveInitialTheme() {
+  const stored = localStorage.getItem(THEME_STORAGE_KEY);
+  if (stored === "dark" || stored === "light") {
+    return stored;
+  }
+
+  const prefersDark =
+    typeof window.matchMedia === "function" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  return prefersDark ? "dark" : "light";
+}
+
+function toggleTheme() {
+  const next = state.theme === "dark" ? "light" : "dark";
+  applyTheme(next, true);
+  setStatus(`已切换为${next === "dark" ? "暗色" : "亮色"}模式`);
+}
+
+function applyTheme(theme, persist) {
+  const normalized = theme === "dark" ? "dark" : "light";
+  state.theme = normalized;
+  document.documentElement.setAttribute("data-theme", normalized);
+  if (persist) {
+    localStorage.setItem(THEME_STORAGE_KEY, normalized);
+  }
+  updateThemeToggleLabel();
+}
+
+function updateThemeToggleLabel() {
+  if (!els.themeToggleBtn) {
+    return;
+  }
+  els.themeToggleBtn.textContent = state.theme === "dark" ? "亮色模式" : "暗色模式";
+}
+
+function setWsIndicator(mode, text) {
+  if (!els.wsStateBadge) {
+    return;
+  }
+
+  els.wsStateBadge.classList.remove("warn", "offline");
+  if (mode === "warn") {
+    els.wsStateBadge.classList.add("warn");
+  } else if (mode === "offline") {
+    els.wsStateBadge.classList.add("offline");
+  }
+
+  if (text) {
+    els.wsStateBadge.textContent = text;
+  }
+
+  if (els.detailWsState) {
+    if (mode === "online") {
+      els.detailWsState.textContent = "已连接";
+    } else if (mode === "warn") {
+      els.detailWsState.textContent = "重连中";
+    } else {
+      els.detailWsState.textContent = "未连接";
+    }
+  }
+}
+
 function startPolling() {
   stopPolling();
 
@@ -366,6 +514,12 @@ async function refreshConversations() {
   });
 
   state.conversations = Array.isArray(data.items) ? data.items : [];
+  state.conversations.sort((a, b) => {
+    const ta = new Date(a.updated_at || a.created_at || 0).getTime();
+    const tb = new Date(b.updated_at || b.created_at || 0).getTime();
+    return tb - ta;
+  });
+  state.queueShortcut = resolveQueueShortcutFromFilters();
 
   if (state.activeConversationId) {
     const found = state.conversations.find((item) => String(item.id) === state.activeConversationId);
@@ -385,6 +539,7 @@ async function refreshConversations() {
   renderConversations(state.conversations);
   renderStats();
   renderQueueTabsMeta();
+  renderQueueShortcuts();
   void refreshUnreadCounts(state.conversations);
 }
 
@@ -467,8 +622,13 @@ function renderConversations(items) {
     row.className = "conversation-title-row";
 
     const title = document.createElement("strong");
-    title.textContent = `#${item.id} · ${item.status}`;
+    title.textContent = `#${item.id}`;
     row.appendChild(title);
+
+    const statusChip = document.createElement("span");
+    statusChip.className = `status-chip ${item.status === "closed" ? "closed" : "open"}`;
+    statusChip.textContent = item.status === "closed" ? "已关闭" : "进行中";
+    row.appendChild(statusChip);
 
     const unread = Number(state.unreadMap[id] || 0);
     if (unread > 0) {
@@ -485,7 +645,7 @@ function renderConversations(items) {
 
     const meta2 = document.createElement("div");
     meta2.className = "meta";
-    meta2.textContent = `更新时间 ${formatTime(item.updated_at)}`;
+    meta2.textContent = `更新时间 ${formatTime(item.updated_at)} · ${formatDurationSince(item.updated_at || item.created_at)}`;
 
     entry.appendChild(row);
     entry.appendChild(meta1);
@@ -541,6 +701,8 @@ function updateActiveConversationHeader(conversation) {
   els.detailStatus.textContent = String(conversation.status || "-");
   els.detailSiteId.textContent = String(conversation.site_id || "-");
   els.detailAssigned.textContent = assigned;
+  els.detailUpdatedAt.textContent = formatTime(conversation.updated_at || conversation.created_at);
+  els.detailWaitingDuration.textContent = formatDurationSince(conversation.updated_at || conversation.created_at);
 }
 
 function resetConversationDetail() {
@@ -548,6 +710,9 @@ function resetConversationDetail() {
   els.detailStatus.textContent = "-";
   els.detailSiteId.textContent = "-";
   els.detailAssigned.textContent = "-";
+  els.detailUpdatedAt.textContent = "-";
+  els.detailWaitingDuration.textContent = "-";
+  els.detailWsState.textContent = "未连接";
 }
 
 async function refreshMessages() {
@@ -651,15 +816,26 @@ function markConversationRead(conversationID, messages) {
 
 function renderStats() {
   const items = Array.isArray(state.conversations) ? state.conversations : [];
+  const meID = Number(state.me?.agent_id || 0);
 
   const total = items.length;
   const open = items.filter((item) => item.status === "open").length;
   const closed = items.filter((item) => item.status === "closed").length;
   const unassigned = items.filter((item) => !item.assigned_agent_id).length;
+  const waiting = items.filter((item) => item.status === "open" && !item.assigned_agent_id).length;
+  const mineOpen = items.filter(
+    (item) => item.status === "open" && meID > 0 && Number(item.assigned_agent_id || 0) === meID
+  ).length;
   const unread = Object.values(state.unreadMap).reduce((sum, v) => sum + Number(v || 0), 0);
 
   els.statTotal.textContent = String(total);
   els.statOpen.textContent = String(open);
+  if (els.statWaiting) {
+    els.statWaiting.textContent = String(waiting);
+  }
+  if (els.statMineOpen) {
+    els.statMineOpen.textContent = String(mineOpen);
+  }
   els.statClosed.textContent = String(closed);
   els.statUnassigned.textContent = String(unassigned);
   els.statUnread.textContent = String(unread);
@@ -816,6 +992,7 @@ async function sendAgentMessage() {
 
 function connectWebSocket() {
   if (!state.activeConversationId) {
+    setWsIndicator("offline", "实时通道：未绑定会话");
     return;
   }
 
@@ -828,6 +1005,7 @@ function connectWebSocket() {
   const conversationID = state.activeConversationId;
   state.wsConversationId = conversationID;
   state.wsConnected = false;
+  setWsIndicator("warn", `实时通道：连接中 #${conversationID}`);
 
   const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/${conversationID}`;
   const ws = new WebSocket(wsUrl);
@@ -838,6 +1016,7 @@ function connectWebSocket() {
     }
     state.wsConnected = true;
     state.wsReconnectAttempt = 0;
+    setWsIndicator("online", `实时通道：已连接 #${conversationID}`);
     setStatus(`WebSocket 已连接，会话 #${conversationID}`);
   });
 
@@ -868,6 +1047,7 @@ function connectWebSocket() {
     if (conversationID !== state.activeConversationId) {
       return;
     }
+    setWsIndicator("warn", `实时通道：重连中 #${conversationID}`);
     scheduleWsReconnect(conversationID);
     setStatus("WebSocket 已断开，正在自动重连", true);
   });
@@ -877,6 +1057,7 @@ function connectWebSocket() {
       return;
     }
     state.wsConnected = false;
+    setWsIndicator("warn", `实时通道：异常 #${conversationID}`);
     setStatus("WebSocket 异常，正在自动重连", true);
   });
 
@@ -892,6 +1073,7 @@ function closeWebSocket() {
   state.wsConnected = false;
   state.wsConversationId = "";
   state.wsReconnectAttempt = 0;
+  setWsIndicator("offline", "实时通道：未连接");
 }
 
 function clearWsReconnectTimer() {
@@ -1052,6 +1234,35 @@ function safeUUID() {
     return window.crypto.randomUUID();
   }
   return `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function formatDurationSince(value) {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  const diffMs = Date.now() - date.getTime();
+  if (diffMs <= 0) {
+    return "刚刚";
+  }
+
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) {
+    return "1 分钟内";
+  }
+  if (minutes < 60) {
+    return `${minutes} 分钟`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours} 小时 ${minutes % 60} 分钟`;
+  }
+  const days = Math.floor(hours / 24);
+  return `${days} 天 ${hours % 24} 小时`;
 }
 
 function formatTime(value) {

@@ -14,8 +14,9 @@
           <p>仅客服账号可访问：会话接待、分配协作、实时沟通</p>
         </div>
         <div class="topbar-side">
-          <span class="live-dot">实时在线</span>
+          <span class="live-dot" id="wsStateBadge">实时通道：连接中</span>
           <div class="user-box" id="userBox">未登录</div>
+          <button id="themeToggleBtn" type="button" class="ghost">暗色模式</button>
           <button id="logoutBtn" type="button" class="ghost">退出登录</button>
         </div>
       </header>
@@ -28,6 +29,14 @@
         <article class="stat-card card">
           <span>进行中</span>
           <strong id="statOpen">0</strong>
+        </article>
+        <article class="stat-card card">
+          <span>待接入</span>
+          <strong id="statWaiting">0</strong>
+        </article>
+        <article class="stat-card card">
+          <span>我的接待</span>
+          <strong id="statMineOpen">0</strong>
         </article>
         <article class="stat-card card">
           <span>已关闭</span>
@@ -48,6 +57,12 @@
           <div class="queue-head">
             <h2>会话队列</h2>
             <button id="refreshConversationsBtn" type="button" class="ghost">刷新</button>
+          </div>
+
+          <div class="queue-shortcuts" id="queueShortcuts">
+            <button type="button" class="queue-shortcut active" data-shortcut="all">全部视图</button>
+            <button type="button" class="queue-shortcut" data-shortcut="unassigned-open">待接入</button>
+            <button type="button" class="queue-shortcut" data-shortcut="mine-open">我接待中</button>
           </div>
 
           <div class="queue-tabs" id="queueTabs">
@@ -119,6 +134,9 @@
               <div><dt>状态</dt><dd id="detailStatus">-</dd></div>
               <div><dt>Site ID</dt><dd id="detailSiteId">-</dd></div>
               <div><dt>分配坐席</dt><dd id="detailAssigned">-</dd></div>
+              <div><dt>最近活跃</dt><dd id="detailUpdatedAt">-</dd></div>
+              <div><dt>等待时长</dt><dd id="detailWaitingDuration">-</dd></div>
+              <div><dt>实时通道</dt><dd id="detailWsState">-</dd></div>
             </dl>
           </section>
 
@@ -132,6 +150,15 @@
               <input id="quickReplyInput" type="text" placeholder="新增快捷语，点击后可一键填充输入框" />
               <button type="submit" class="ghost">新增</button>
             </form>
+          </section>
+
+          <section class="playbook-panel">
+            <h3>接待建议</h3>
+            <ul>
+              <li>优先处理“待接入”与未读数较高会话。</li>
+              <li>首次回复建议在 60 秒内完成，降低访客流失。</li>
+              <li>转接前先补充上下文，减少重复沟通成本。</li>
+            </ul>
           </section>
         </aside>
       </section>

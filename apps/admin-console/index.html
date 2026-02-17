@@ -10,11 +10,13 @@
     <main class="shell">
       <header class="topbar card">
         <div>
-          <h1>InlineChat 管理后台</h1>
-          <p>站点管理与坐席账号管理（超级管理员不参与客服接待）</p>
+          <h1>InlineChat 超级管理员后台</h1>
+          <p>站点配置、坐席账号、嵌入脚本与运营管理（不参与客服接待）</p>
         </div>
         <div class="topbar-actions">
+          <span id="roleTag" class="role-tag">管理角色</span>
           <div class="user-box" id="userBox">未登录</div>
+          <button id="themeToggleBtn" type="button" class="ghost">暗色模式</button>
           <button id="logoutBtn" type="button" class="ghost">退出登录</button>
         </div>
       </header>
@@ -28,34 +30,71 @@
           <span>坐席总数</span>
           <strong id="agentCount">0</strong>
         </article>
+        <article class="stat card">
+          <span>在线坐席</span>
+          <strong id="agentActiveCount">0</strong>
+        </article>
+        <article class="stat card">
+          <span>停用坐席</span>
+          <strong id="agentInactiveCount">0</strong>
+        </article>
+        <article class="stat card">
+          <span>最近同步</span>
+          <strong id="lastSyncAt">--</strong>
+        </article>
       </section>
 
       <section class="workspace">
-        <section class="card panel">
+        <section class="card panel panel-sites">
           <div class="panel-head">
-            <h2>站点管理</h2>
+            <h2>站点中心</h2>
             <button id="refreshSitesBtn" type="button" class="ghost">刷新</button>
           </div>
+
+          <div class="panel-tools">
+            <input id="siteSearchInput" type="search" placeholder="搜索站点名称 / site_id / 域名" />
+          </div>
+
           <form id="createSiteForm" class="form-grid two-col">
             <label>站点名称 <input id="siteNameInput" type="text" placeholder="官方商城" required /></label>
             <label>绑定域名 <input id="siteDomainInput" type="text" placeholder="shop.example.com" required /></label>
             <button type="submit">创建站点</button>
           </form>
+
           <div id="siteList" class="list"></div>
         </section>
 
-        <section class="card panel">
+        <section class="card panel panel-agents">
           <div class="panel-head">
-            <h2>坐席管理</h2>
+            <h2>坐席中心</h2>
             <button id="refreshAgentsBtn" type="button" class="ghost">刷新</button>
           </div>
+
+          <div class="panel-tools two-col">
+            <input id="agentSearchInput" type="search" placeholder="搜索邮箱 / 显示名 / ID" />
+            <select id="agentStatusFilter">
+              <option value="all">全部状态</option>
+              <option value="active">仅 active</option>
+              <option value="inactive">仅 inactive</option>
+            </select>
+          </div>
+
           <form id="createAgentForm" class="form-grid two-col">
             <label>邮箱 <input id="agentEmailInput" type="email" required /></label>
             <label>密码 <input id="agentPasswordInput" type="password" minlength="8" required /></label>
             <label>显示名 <input id="agentDisplayNameInput" type="text" required /></label>
             <button type="submit">创建坐席</button>
           </form>
+
           <div id="agentList" class="list"></div>
+        </section>
+
+        <section class="card panel panel-ops">
+          <div class="panel-head">
+            <h2>操作动态</h2>
+            <button id="clearFeedBtn" type="button" class="ghost">清空</button>
+          </div>
+          <ul id="operationFeed" class="operation-feed"></ul>
         </section>
       </section>
 
