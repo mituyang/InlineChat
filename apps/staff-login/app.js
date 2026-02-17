@@ -123,7 +123,7 @@ function resolveTarget(role, next) {
 
 function canVisit(path, role) {
   if (path === ROUTES.agent) {
-    return role === "agent" || role === "admin" || role === "super_admin";
+    return role === "agent";
   }
   if (path === ROUTES.admin) {
     return role === "admin" || role === "super_admin";

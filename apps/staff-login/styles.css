@@ -98,20 +98,27 @@ button:disabled {
   opacity: 0.7;
 }
 
-.links {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+.role-notes {
+  display: grid;
+  gap: 10px;
 }
 
-.links a {
-  color: #0b6fb8;
-  text-decoration: none;
+.role-note {
+  border: 1px solid #d9e4f2;
+  border-radius: 12px;
+  background: #f7fbff;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+}
+
+.role-note strong {
   font-size: 13px;
 }
 
-.links a:hover {
-  text-decoration: underline;
+.role-note span {
+  font-size: 12px;
+  color: #516074;
 }
 
 .status-line {

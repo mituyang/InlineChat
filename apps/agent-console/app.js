@@ -14,7 +14,8 @@ const STORAGE_KEYS = {
 const LEGACY_TOKEN_KEYS = ["inlinechat.agent.token", "inlinechat.admin.token"];
 const LOGIN_PAGE_URL = "/app/staff-login/";
 const AGENT_HOME_URL = "/app/agent/";
-const ALLOWED_ROLES = new Set(["agent", "admin", "super_admin"]);
+const ADMIN_HOME_URL = "/app/admin/";
+const ALLOWED_ROLES = new Set(["agent"]);
 
 const state = {
   token: "",
@@ -106,6 +107,11 @@ async function init() {
   try {
     await fetchMe();
     if (!ALLOWED_ROLES.has(String(state.me?.role || ""))) {
+      const role = String(state.me?.role || "");
+      if (role === "super_admin" || role === "admin") {
+        redirectToAdmin("当前账号没有客服工作台权限，正在跳转管理后台");
+        return;
+      }
       clearAuth();
       redirectToLogin();
       return;
@@ -282,6 +288,13 @@ function redirectToLogin(message = "") {
     setStatus(message, true);
   }
   window.location.replace(target);
+}
+
+function redirectToAdmin(message = "") {
+  if (message) {
+    setStatus(message, true);
+  }
+  window.location.replace(ADMIN_HOME_URL);
 }
 
 function startPolling() {

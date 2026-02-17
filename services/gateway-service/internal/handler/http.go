@@ -103,7 +103,7 @@ func (h *HTTPHandler) getConversation(c *gin.Context) {
 }
 
 func (h *HTTPHandler) listConversations(c *gin.Context) {
-	actor, err := h.requireActor(c)
+	actor, err := h.requireAgentActor(c)
 	if err != nil {
 		handleGRPCError(c, err)
 		return
@@ -211,6 +211,15 @@ func (h *HTTPHandler) createMessage(c *gin.Context) {
 		return
 	}
 
+	if req.SenderType == "agent" {
+		actor, actorErr := h.requireAgentActor(c)
+		if actorErr != nil {
+			handleGRPCError(c, actorErr)
+			return
+		}
+		req.SenderID = strconv.FormatUint(actor.GetAgentId(), 10)
+	}
+
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
 
@@ -278,7 +287,7 @@ func (h *HTTPHandler) listMessages(c *gin.Context) {
 }
 
 func (h *HTTPHandler) claimConversation(c *gin.Context) {
-	actor, err := h.requireActor(c)
+	actor, err := h.requireAgentActor(c)
 	if err != nil {
 		handleGRPCError(c, err)
 		return
@@ -310,7 +319,7 @@ type transferConversationRequest struct {
 }
 
 func (h *HTTPHandler) transferConversation(c *gin.Context) {
-	actor, err := h.requireActor(c)
+	actor, err := h.requireAgentActor(c)
 	if err != nil {
 		handleGRPCError(c, err)
 		return
@@ -346,7 +355,7 @@ func (h *HTTPHandler) transferConversation(c *gin.Context) {
 }
 
 func (h *HTTPHandler) closeConversation(c *gin.Context) {
-	actor, err := h.requireActor(c)
+	actor, err := h.requireAgentActor(c)
 	if err != nil {
 		handleGRPCError(c, err)
 		return
@@ -572,6 +581,17 @@ func (h *HTTPHandler) requireActor(c *gin.Context) (*authv1.MeResponse, error) {
 	return h.clients.Auth.Me(ctx, &authv1.MeRequest{
 		Authorization: c.GetHeader("Authorization"),
 	})
+}
+
+func (h *HTTPHandler) requireAgentActor(c *gin.Context) (*authv1.MeResponse, error) {
+	actor, err := h.requireActor(c)
+	if err != nil {
+		return nil, err
+	}
+	if actor.GetRole() != "agent" {
+		return nil, status.Error(codes.PermissionDenied, "agent role required")
+	}
+	return actor, nil
 }
 
 func handleGRPCError(c *gin.Context, err error) {
