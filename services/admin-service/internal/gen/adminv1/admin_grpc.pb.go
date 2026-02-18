@@ -24,6 +24,7 @@ const _ = grpc.SupportPackageIsVersion7
 type AdminGatewayServiceClient interface {
 	CreateSite(ctx context.Context, in *CreateSiteRequest, opts ...grpc.CallOption) (*Site, error)
 	ListSites(ctx context.Context, in *ListSitesRequest, opts ...grpc.CallOption) (*ListSitesResponse, error)
+	GetSiteBySiteID(ctx context.Context, in *GetSiteBySiteIDRequest, opts ...grpc.CallOption) (*Site, error)
 	CreateAgent(ctx context.Context, in *CreateAgentRequest, opts ...grpc.CallOption) (*Agent, error)
 	ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error)
 }
@@ -54,6 +55,15 @@ func (c *adminGatewayServiceClient) ListSites(ctx context.Context, in *ListSites
 	return out, nil
 }
 
+func (c *adminGatewayServiceClient) GetSiteBySiteID(ctx context.Context, in *GetSiteBySiteIDRequest, opts ...grpc.CallOption) (*Site, error) {
+	out := new(Site)
+	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/GetSiteBySiteID", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *adminGatewayServiceClient) CreateAgent(ctx context.Context, in *CreateAgentRequest, opts ...grpc.CallOption) (*Agent, error) {
 	out := new(Agent)
 	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/CreateAgent", in, out, opts...)
@@ -78,6 +88,7 @@ func (c *adminGatewayServiceClient) ListAgents(ctx context.Context, in *ListAgen
 type AdminGatewayServiceServer interface {
 	CreateSite(context.Context, *CreateSiteRequest) (*Site, error)
 	ListSites(context.Context, *ListSitesRequest) (*ListSitesResponse, error)
+	GetSiteBySiteID(context.Context, *GetSiteBySiteIDRequest) (*Site, error)
 	CreateAgent(context.Context, *CreateAgentRequest) (*Agent, error)
 	ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error)
 	mustEmbedUnimplementedAdminGatewayServiceServer()
@@ -92,6 +103,9 @@ func (UnimplementedAdminGatewayServiceServer) CreateSite(context.Context, *Creat
 }
 func (UnimplementedAdminGatewayServiceServer) ListSites(context.Context, *ListSitesRequest) (*ListSitesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSites not implemented")
+}
+func (UnimplementedAdminGatewayServiceServer) GetSiteBySiteID(context.Context, *GetSiteBySiteIDRequest) (*Site, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSiteBySiteID not implemented")
 }
 func (UnimplementedAdminGatewayServiceServer) CreateAgent(context.Context, *CreateAgentRequest) (*Agent, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateAgent not implemented")
@@ -148,6 +162,24 @@ func _AdminGatewayService_ListSites_Handler(srv interface{}, ctx context.Context
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AdminGatewayService_GetSiteBySiteID_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSiteBySiteIDRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminGatewayServiceServer).GetSiteBySiteID(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/inlinechat.admin.v1.AdminGatewayService/GetSiteBySiteID",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminGatewayServiceServer).GetSiteBySiteID(ctx, req.(*GetSiteBySiteIDRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AdminGatewayService_CreateAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateAgentRequest)
 	if err := dec(in); err != nil {
@@ -198,6 +230,10 @@ var AdminGatewayService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListSites",
 			Handler:    _AdminGatewayService_ListSites_Handler,
+		},
+		{
+			MethodName: "GetSiteBySiteID",
+			Handler:    _AdminGatewayService_GetSiteBySiteID_Handler,
 		},
 		{
 			MethodName: "CreateAgent",

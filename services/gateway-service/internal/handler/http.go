@@ -67,9 +67,31 @@ func (h *HTTPHandler) createConversation(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+	req.SiteID = strings.TrimSpace(req.SiteID)
+	req.VisitorToken = strings.TrimSpace(req.VisitorToken)
+	if req.SiteID == "" || req.VisitorToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "site_id and visitor_token are required"})
+		return
+	}
 
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
+
+	siteResp, err := h.clients.Admin.GetSiteBySiteID(ctx, &adminv1.GetSiteBySiteIDRequest{
+		SiteId: req.SiteID,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid site_id"})
+			return
+		}
+		handleGRPCError(c, err)
+		return
+	}
+	if strings.TrimSpace(strings.ToLower(siteResp.GetStatus())) != "active" {
+		c.JSON(http.StatusConflict, gin.H{"error": "site is not active"})
+		return
+	}
 
 	resp, err := h.clients.Chat.CreateConversation(ctx, &chatv1.CreateConversationRequest{
 		SiteId:       req.SiteID,
@@ -431,6 +453,7 @@ func (h *HTTPHandler) me(c *gin.Context) {
 }
 
 type createSiteRequest struct {
+	SiteID string `json:"site_id" binding:"required,min=4,max=64"`
 	Name   string `json:"name" binding:"required,min=1,max=128"`
 	Domain string `json:"domain" binding:"required,min=3,max=255"`
 }
@@ -447,6 +470,7 @@ func (h *HTTPHandler) createSite(c *gin.Context) {
 
 	resp, err := h.clients.Admin.CreateSite(ctx, &adminv1.CreateSiteRequest{
 		Authorization: c.GetHeader("Authorization"),
+		SiteId:        req.SiteID,
 		Name:          req.Name,
 		Domain:        req.Domain,
 	})

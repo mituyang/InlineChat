@@ -41,6 +41,7 @@ GATEWAY_URL="${SMOKE_GATEWAY_URL:-http://127.0.0.1:${GATEWAY_HTTP_PORT}}"
 RUN_ID="$(date +%s)"
 SITE_NAME="Smoke Site ${RUN_ID}"
 SITE_DOMAIN="smoke-${RUN_ID}.local"
+SITE_ID="site_smoke_${RUN_ID}"
 AGENT_EMAIL="smoke_agent_${RUN_ID}@example.com"
 AGENT_PASSWORD="${SMOKE_AGENT_PASSWORD:-Agent12345!}"
 VISITOR_TOKEN="smoke_visitor_${RUN_ID}"
@@ -127,7 +128,7 @@ fi
 echo "  超级管理员登录成功: ${SUPER_ADMIN_EMAIL}"
 
 echo "[3/9] 创建站点"
-site_payload="$(printf '{"name":"%s","domain":"%s"}' "$SITE_NAME" "$SITE_DOMAIN")"
+site_payload="$(printf '{"site_id":"%s","name":"%s","domain":"%s"}' "$SITE_ID" "$SITE_NAME" "$SITE_DOMAIN")"
 site_resp="$(http_json POST "${GATEWAY_URL}/api/admin/v1/admin/sites" "$site_payload" "$super_admin_token")"
 site_id="$(extract_json_string "$site_resp" "site_id")"
 if [ -z "$site_id" ]; then

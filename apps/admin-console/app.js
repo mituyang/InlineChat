@@ -34,6 +34,8 @@ const els = {
   refreshSitesBtn: document.getElementById("refreshSitesBtn"),
   siteSearchInput: document.getElementById("siteSearchInput"),
   createSiteForm: document.getElementById("createSiteForm"),
+  siteIdInput: document.getElementById("siteIdInput"),
+  generateSiteIdBtn: document.getElementById("generateSiteIdBtn"),
   siteNameInput: document.getElementById("siteNameInput"),
   siteDomainInput: document.getElementById("siteDomainInput"),
   siteList: document.getElementById("siteList"),
@@ -127,6 +129,13 @@ function bindEvents() {
   els.createSiteForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     await createSite();
+  });
+
+  els.generateSiteIdBtn?.addEventListener("click", () => {
+    const siteID = buildSiteIDCandidate();
+    els.siteIdInput.value = siteID;
+    appendFeed(`生成站点ID：${siteID}`);
+    setStatus("已生成站点ID，可继续手动调整");
   });
 
   els.createAgentForm?.addEventListener("submit", async (event) => {
@@ -306,10 +315,15 @@ async function refreshAgents() {
 }
 
 async function createSite() {
+  const siteID = normalizeSiteID(els.siteIdInput.value);
   const name = els.siteNameInput.value.trim();
   const domain = els.siteDomainInput.value.trim();
-  if (!name || !domain) {
-    setStatus("请填写站点名称和域名", true);
+  if (!siteID || !name || !domain) {
+    setStatus("请填写站点ID、名称和域名", true);
+    return;
+  }
+  if (!isValidSiteID(siteID)) {
+    setStatus("站点ID格式无效：仅允许小写字母、数字、下划线、连字符，长度 4-64", true);
     return;
   }
 
@@ -317,12 +331,13 @@ async function createSite() {
     await apiRequest("/api/admin/v1/admin/sites", {
       method: "POST",
       auth: true,
-      body: { name, domain },
+      body: { site_id: siteID, name, domain },
     });
+    els.siteIdInput.value = "";
     els.siteNameInput.value = "";
     els.siteDomainInput.value = "";
     await refreshSites();
-    appendFeed(`创建站点：${name} (${domain})`);
+    appendFeed(`创建站点：${name} (${domain}) [${siteID}]`);
     setStatus("站点创建成功");
   } catch (error) {
     setStatus(error.message || "创建站点失败", true);
@@ -414,12 +429,14 @@ function renderSites(items) {
   for (const site of list) {
     const siteID = String(site.site_id || "");
     const snippet = buildEmbedSnippet(siteID);
+    const demoURL = "/app/demo/";
     const node = document.createElement("article");
     node.className = "item";
     node.innerHTML = `
       <strong>${escapeHTML(site.name || "-")}</strong>
       <div class="meta">site_id=${escapeHTML(siteID || "-")} · domain=${escapeHTML(site.domain || "-")}</div>
       <div class="meta">widget_key=${escapeHTML(site.widget_key || "-")} · status=${escapeHTML(site.status || "-")}</div>
+      <a class="demo-link" href="${demoURL}" target="_blank" rel="noreferrer">打开 Demo 预览</a>
       <div class="snippet-box">
         <div class="snippet-title">嵌入脚本</div>
         <pre class="snippet-code">${escapeHTML(snippet)}</pre>
@@ -550,6 +567,31 @@ function buildEmbedSnippet(siteID) {
   const normalizedSiteID = String(siteID || "").trim();
   const src = `${window.location.origin}/sdk/inlinechat-widget.js`;
   return `<script src="${src}" data-site-id="${normalizedSiteID}" data-title="在线客服" defer></script>`;
+}
+
+function normalizeSiteID(raw) {
+  return String(raw || "")
+    .trim()
+    .toLowerCase();
+}
+
+function isValidSiteID(siteID) {
+  return /^[a-z0-9][a-z0-9_-]{3,63}$/.test(siteID);
+}
+
+function buildSiteIDCandidate() {
+  const domainText = String(els.siteDomainInput?.value || "")
+    .trim()
+    .toLowerCase();
+  const domainCore = domainText.split(".")[0] || "site";
+  const normalizedCore =
+    domainCore
+      .replace(/[^a-z0-9_-]+/g, "_")
+      .replace(/^[_-]+|[_-]+$/g, "")
+      .slice(0, 24) || "site";
+  const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  const candidate = `site_${normalizedCore}_${suffix}`;
+  return candidate.slice(0, 64);
 }
 
 async function copyText(text) {

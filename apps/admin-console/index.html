@@ -56,6 +56,13 @@
           </div>
 
           <form id="createSiteForm" class="form-grid two-col">
+            <label class="span-all">
+              站点ID
+              <div class="inline-action">
+                <input id="siteIdInput" type="text" placeholder="site_shop_main" required />
+                <button id="generateSiteIdBtn" type="button" class="ghost">生成ID</button>
+              </div>
+            </label>
             <label>站点名称 <input id="siteNameInput" type="text" placeholder="官方商城" required /></label>
             <label>绑定域名 <input id="siteDomainInput" type="text" placeholder="shop.example.com" required /></label>
             <button type="submit">创建站点</button>

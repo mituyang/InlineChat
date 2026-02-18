@@ -33,11 +33,12 @@ func (s *AdminGatewayServer) CreateSite(ctx context.Context, req *adminv1.Create
 	if _, err := s.requireAdmin(req.GetAuthorization()); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(req.GetName()) == "" || strings.TrimSpace(req.GetDomain()) == "" {
-		return nil, status.Error(codes.InvalidArgument, "name and domain are required")
+	if strings.TrimSpace(req.GetSiteId()) == "" || strings.TrimSpace(req.GetName()) == "" || strings.TrimSpace(req.GetDomain()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "site_id name and domain are required")
 	}
 
 	site, err := s.adminService.CreateSite(ctx, service.CreateSiteInput{
+		SiteID: req.GetSiteId(),
 		Name:   req.GetName(),
 		Domain: req.GetDomain(),
 	})
@@ -78,6 +79,20 @@ func (s *AdminGatewayServer) ListSites(ctx context.Context, req *adminv1.ListSit
 		resp.Items = append(resp.Items, toSitePB(&item))
 	}
 	return resp, nil
+}
+
+func (s *AdminGatewayServer) GetSiteBySiteID(ctx context.Context, req *adminv1.GetSiteBySiteIDRequest) (*adminv1.Site, error) {
+	siteID := strings.TrimSpace(req.GetSiteId())
+	if siteID == "" {
+		return nil, status.Error(codes.InvalidArgument, "site_id is required")
+	}
+
+	site, err := s.adminService.GetSiteBySiteID(ctx, siteID)
+	if err != nil {
+		return nil, mapError(err)
+	}
+
+	return toSitePB(site), nil
 }
 
 func (s *AdminGatewayServer) CreateAgent(ctx context.Context, req *adminv1.CreateAgentRequest) (*adminv1.Agent, error) {
@@ -165,6 +180,8 @@ func mapError(err error) error {
 	switch err {
 	case service.ErrConflict:
 		return status.Error(codes.AlreadyExists, err.Error())
+	case service.ErrNotFound:
+		return status.Error(codes.NotFound, err.Error())
 	default:
 		msg := strings.ToLower(err.Error())
 		if strings.Contains(msg, "required") || strings.Contains(msg, "invalid") {

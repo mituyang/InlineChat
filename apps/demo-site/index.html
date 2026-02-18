@@ -284,14 +284,39 @@
 
     <footer class="container">© 2026 青禾家居（示例业务网站）</footer>
 
-    <script
-      src="/sdk/inlinechat-widget.js"
-      data-site-id="site_demo"
-      data-title="青禾在线客服"
-      data-primary-color="#2f343c"
-      data-bottom="24"
-      data-right="24"
-      defer
-    ></script>
+    <script src="/app/demo/config.js"></script>
+    <script>
+      (function () {
+        var config = window.INLINECHAT_DEMO_CONFIG || {};
+        var siteID = String(config.siteID || "").trim();
+
+        var hint = document.createElement("div");
+        hint.className = "container";
+        hint.style.marginBottom = "18px";
+        hint.style.fontSize = "14px";
+        hint.style.color = "#475569";
+
+        if (!siteID) {
+          hint.innerHTML = '未配置 site_id。请编辑 <code>/app/demo/config.js</code> 写入后台生成的 site_id。';
+          document.body.insertBefore(hint, document.querySelector("footer.container"));
+          return;
+        }
+
+        hint.innerHTML = '当前站点：<code>' + siteID + "</code>";
+        document.body.insertBefore(hint, document.querySelector("footer.container"));
+
+        var sdk = document.createElement("script");
+        sdk.src = "/sdk/inlinechat-widget.js";
+        sdk.dataset.siteId = siteID;
+        sdk.dataset.title = String(config.title || "青禾在线客服");
+        sdk.dataset.primaryColor = String(config.primaryColor || "#2f343c");
+        sdk.dataset.bottom = String(config.bottom || "24");
+        sdk.dataset.right = String(config.right || "24");
+        sdk.dataset.panelWidth = String(config.panelWidth || "380");
+        sdk.dataset.panelHeight = String(config.panelHeight || "620");
+        sdk.defer = true;
+        document.body.appendChild(sdk);
+      })();
+    </script>
   </body>
 </html>

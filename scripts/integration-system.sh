@@ -43,7 +43,13 @@ require_env MYSQL_PASSWORD
 compose_cmd=(docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE")
 
 echo "[1/5] 运行端到端冒烟"
-ENV_FILE="$ENV_FILE" "$ROOT_DIR/scripts/smoke-e2e.sh"
+smoke_output="$(ENV_FILE="$ENV_FILE" "$ROOT_DIR/scripts/smoke-e2e.sh")"
+echo "$smoke_output"
+smoke_site_id="$(printf "%s\n" "$smoke_output" | sed -n 's/^site_id=//p' | tail -n1)"
+if [ -z "$smoke_site_id" ]; then
+  echo "  冒烟输出中未解析到 site_id"
+  exit 1
+fi
 
 echo "[2/5] 校验 etcd 服务注册"
 etcd_keys="$("${compose_cmd[@]}" exec -T etcd etcdctl --endpoints=http://127.0.0.1:2379 get "$DISCOVERY_PREFIX" --prefix --keys-only)"
@@ -68,6 +74,7 @@ echo "[4/5] 校验 Redis + WebSocket + gRPC 消息链路"
 (
   cd "$ROOT_DIR/services/gateway-service"
   GATEWAY_URL="$GATEWAY_URL" \
+  WS_CHECK_SITE_ID="$smoke_site_id" \
   GOCACHE="$ROOT_DIR/.cache/go-build" \
   GOMODCACHE="$ROOT_DIR/.cache/go-mod" \
   go run ./cmd/ws-push-check

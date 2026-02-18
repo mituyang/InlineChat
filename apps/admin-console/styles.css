@@ -234,6 +234,21 @@ body.auth-guard .shell {
   color: var(--text-sub);
 }
 
+.form-grid label.span-all {
+  grid-column: 1 / -1;
+}
+
+.inline-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.inline-action > button {
+  min-height: 38px;
+  white-space: nowrap;
+}
+
 .form-grid > button[type="submit"] {
   grid-column: 1 / -1;
   min-height: 40px;
@@ -273,6 +288,17 @@ body.auth-guard .shell {
 .item .meta {
   color: var(--text-sub);
   font-size: 11px;
+}
+
+.demo-link {
+  width: fit-content;
+  font-size: 12px;
+  color: var(--brand);
+  text-decoration: none;
+}
+
+.demo-link:hover {
+  text-decoration: underline;
 }
 
 .snippet-box {

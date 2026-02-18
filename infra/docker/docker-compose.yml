@@ -8,7 +8,7 @@ services:
       MYSQL_USER: ${MYSQL_USER}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     ports:
-      - "3306:3306"
+      - "${MYSQL_HOST_PORT:-8233}:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
@@ -21,7 +21,7 @@ services:
     image: redis:7.4-alpine
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "${REDIS_HOST_PORT:-8236}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -38,7 +38,7 @@ services:
       ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
       ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
     ports:
-      - "2379:2379"
+      - "${ETCD_HOST_PORT:-8237}:2379"
     volumes:
       - etcd_data:/bitnami/etcd
     healthcheck:

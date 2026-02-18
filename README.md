@@ -34,6 +34,11 @@
 4. 网关健康检查：`GET http://localhost:8200/healthz`
 5. 网关会在请求与响应里统一透传 `X-Request-ID`（可用 `GATEWAY_REQUEST_ID_HEADER` 配置）
 
+基础依赖默认宿主机端口：
+- MySQL: `8233 -> 3306`
+- Redis: `8236 -> 6379`
+- etcd: `8237 -> 2379`
+
 ## 前端访问
 - 员工统一登录页（客服/超级管理员共用）：`http://localhost:8200/app/staff-login/`
 - 访客端：`http://localhost:8200/app/customer/`
@@ -62,6 +67,11 @@
 ></script>
 ```
 
+注意：
+- `data-site-id` 必须使用管理后台已创建站点的 `site_id`，前端值与后台站点不匹配将无法创建会话。
+- 管理后台创建站点时需先填写 `site_id`（可点击“生成ID”按钮），再提交创建。
+- 建议直接使用管理后台站点卡片中的“嵌入脚本”复制结果，避免手工输入错误。
+
 可选参数：
 - `data-gateway-origin`: 网关地址（默认取脚本 `src` 的域名）
 - `data-primary-color`: 右下角图标主色（默认 `#2f343c`）
@@ -72,6 +82,7 @@
 - 脚本会在右下角渲染悬浮按钮，点击后打开聊天窗。
 - 聊天窗内部使用 `wss/ws` 连接 `/ws/:conversation_id` 实时通道，并带 HTTP 轮询兜底。
 - 本地示例宿主页：`apps/widget-sdk/demo-host.html`
+- 业务网站示例请在 `apps/demo-site/config.js` 手动配置 `siteID`，然后访问 `http://localhost:8200/app/demo/` 验证嵌入效果。
 
 ## Makefile
 - `make build-local`: 本地先编译全部服务二进制（`linux` 目标）
@@ -127,7 +138,7 @@
   - `POST /api/auth/v1/auth/login`
   - `GET /api/auth/v1/auth/me`
 - Admin:
-  - `POST /api/admin/v1/admin/sites`（需要 Bearer Token，且角色为 `admin/super_admin`）
+  - `POST /api/admin/v1/admin/sites`（需要 Bearer Token，且角色为 `admin/super_admin`；请求体需包含 `site_id`、`name`、`domain`）
   - `GET /api/admin/v1/admin/sites`（需要 Bearer Token，且角色为 `admin/super_admin`）
   - `POST /api/admin/v1/admin/agents`（需要 Bearer Token，且角色必须为 `super_admin`）
   - `GET /api/admin/v1/admin/agents`（需要 Bearer Token，且角色为 `admin/super_admin`）

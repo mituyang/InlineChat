@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 	"inlinechat/services/admin-service/internal/model"
+	"inlinechat/services/admin-service/internal/repository"
 )
 
 type fakeSiteRepository struct {
@@ -30,6 +31,16 @@ func (r *fakeSiteRepository) List(_ context.Context, _ int, _ int) ([]model.Site
 	out := make([]model.Site, len(r.items))
 	copy(out, r.items)
 	return out, nil
+}
+
+func (r *fakeSiteRepository) GetBySiteID(_ context.Context, siteID string) (*model.Site, error) {
+	for i := range r.items {
+		if r.items[i].SiteID == siteID {
+			out := r.items[i]
+			return &out, nil
+		}
+	}
+	return nil, repository.ErrNotFound
 }
 
 type fakeAgentRepository struct {
@@ -127,6 +138,7 @@ func TestCreateSiteNormalizeDomainAndGenerateKeys(t *testing.T) {
 	svc := New(siteRepo, &fakeAgentRepository{}, 10)
 
 	site, err := svc.CreateSite(context.Background(), CreateSiteInput{
+		SiteID: "Shop_Main",
 		Name:   " 商城站点 ",
 		Domain: " Shop.Example.COM ",
 	})
@@ -143,10 +155,53 @@ func TestCreateSiteNormalizeDomainAndGenerateKeys(t *testing.T) {
 	if site.Domain != "shop.example.com" {
 		t.Fatalf("unexpected normalized domain: %q", site.Domain)
 	}
-	if !strings.HasPrefix(site.SiteID, "site_") {
+	if site.SiteID != "shop_main" {
 		t.Fatalf("unexpected site_id: %s", site.SiteID)
 	}
 	if !strings.HasPrefix(site.WidgetKey, "wk_") {
 		t.Fatalf("unexpected widget_key: %s", site.WidgetKey)
+	}
+}
+
+func TestCreateSiteRequireSiteID(t *testing.T) {
+	siteRepo := &fakeSiteRepository{}
+	svc := New(siteRepo, &fakeAgentRepository{}, 10)
+
+	_, err := svc.CreateSite(context.Background(), CreateSiteInput{
+		SiteID: "",
+		Name:   "商城站点",
+		Domain: "shop.example.com",
+	})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "site_id is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetSiteBySiteID(t *testing.T) {
+	siteRepo := &fakeSiteRepository{
+		items: []model.Site{
+			{SiteID: "site_abc", Name: "测试站点"},
+		},
+	}
+	svc := New(siteRepo, &fakeAgentRepository{}, 10)
+
+	site, err := svc.GetSiteBySiteID(context.Background(), " site_abc ")
+	if err != nil {
+		t.Fatalf("GetSiteBySiteID failed: %v", err)
+	}
+	if site.SiteID != "site_abc" {
+		t.Fatalf("unexpected site_id: %s", site.SiteID)
+	}
+}
+
+func TestGetSiteBySiteIDNotFound(t *testing.T) {
+	svc := New(&fakeSiteRepository{}, &fakeAgentRepository{}, 10)
+
+	_, err := svc.GetSiteBySiteID(context.Background(), "site_missing")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
