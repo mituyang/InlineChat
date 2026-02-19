@@ -102,7 +102,7 @@ func (h *HTTPHandler) createConversation(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, conversationToJSON(resp))
+	c.JSON(http.StatusCreated, conversationToPublicJSON(resp))
 }
 
 func (h *HTTPHandler) getConversation(c *gin.Context) {
@@ -670,6 +670,15 @@ func conversationToJSON(item *chatv1.Conversation) gin.H {
 		payload["closed_by_agent_id"] = item.GetClosedByAgentId()
 	}
 	return payload
+}
+
+func conversationToPublicJSON(item *chatv1.Conversation) gin.H {
+	return gin.H{
+		"id":         item.GetId(),
+		"status":     item.GetStatus(),
+		"created_at": item.GetCreatedAt(),
+		"updated_at": item.GetUpdatedAt(),
+	}
 }
 
 func messageToJSON(item *chatv1.Message) gin.H {

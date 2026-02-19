@@ -95,6 +95,20 @@ func (s *AdminGatewayServer) GetSiteBySiteID(ctx context.Context, req *adminv1.G
 	return toSitePB(site), nil
 }
 
+func (s *AdminGatewayServer) GetSiteByDomain(ctx context.Context, req *adminv1.GetSiteByDomainRequest) (*adminv1.Site, error) {
+	domain := strings.TrimSpace(req.GetDomain())
+	if domain == "" {
+		return nil, status.Error(codes.InvalidArgument, "domain is required")
+	}
+
+	site, err := s.adminService.GetSiteByDomain(ctx, domain)
+	if err != nil {
+		return nil, mapError(err)
+	}
+
+	return toSitePB(site), nil
+}
+
 func (s *AdminGatewayServer) CreateAgent(ctx context.Context, req *adminv1.CreateAgentRequest) (*adminv1.Agent, error) {
 	claims, err := s.requireAdmin(req.GetAuthorization())
 	if err != nil {

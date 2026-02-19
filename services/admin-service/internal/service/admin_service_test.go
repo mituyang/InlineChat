@@ -43,6 +43,16 @@ func (r *fakeSiteRepository) GetBySiteID(_ context.Context, siteID string) (*mod
 	return nil, repository.ErrNotFound
 }
 
+func (r *fakeSiteRepository) GetByDomain(_ context.Context, domain string) (*model.Site, error) {
+	for i := range r.items {
+		if r.items[i].Domain == domain {
+			out := r.items[i]
+			return &out, nil
+		}
+	}
+	return nil, repository.ErrNotFound
+}
+
 type fakeAgentRepository struct {
 	items       []model.Agent
 	createCalls int
@@ -201,6 +211,32 @@ func TestGetSiteBySiteIDNotFound(t *testing.T) {
 	svc := New(&fakeSiteRepository{}, &fakeAgentRepository{}, 10)
 
 	_, err := svc.GetSiteBySiteID(context.Background(), "site_missing")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestGetSiteByDomain(t *testing.T) {
+	siteRepo := &fakeSiteRepository{
+		items: []model.Site{
+			{SiteID: "site_abc", Domain: "shop.example.com", Name: "测试站点"},
+		},
+	}
+	svc := New(siteRepo, &fakeAgentRepository{}, 10)
+
+	site, err := svc.GetSiteByDomain(context.Background(), " Shop.Example.com ")
+	if err != nil {
+		t.Fatalf("GetSiteByDomain failed: %v", err)
+	}
+	if site.Domain != "shop.example.com" {
+		t.Fatalf("unexpected domain: %s", site.Domain)
+	}
+}
+
+func TestGetSiteByDomainNotFound(t *testing.T) {
+	svc := New(&fakeSiteRepository{}, &fakeAgentRepository{}, 10)
+
+	_, err := svc.GetSiteByDomain(context.Background(), "missing.example.com")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}

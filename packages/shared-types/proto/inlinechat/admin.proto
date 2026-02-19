@@ -8,6 +8,7 @@ service AdminGatewayService {
   rpc CreateSite(CreateSiteRequest) returns (Site);
   rpc ListSites(ListSitesRequest) returns (ListSitesResponse);
   rpc GetSiteBySiteID(GetSiteBySiteIDRequest) returns (Site);
+  rpc GetSiteByDomain(GetSiteByDomainRequest) returns (Site);
   rpc CreateAgent(CreateAgentRequest) returns (Agent);
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
 }
@@ -27,6 +28,10 @@ message ListSitesRequest {
 
 message GetSiteBySiteIDRequest {
   string site_id = 1;
+}
+
+message GetSiteByDomainRequest {
+  string domain = 1;
 }
 
 message CreateAgentRequest {

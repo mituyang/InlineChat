@@ -297,12 +297,12 @@
         hint.style.color = "#475569";
 
         if (!siteID) {
-          hint.innerHTML = '未配置 site_id。请编辑 <code>/app/demo/config.js</code> 写入后台生成的 site_id。';
+          hint.innerHTML = "未配置站点参数。请编辑 <code>/app/demo/config.js</code> 写入后台生成的 site_id。";
           document.body.insertBefore(hint, document.querySelector("footer.container"));
           return;
         }
 
-        hint.innerHTML = '当前站点：<code>' + siteID + "</code>";
+        hint.textContent = "已配置客服接入参数";
         document.body.insertBefore(hint, document.querySelector("footer.container"));
 
         var sdk = document.createElement("script");

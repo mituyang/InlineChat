@@ -92,6 +92,22 @@ func (s *AdminService) GetSiteBySiteID(ctx context.Context, siteID string) (*mod
 	return site, nil
 }
 
+func (s *AdminService) GetSiteByDomain(ctx context.Context, domain string) (*model.Site, error) {
+	normalizedDomain := strings.TrimSpace(strings.ToLower(domain))
+	if normalizedDomain == "" {
+		return nil, fmt.Errorf("domain is required")
+	}
+
+	site, err := s.siteRepo.GetByDomain(ctx, normalizedDomain)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return site, nil
+}
+
 func (s *AdminService) CreateAgent(ctx context.Context, in CreateAgentInput) (*model.Agent, error) {
 	email := strings.TrimSpace(strings.ToLower(in.Email))
 	displayName := strings.TrimSpace(in.DisplayName)

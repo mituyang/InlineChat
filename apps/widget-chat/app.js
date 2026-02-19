@@ -89,14 +89,8 @@ async function prepareConversation() {
 
   if (storedConversationID) {
     try {
-      const existing = await apiRequest(`/api/chat/v1/conversations/${storedConversationID}`);
-      if (
-        String(existing.site_id) === state.siteID &&
-        String(existing.visitor_token) === state.visitorToken &&
-        String(existing.status) === "open"
-      ) {
-        conversationID = String(existing.id);
-      }
+      await apiRequest(`/api/chat/v1/conversations/${storedConversationID}/messages?limit=1`);
+      conversationID = String(storedConversationID);
     } catch {
       conversationID = "";
     }
