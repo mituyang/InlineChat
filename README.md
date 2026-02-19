@@ -30,6 +30,8 @@
 ## 本地启动
 1. `cp .env.example .env`
 2. 在 `.env` 设置超级管理员账号（`SUPER_ADMIN_EMAIL`、`SUPER_ADMIN_PASSWORD`、`SUPER_ADMIN_DISPLAY_NAME`）
+   - `SUPER_ADMIN_PASSWORD` 必须满足：12-72 位、包含大小写字母/数字/特殊字符、不能包含空白字符、不能使用常见弱口令。
+   - 若浏览器出现“密码泄露/检查已保存密码”提示，通常是浏览器密码管理器检测到旧弱口令，不是后端报错；更新为强口令并更新浏览器已保存密码即可。
 3. `docker compose -f infra/docker/docker-compose.yml --env-file .env up --build`
 4. 网关健康检查：`GET http://localhost:8200/healthz`
 5. 网关会在请求与响应里统一透传 `X-Request-ID`（可用 `GATEWAY_REQUEST_ID_HEADER` 配置）

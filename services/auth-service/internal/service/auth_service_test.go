@@ -68,7 +68,7 @@ func newTestAuthService(repo repository.AgentRepository, email string, password 
 
 func TestEnsureSuperAdminCreateWhenMissing(t *testing.T) {
 	repo := newFakeAgentRepository()
-	svc := newTestAuthService(repo, "super@example.com", "SuperAdmin123!", "超级管理员")
+	svc := newTestAuthService(repo, "super@example.com", "Sup3rAdmin#2026!", "超级管理员")
 
 	if err := svc.EnsureSuperAdmin(context.Background()); err != nil {
 		t.Fatalf("EnsureSuperAdmin failed: %v", err)
@@ -94,10 +94,10 @@ func TestEnsureSuperAdminCreateWhenMissing(t *testing.T) {
 	if created.DisplayName != "超级管理员" {
 		t.Fatalf("unexpected display_name: %s", created.DisplayName)
 	}
-	if created.PasswordHash == "SuperAdmin123!" {
+	if created.PasswordHash == "Sup3rAdmin#2026!" {
 		t.Fatalf("password hash should not be plain text")
 	}
-	if err := security.ComparePassword(created.PasswordHash, "SuperAdmin123!"); err != nil {
+	if err := security.ComparePassword(created.PasswordHash, "Sup3rAdmin#2026!"); err != nil {
 		t.Fatalf("password hash does not match: %v", err)
 	}
 }
@@ -181,5 +181,24 @@ func TestEnsureSuperAdminPropagatesRepositoryError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "db unavailable") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestEnsureSuperAdminRejectWeakPassword(t *testing.T) {
+	repo := newFakeAgentRepository()
+	svc := newTestAuthService(repo, "super@example.com", "password12345!", "超级管理员")
+
+	err := svc.EnsureSuperAdmin(context.Background())
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid SUPER_ADMIN_PASSWORD") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if repo.createCalls != 0 {
+		t.Fatalf("expected createCalls=0, got %d", repo.createCalls)
+	}
+	if repo.saveCalls != 0 {
+		t.Fatalf("expected saveCalls=0, got %d", repo.saveCalls)
 	}
 }

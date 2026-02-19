@@ -111,7 +111,7 @@ func (s *AdminService) GetSiteByDomain(ctx context.Context, domain string) (*mod
 func (s *AdminService) CreateAgent(ctx context.Context, in CreateAgentInput) (*model.Agent, error) {
 	email := strings.TrimSpace(strings.ToLower(in.Email))
 	displayName := strings.TrimSpace(in.DisplayName)
-	password := strings.TrimSpace(in.Password)
+	password := in.Password
 	role := strings.TrimSpace(strings.ToLower(in.Role))
 	if role == "" {
 		role = "agent"
@@ -119,8 +119,11 @@ func (s *AdminService) CreateAgent(ctx context.Context, in CreateAgentInput) (*m
 	if role != "agent" {
 		return nil, fmt.Errorf("invalid role")
 	}
-	if email == "" || displayName == "" || password == "" {
-		return nil, fmt.Errorf("email display_name password are required")
+	if email == "" || displayName == "" {
+		return nil, fmt.Errorf("email and display_name are required")
+	}
+	if err := security.ValidatePasswordPolicy(password); err != nil {
+		return nil, err
 	}
 
 	hash, err := security.HashPassword(password, s.bcryptCost)

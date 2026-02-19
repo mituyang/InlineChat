@@ -93,6 +93,9 @@ func (s *AuthService) EnsureSuperAdmin(ctx context.Context) error {
 	if s.superAdminEmail == "" || s.superAdminPassword == "" || s.superAdminDisplayName == "" {
 		return fmt.Errorf("super admin env is required")
 	}
+	if err := security.ValidatePasswordPolicy(s.superAdminPassword); err != nil {
+		return fmt.Errorf("invalid SUPER_ADMIN_PASSWORD: %w", err)
+	}
 
 	agent, err := s.repo.GetByEmail(ctx, s.superAdminEmail)
 	if err != nil {

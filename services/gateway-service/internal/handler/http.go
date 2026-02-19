@@ -524,7 +524,7 @@ func (h *HTTPHandler) listSites(c *gin.Context) {
 
 type createAgentRequest struct {
 	Email       string `json:"email" binding:"required,email"`
-	Password    string `json:"password" binding:"required,min=8,max=72"`
+	Password    string `json:"password" binding:"required,min=12,max=72"`
 	DisplayName string `json:"display_name" binding:"required,min=1,max=128"`
 	Role        string `json:"role" binding:"omitempty,oneof=agent"`
 }

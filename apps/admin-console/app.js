@@ -5,6 +5,19 @@ const ADMIN_HOME_URL = "/app/admin/";
 const AGENT_HOME_URL = "/app/agent/";
 const ADMIN_ALLOWED_ROLES = new Set(["admin", "super_admin"]);
 const THEME_STORAGE_KEY = "inlinechat.ui.theme";
+const WEAK_PASSWORD_BLACKLIST = new Set([
+  "123456",
+  "12345678",
+  "password",
+  "password123",
+  "qwerty123",
+  "admin123456",
+  "letmein123",
+  "agent12345!",
+  "superadmin123!",
+  "changeme123!",
+  "changeme",
+]);
 
 const state = {
   token: "",
@@ -353,6 +366,11 @@ async function createAgent() {
     setStatus("请完整填写坐席信息", true);
     return;
   }
+  const passwordError = validateAgentPassword(password);
+  if (passwordError) {
+    setStatus(passwordError, true);
+    return;
+  }
 
   try {
     await apiRequest("/api/admin/v1/admin/agents", {
@@ -373,6 +391,25 @@ async function createAgent() {
   } catch (error) {
     setStatus(error.message || "创建坐席失败", true);
   }
+}
+
+function validateAgentPassword(password) {
+  if (!password || password.trim() === "") {
+    return "密码不能为空";
+  }
+  if (password.length < 12 || password.length > 72) {
+    return "密码长度需为 12-72 位";
+  }
+  if (/\s/.test(password)) {
+    return "密码不能包含空白字符";
+  }
+  if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+    return "密码需同时包含大写字母、小写字母、数字和特殊字符";
+  }
+  if (WEAK_PASSWORD_BLACKLIST.has(password.toLowerCase())) {
+    return "密码过于常见，请更换为更强的密码";
+  }
+  return "";
 }
 
 function renderStats() {

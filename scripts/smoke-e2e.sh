@@ -43,7 +43,7 @@ SITE_NAME="Smoke Site ${RUN_ID}"
 SITE_DOMAIN="smoke-${RUN_ID}.local"
 SITE_ID="site_smoke_${RUN_ID}"
 AGENT_EMAIL="smoke_agent_${RUN_ID}@example.com"
-AGENT_PASSWORD="${SMOKE_AGENT_PASSWORD:-Agent12345!}"
+AGENT_PASSWORD="${SMOKE_AGENT_PASSWORD:-Agent#Smoke2026!}"
 VISITOR_TOKEN="smoke_visitor_${RUN_ID}"
 
 extract_json_string() {

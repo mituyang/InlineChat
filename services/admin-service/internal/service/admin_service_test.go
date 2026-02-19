@@ -82,7 +82,7 @@ func TestCreateAgentDefaultRoleAndHashPassword(t *testing.T) {
 
 	agent, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 		Email:       "Agent@Example.com",
-		Password:    "Agent12345!",
+		Password:    "Agent#Strong2026!",
 		DisplayName: "客服A",
 	})
 	if err != nil {
@@ -101,10 +101,10 @@ func TestCreateAgentDefaultRoleAndHashPassword(t *testing.T) {
 	if agent.Status != "active" {
 		t.Fatalf("unexpected status: %s", agent.Status)
 	}
-	if agent.PasswordHash == "Agent12345!" {
+	if agent.PasswordHash == "Agent#Strong2026!" {
 		t.Fatalf("password hash should not be plain text")
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(agent.PasswordHash), []byte("Agent12345!")); err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(agent.PasswordHash), []byte("Agent#Strong2026!")); err != nil {
 		t.Fatalf("password hash does not match: %v", err)
 	}
 }
@@ -114,7 +114,7 @@ func TestCreateAgentRejectInvalidRole(t *testing.T) {
 
 	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 		Email:       "agent@example.com",
-		Password:    "Agent12345!",
+		Password:    "Agent#Strong2026!",
 		DisplayName: "客服A",
 		Role:        "super_admin",
 	})
@@ -134,12 +134,29 @@ func TestCreateAgentMapDuplicateToConflict(t *testing.T) {
 
 	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 		Email:       "agent@example.com",
-		Password:    "Agent12345!",
+		Password:    "Agent#Strong2026!",
 		DisplayName: "客服A",
 		Role:        "agent",
 	})
 	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("expected ErrConflict, got %v", err)
+	}
+}
+
+func TestCreateAgentRejectWeakPassword(t *testing.T) {
+	svc := New(&fakeSiteRepository{}, &fakeAgentRepository{}, 10)
+
+	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
+		Email:       "agent@example.com",
+		Password:    "password12345!",
+		DisplayName: "客服A",
+		Role:        "agent",
+	})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "password") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

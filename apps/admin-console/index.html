@@ -88,7 +88,16 @@
 
           <form id="createAgentForm" class="form-grid two-col">
             <label>邮箱 <input id="agentEmailInput" type="email" required /></label>
-            <label>密码 <input id="agentPasswordInput" type="password" minlength="8" required /></label>
+            <label>
+              密码
+              <input
+                id="agentPasswordInput"
+                type="password"
+                minlength="12"
+                title="至少12位，包含大小写字母、数字和特殊字符，且不能包含空格"
+                required
+              />
+            </label>
             <label>显示名 <input id="agentDisplayNameInput" type="text" required /></label>
             <button type="submit">创建坐席</button>
           </form>
