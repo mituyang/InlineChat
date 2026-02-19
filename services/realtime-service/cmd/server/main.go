@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -74,7 +77,15 @@ func main() {
 			appLogger.Warn("close chat grpc client failed", zap.Error(err))
 		}
 	}()
-	wsHandler := ws.NewHandler(hub, chatClient, cfg.AllowedOrigins, callTimeout, appLogger)
+	wsHandler := ws.NewHandler(
+		hub,
+		chatClient,
+		cfg.AllowedOrigins,
+		callTimeout,
+		cfg.JWTSecret,
+		cfg.JWTIssuer,
+		appLogger,
+	)
 
 	registerCtx, cancelRegister := context.WithTimeout(context.Background(), etcdDialTimeout)
 	registrar, err := shareddiscovery.Register(registerCtx, shareddiscovery.RegisterRequest{
@@ -110,7 +121,50 @@ func main() {
 	defer stopConsume()
 	go func() {
 		err := publisher.Consume(consumeCtx, func(conversationID string, payload []byte) {
-			hub.Broadcast(conversationID, payload)
+			eventType, ok := parseMessageEventType(payload)
+			if !ok {
+				return
+			}
+			if eventType == "message.status" {
+				_ = hub.Broadcast(conversationID, payload, "")
+				return
+			}
+			if eventType != "message.new" {
+				return
+			}
+
+			eventConversationID, messageID, senderType, ok := parseMessageNewEvent(payload)
+			if !ok {
+				return
+			}
+
+			delivered := hub.Broadcast(conversationID, payload, senderType)
+			if !delivered || senderType == "" || messageID == 0 {
+				return
+			}
+
+			targetConversationID := eventConversationID
+			if targetConversationID == 0 {
+				id, err := strconv.ParseUint(conversationID, 10, 64)
+				if err != nil {
+					appLogger.Warn("skip mark delivered due to invalid conversation id",
+						zap.String("conversation_id", conversationID),
+						zap.Error(err),
+					)
+					return
+				}
+				targetConversationID = id
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+			defer cancel()
+			if _, err := chatClient.MarkMessageDelivered(ctx, targetConversationID, messageID); err != nil {
+				appLogger.Warn("mark message delivered failed",
+					zap.Error(err),
+					zap.Uint64("conversation_id", targetConversationID),
+					zap.Uint64("message_id", messageID),
+				)
+			}
 		})
 		if err != nil && consumeCtx.Err() == nil {
 			appLogger.Error("redis consume loop exited", zap.Error(err))
@@ -143,4 +197,48 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
+}
+
+type messageNewEvent struct {
+	Type    string `json:"type"`
+	Payload struct {
+		ConversationID uint64 `json:"conversation_id"`
+		Message        struct {
+			ID         uint64 `json:"id"`
+			SenderType string `json:"sender_type"`
+		} `json:"message"`
+	} `json:"payload"`
+}
+
+type messageEventTypeEnvelope struct {
+	Type string `json:"type"`
+}
+
+func parseMessageEventType(payload []byte) (string, bool) {
+	var env messageEventTypeEnvelope
+	if err := json.Unmarshal(payload, &env); err != nil {
+		return "", false
+	}
+	eventType := strings.ToLower(strings.TrimSpace(env.Type))
+	if eventType == "" {
+		return "", false
+	}
+	return eventType, true
+}
+
+func parseMessageNewEvent(payload []byte) (conversationID uint64, messageID uint64, senderType string, ok bool) {
+	var event messageNewEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return 0, 0, "", false
+	}
+	if event.Type != "message.new" {
+		return 0, 0, "", false
+	}
+
+	senderType = strings.ToLower(strings.TrimSpace(event.Payload.Message.SenderType))
+	if senderType != "visitor" && senderType != "agent" {
+		senderType = ""
+	}
+
+	return event.Payload.ConversationID, event.Payload.Message.ID, senderType, true
 }

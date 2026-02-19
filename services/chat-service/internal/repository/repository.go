@@ -21,7 +21,11 @@ type ConversationRepository interface {
 
 type MessageRepository interface {
 	Create(ctx context.Context, message *model.Message) error
+	GetByID(ctx context.Context, conversationID uint64, messageID uint64) (*model.Message, error)
+	GetByClientMsgID(ctx context.Context, conversationID uint64, clientMsgID string) (*model.Message, error)
 	ListByConversation(ctx context.Context, conversationID uint64, limit int, beforeID uint64) ([]model.Message, error)
+	MarkDelivered(ctx context.Context, conversationID uint64, messageID uint64) (bool, error)
+	MarkReadByConversationAndSender(ctx context.Context, conversationID uint64, senderType string, lastReadMessageID uint64) (int64, error)
 }
 
 type GormConversationRepository struct {
@@ -140,6 +144,32 @@ func (r *GormMessageRepository) Create(ctx context.Context, message *model.Messa
 	return r.db.WithContext(ctx).Create(message).Error
 }
 
+func (r *GormMessageRepository) GetByID(ctx context.Context, conversationID uint64, messageID uint64) (*model.Message, error) {
+	var message model.Message
+	if err := r.db.WithContext(ctx).
+		Where("conversation_id = ? AND id = ?", conversationID, messageID).
+		First(&message).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &message, nil
+}
+
+func (r *GormMessageRepository) GetByClientMsgID(ctx context.Context, conversationID uint64, clientMsgID string) (*model.Message, error) {
+	var message model.Message
+	if err := r.db.WithContext(ctx).
+		Where("conversation_id = ? AND client_msg_id = ?", conversationID, clientMsgID).
+		First(&message).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &message, nil
+}
+
 func (r *GormMessageRepository) ListByConversation(ctx context.Context, conversationID uint64, limit int, beforeID uint64) ([]model.Message, error) {
 	query := r.db.WithContext(ctx).
 		Where("conversation_id = ?", conversationID).
@@ -155,4 +185,27 @@ func (r *GormMessageRepository) ListByConversation(ctx context.Context, conversa
 		return nil, err
 	}
 	return messages, nil
+}
+
+func (r *GormMessageRepository) MarkDelivered(ctx context.Context, conversationID uint64, messageID uint64) (bool, error) {
+	tx := r.db.WithContext(ctx).
+		Model(&model.Message{}).
+		Where("conversation_id = ? AND id = ? AND status = ?", conversationID, messageID, "sent").
+		Update("status", "delivered")
+	if tx.Error != nil {
+		return false, tx.Error
+	}
+	return tx.RowsAffected > 0, nil
+}
+
+func (r *GormMessageRepository) MarkReadByConversationAndSender(ctx context.Context, conversationID uint64, senderType string, lastReadMessageID uint64) (int64, error) {
+	tx := r.db.WithContext(ctx).
+		Model(&model.Message{}).
+		Where("conversation_id = ? AND sender_type = ? AND id <= ?", conversationID, senderType, lastReadMessageID).
+		Where("status IN ?", []string{"sent", "delivered"}).
+		Update("status", "read")
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
+	return tx.RowsAffected, nil
 }

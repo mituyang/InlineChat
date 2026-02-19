@@ -17,6 +17,7 @@ const AGENT_HOME_URL = "/app/agent/";
 const ADMIN_HOME_URL = "/app/admin/";
 const ALLOWED_ROLES = new Set(["agent"]);
 const THEME_STORAGE_KEY = "inlinechat.ui.theme";
+const ACK_TIMEOUT_MS = 5000;
 
 const state = {
   token: "",
@@ -39,6 +40,7 @@ const state = {
   readCursor: {},
   unreadSeq: 0,
   quickReplies: [...DEFAULT_QUICK_REPLIES],
+  pendingMap: {},
 };
 
 const els = {
@@ -680,6 +682,7 @@ function renderQueueTabsMeta() {
 
 async function selectConversation(conversation) {
   state.activeConversationId = String(conversation.id);
+  resetPendingMap();
   state.messages = [];
   clearWsReconnectTimer();
   state.wsReconnectAttempt = 0;
@@ -728,24 +731,372 @@ async function refreshMessages() {
 }
 
 function mergeMessages(items) {
-  const dict = new Map();
-  for (const msg of state.messages) {
-    if (msg && msg.id) {
-      dict.set(String(msg.id), msg);
+  const byKey = new Map();
+  const clientMsgKey = new Map();
+
+  for (const current of state.messages) {
+    const normalized = normalizeMessage(current);
+    if (!normalized) {
+      continue;
     }
-  }
-  for (const msg of items) {
-    if (msg && msg.id) {
-      dict.set(String(msg.id), msg);
+    const key = getMessageKey(normalized);
+    byKey.set(key, normalized);
+    if (normalized.client_msg_id) {
+      clientMsgKey.set(normalized.client_msg_id, key);
     }
   }
 
-  state.messages = Array.from(dict.values()).sort((a, b) => Number(a.id) - Number(b.id));
+  for (const incomingRaw of items) {
+    const incoming = normalizeMessage(incomingRaw);
+    if (!incoming) {
+      continue;
+    }
+
+    const clientMsgID = String(incoming.client_msg_id || "");
+    const incomingKey = getMessageKey(incoming);
+    let hitKey = "";
+    if (clientMsgID && clientMsgKey.has(clientMsgID)) {
+      hitKey = clientMsgKey.get(clientMsgID);
+    } else if (incomingKey && byKey.has(incomingKey)) {
+      hitKey = incomingKey;
+    }
+
+    if (!hitKey) {
+      byKey.set(incomingKey, incoming);
+      if (clientMsgID) {
+        clientMsgKey.set(clientMsgID, incomingKey);
+      }
+    } else {
+      const merged = mergeMessageRecord(byKey.get(hitKey), incoming);
+      const mergedKey = getMessageKey(merged);
+      if (mergedKey !== hitKey) {
+        byKey.delete(hitKey);
+      }
+      byKey.set(mergedKey, merged);
+      if (merged.client_msg_id) {
+        clientMsgKey.set(merged.client_msg_id, mergedKey);
+      }
+    }
+
+    if (clientMsgID && Number(incoming.id || 0) > 0) {
+      clearPending(clientMsgID);
+    }
+  }
+
+  state.messages = Array.from(byKey.values()).sort(compareMessageOrder);
   renderMessages(state.messages);
 
   if (state.activeConversationId) {
     markConversationRead(state.activeConversationId, state.messages);
   }
+}
+
+function createLocalOutgoingMessage(content, clientMsgID, senderType, senderID) {
+  const now = new Date().toISOString();
+  return {
+    id: 0,
+    conversation_id: Number(state.activeConversationId || 0),
+    sender_type: senderType,
+    sender_id: senderID || "",
+    content,
+    client_msg_id: clientMsgID,
+    status: "sending",
+    created_at: now,
+    updated_at: now,
+  };
+}
+
+function normalizeMessage(message) {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+  const id = Number(message.id || 0);
+  const clientMsgID = String(message.client_msg_id || "").trim();
+  if (id <= 0 && !clientMsgID) {
+    return null;
+  }
+  return {
+    ...message,
+    id: id > 0 ? id : 0,
+    client_msg_id: clientMsgID,
+    sender_type: String(message.sender_type || "").trim().toLowerCase(),
+    sender_id: String(message.sender_id || "").trim(),
+    status: normalizeMessageStatus(message.status),
+    created_at: message.created_at || new Date().toISOString(),
+    updated_at: message.updated_at || message.created_at || new Date().toISOString(),
+  };
+}
+
+function normalizeMessageStatus(status) {
+  const text = String(status || "")
+    .trim()
+    .toLowerCase();
+  if (text === "sending" || text === "sent" || text === "delivered" || text === "read" || text === "failed") {
+    return text;
+  }
+  return "";
+}
+
+function getMessageKey(message) {
+  const id = Number(message?.id || 0);
+  if (id > 0) {
+    return `id:${id}`;
+  }
+  return `client:${String(message?.client_msg_id || "")}`;
+}
+
+function mergeMessageRecord(current, incoming) {
+  const merged = {
+    ...current,
+    ...incoming,
+  };
+  if (!incoming.status && current?.status) {
+    merged.status = current.status;
+  }
+  return merged;
+}
+
+function compareMessageOrder(a, b) {
+  const idA = Number(a?.id || 0);
+  const idB = Number(b?.id || 0);
+  if (idA > 0 && idB > 0 && idA !== idB) {
+    return idA - idB;
+  }
+  if (idA > 0 && idB <= 0) {
+    return -1;
+  }
+  if (idA <= 0 && idB > 0) {
+    return 1;
+  }
+  const timeA = Date.parse(a?.created_at || "");
+  const timeB = Date.parse(b?.created_at || "");
+  if (!Number.isNaN(timeA) && !Number.isNaN(timeB) && timeA !== timeB) {
+    return timeA - timeB;
+  }
+  return 0;
+}
+
+function sendMessageViaWS(payload) {
+  if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+    throw new Error("实时通道未连接，请重连后重发");
+  }
+  beginPending(payload.client_msg_id);
+  try {
+    state.ws.send(
+      JSON.stringify({
+        type: "message.send",
+        payload,
+      })
+    );
+  } catch (error) {
+    clearPending(payload.client_msg_id);
+    throw error instanceof Error ? error : new Error("消息发送失败");
+  }
+}
+
+function beginPending(clientMsgID) {
+  clearPending(clientMsgID);
+  const timer = setTimeout(() => {
+    clearPending(clientMsgID);
+    markMessageFailedByClientMsgID(clientMsgID);
+    setStatus("消息发送超时，请重发", true);
+  }, ACK_TIMEOUT_MS);
+  state.pendingMap[clientMsgID] = {
+    timer,
+  };
+}
+
+function clearPending(clientMsgID) {
+  const pending = state.pendingMap[clientMsgID];
+  if (pending && pending.timer) {
+    clearTimeout(pending.timer);
+  }
+  delete state.pendingMap[clientMsgID];
+}
+
+function resetPendingMap() {
+  for (const clientMsgID of Object.keys(state.pendingMap)) {
+    clearPending(clientMsgID);
+  }
+}
+
+function updateMessageByClientMsgID(clientMsgID, patch) {
+  const key = String(clientMsgID || "").trim();
+  if (!key) {
+    return false;
+  }
+  let changed = false;
+  state.messages = state.messages.map((item) => {
+    if (String(item.client_msg_id || "") !== key) {
+      return item;
+    }
+    const next = { ...item };
+    if (Number(patch.id || 0) > 0) {
+      next.id = Number(patch.id);
+    }
+    if (patch.status) {
+      next.status = normalizeMessageStatus(patch.status) || next.status;
+    }
+    if (patch.updated_at) {
+      next.updated_at = patch.updated_at;
+    }
+    if (patch.sender_id !== undefined) {
+      next.sender_id = String(patch.sender_id || "");
+    }
+    if (next.id !== item.id || next.status !== item.status || next.updated_at !== item.updated_at || next.sender_id !== item.sender_id) {
+      changed = true;
+    }
+    return next;
+  });
+  if (changed) {
+    state.messages.sort(compareMessageOrder);
+    renderMessages(state.messages);
+  }
+  return changed;
+}
+
+function updateMessageByID(messageID, patch) {
+  const id = Number(messageID || 0);
+  if (id <= 0) {
+    return false;
+  }
+  let changed = false;
+  state.messages = state.messages.map((item) => {
+    if (Number(item.id || 0) !== id) {
+      return item;
+    }
+    const next = { ...item };
+    if (patch.status) {
+      next.status = normalizeMessageStatus(patch.status) || next.status;
+    }
+    if (patch.updated_at) {
+      next.updated_at = patch.updated_at;
+    }
+    if (next.status !== item.status || next.updated_at !== item.updated_at) {
+      changed = true;
+    }
+    return next;
+  });
+  if (changed) {
+    renderMessages(state.messages);
+  }
+  return changed;
+}
+
+function markMessageFailedByClientMsgID(clientMsgID) {
+  return updateMessageByClientMsgID(clientMsgID, {
+    status: "failed",
+    updated_at: new Date().toISOString(),
+  });
+}
+
+function handleMessageAck(payload) {
+  const clientMsgID = String(payload.client_msg_id || "").trim();
+  if (!clientMsgID) {
+    return;
+  }
+  clearPending(clientMsgID);
+  const status = normalizeMessageStatus(payload.status) || "sent";
+  updateMessageByClientMsgID(clientMsgID, {
+    id: Number(payload.message_id || 0),
+    status,
+    updated_at: new Date().toISOString(),
+  });
+}
+
+function handleMessageNack(payload) {
+  const clientMsgID = String(payload.client_msg_id || "").trim();
+  if (!clientMsgID) {
+    return;
+  }
+  clearPending(clientMsgID);
+  markMessageFailedByClientMsgID(clientMsgID);
+  setStatus(payload.error || "发送失败", true);
+}
+
+function handleMessageStatusEvent(payload) {
+  const conversationID = Number(payload.conversation_id || 0);
+  if (conversationID > 0 && String(conversationID) !== String(state.activeConversationId || "")) {
+    return;
+  }
+
+  const status = normalizeMessageStatus(payload.status);
+  if (!status) {
+    return;
+  }
+
+  const messageID = Number(payload.message_id || 0);
+  if (messageID > 0) {
+    updateMessageByID(messageID, {
+      status,
+      updated_at: new Date().toISOString(),
+    });
+    return;
+  }
+
+  const upToMessageID = Number(payload.up_to_message_id || 0);
+  const senderType = String(payload.sender_type || "").trim().toLowerCase();
+  if (status !== "read" || upToMessageID <= 0 || !senderType) {
+    return;
+  }
+
+  let changed = false;
+  state.messages = state.messages.map((item) => {
+    if (String(item.sender_type || "").toLowerCase() !== senderType) {
+      return item;
+    }
+    if (Number(item.id || 0) <= 0 || Number(item.id || 0) > upToMessageID) {
+      return item;
+    }
+    if (item.status === "read") {
+      return item;
+    }
+    changed = true;
+    return {
+      ...item,
+      status: "read",
+      updated_at: new Date().toISOString(),
+    };
+  });
+  if (changed) {
+    renderMessages(state.messages);
+  }
+}
+
+async function resendMessage(clientMsgID) {
+  const key = String(clientMsgID || "").trim();
+  if (!key) {
+    return;
+  }
+
+  const message = state.messages.find((item) => String(item.client_msg_id || "") === key);
+  if (!message || !isMineMessage(message)) {
+    return;
+  }
+
+  try {
+    updateMessageByClientMsgID(key, {
+      status: "sending",
+      updated_at: new Date().toISOString(),
+    });
+    sendMessageViaWS({
+      sender_type: "agent",
+      content: message.content || "",
+      client_msg_id: key,
+    });
+    setStatus("消息重发中...");
+  } catch (error) {
+    markMessageFailedByClientMsgID(key);
+    setStatus(error.message || "重发失败", true);
+  }
+}
+
+function isMineMessage(message) {
+  return (
+    message?.sender_type === "agent" &&
+    state.me &&
+    String(message.sender_id || "") === String(state.me.agent_id)
+  );
 }
 
 function renderMessages(items) {
@@ -756,11 +1107,7 @@ function renderMessages(items) {
 
   els.agentMessages.innerHTML = "";
   for (const item of items) {
-    const mine =
-      item.sender_type === "agent" &&
-      item.sender_id &&
-      state.me &&
-      String(item.sender_id) === String(state.me.agent_id);
+    const mine = isMineMessage(item);
 
     const block = document.createElement("article");
     block.className = `message ${mine ? "mine" : "other"}`;
@@ -776,7 +1123,17 @@ function renderMessages(items) {
         : item.sender_type === "agent"
           ? `客服 ${item.sender_id || ""}`
           : "系统";
-    meta.textContent = `${sender} · ${formatTime(item.created_at)}`;
+    const statusText = formatMessageStatus(item.status);
+    meta.textContent = statusText
+      ? `${sender} · ${formatTime(item.created_at)} · ${statusText}`
+      : `${sender} · ${formatTime(item.created_at)}`;
+    if (mine && item.status === "failed" && item.client_msg_id) {
+      meta.style.cursor = "pointer";
+      meta.title = "点击重发";
+      meta.addEventListener("click", () => {
+        void resendMessage(item.client_msg_id);
+      });
+    }
 
     block.appendChild(content);
     block.appendChild(meta);
@@ -804,6 +1161,7 @@ function markConversationRead(conversationID, messages) {
   if (maxMessageID > prev) {
     state.readCursor[conversationID] = maxMessageID;
     saveReadCursor();
+    void reportConversationRead(conversationID, maxMessageID);
   }
 
   if (Number(state.unreadMap[conversationID] || 0) !== 0) {
@@ -812,6 +1170,27 @@ function markConversationRead(conversationID, messages) {
   }
   renderStats();
   renderQueueTabsMeta();
+}
+
+async function reportConversationRead(conversationID, lastReadMessageID) {
+  if (!conversationID || !state.token || !Number.isFinite(lastReadMessageID) || lastReadMessageID <= 0) {
+    return;
+  }
+
+  try {
+    const resp = await apiRequest(`/api/chat/v1/conversations/${conversationID}/read`, {
+      method: "POST",
+      auth: true,
+      body: {
+        last_read_message_id: lastReadMessageID,
+      },
+    });
+    if (Number(resp.updated_count || 0) > 0 && conversationID === state.activeConversationId) {
+      await refreshMessages();
+    }
+  } catch {
+    // 仅做状态上报，不打断客服操作。
+  }
 }
 
 function renderStats() {
@@ -964,25 +1343,20 @@ async function sendAgentMessage() {
   if (!content) {
     return;
   }
+  const clientMsgID = `a_${safeUUID()}`;
 
   els.agentSendBtn.disabled = true;
   try {
-    await apiRequest(`/api/chat/v1/conversations/${state.activeConversationId}/messages`, {
-      method: "POST",
-      auth: true,
-      body: {
-        sender_type: "agent",
-        sender_id: String(state.me.agent_id),
-        content,
-        client_msg_id: `a_${safeUUID()}`,
-      },
+    mergeMessages([createLocalOutgoingMessage(content, clientMsgID, "agent", String(state.me.agent_id))]);
+    sendMessageViaWS({
+      sender_type: "agent",
+      content,
+      client_msg_id: clientMsgID,
     });
     els.agentContentInput.value = "";
-    if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
-      await refreshMessages();
-    }
-    setStatus("消息已发送");
+    setStatus("消息发送中...");
   } catch (error) {
+    markMessageFailedByClientMsgID(clientMsgID);
     setStatus(error.message || "发送失败", true);
   } finally {
     els.agentSendBtn.disabled = false;
@@ -1007,7 +1381,7 @@ function connectWebSocket() {
   state.wsConnected = false;
   setWsIndicator("warn", `实时通道：连接中 #${conversationID}`);
 
-  const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/${conversationID}`;
+  const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/${conversationID}?access_token=${encodeURIComponent(state.token)}`;
   const ws = new WebSocket(wsUrl);
 
   ws.addEventListener("open", () => {
@@ -1023,15 +1397,30 @@ function connectWebSocket() {
   ws.addEventListener("message", (event) => {
     try {
       const data = JSON.parse(event.data);
-      if (data.type === "message.new" && data.payload && data.payload.message) {
-        const cid = String(data.payload.conversation_id || data.payload.message.conversation_id || "");
-        if (!cid || cid !== state.activeConversationId) {
-          return;
-        }
-        mergeMessages([data.payload.message]);
-      }
-      if (data.type === "error") {
-        setStatus(data.error || "WebSocket 消息异常", true);
+      switch (data.type) {
+        case "message.new":
+          if (data.payload && data.payload.message) {
+            const cid = String(data.payload.conversation_id || data.payload.message.conversation_id || "");
+            if (!cid || cid !== state.activeConversationId) {
+              return;
+            }
+            mergeMessages([data.payload.message]);
+          }
+          break;
+        case "message.ack":
+          handleMessageAck(data.payload || {});
+          break;
+        case "message.nack":
+          handleMessageNack(data.payload || {});
+          break;
+        case "message.status":
+          handleMessageStatusEvent(data.payload || {});
+          break;
+        case "error":
+          setStatus(data.error || "WebSocket 消息异常", true);
+          break;
+        default:
+          break;
       }
     } catch {
       setStatus("收到无法解析的 WebSocket 消息", true);
@@ -1276,7 +1665,27 @@ function formatTime(value) {
   return date.toLocaleString("zh-CN", { hour12: false });
 }
 
+function formatMessageStatus(status) {
+  if (status === "sending") {
+    return "发送中";
+  }
+  if (status === "failed") {
+    return "发送失败";
+  }
+  if (status === "sent") {
+    return "已发送";
+  }
+  if (status === "delivered") {
+    return "已发送";
+  }
+  if (status === "read") {
+    return "已读";
+  }
+  return "";
+}
+
 window.addEventListener("beforeunload", () => {
+  resetPendingMap();
   closeWebSocket();
   stopPolling();
 });

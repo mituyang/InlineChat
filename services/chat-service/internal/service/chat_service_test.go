@@ -105,9 +105,32 @@ func (r *fakeMessageRepository) Create(_ context.Context, message *model.Message
 		message.ID = r.nextID
 		r.nextID++
 	}
+	if message.Status == "" {
+		message.Status = MessageStatusSent
+	}
 	copyMessage := *message
 	r.items[message.ConversationID] = append(r.items[message.ConversationID], copyMessage)
 	return nil
+}
+
+func (r *fakeMessageRepository) GetByID(_ context.Context, conversationID uint64, messageID uint64) (*model.Message, error) {
+	for _, msg := range r.items[conversationID] {
+		if msg.ID == messageID {
+			cp := msg
+			return &cp, nil
+		}
+	}
+	return nil, repository.ErrNotFound
+}
+
+func (r *fakeMessageRepository) GetByClientMsgID(_ context.Context, conversationID uint64, clientMsgID string) (*model.Message, error) {
+	for _, msg := range r.items[conversationID] {
+		if msg.ClientMsgID == clientMsgID {
+			cp := msg
+			return &cp, nil
+		}
+	}
+	return nil, repository.ErrNotFound
 }
 
 func (r *fakeMessageRepository) ListByConversation(_ context.Context, conversationID uint64, limit int, beforeID uint64) ([]model.Message, error) {
@@ -125,16 +148,74 @@ func (r *fakeMessageRepository) ListByConversation(_ context.Context, conversati
 	return out, nil
 }
 
+func (r *fakeMessageRepository) MarkDelivered(_ context.Context, conversationID uint64, messageID uint64) (bool, error) {
+	items := r.items[conversationID]
+	for i := range items {
+		if items[i].ID != messageID {
+			continue
+		}
+		if items[i].Status != MessageStatusSent {
+			return false, nil
+		}
+		items[i].Status = MessageStatusDelivered
+		r.items[conversationID] = items
+		return true, nil
+	}
+	return false, nil
+}
+
+func (r *fakeMessageRepository) MarkReadByConversationAndSender(_ context.Context, conversationID uint64, senderType string, lastReadMessageID uint64) (int64, error) {
+	items := r.items[conversationID]
+	var updated int64
+	for i := range items {
+		if items[i].ID > lastReadMessageID {
+			continue
+		}
+		if items[i].SenderType != senderType {
+			continue
+		}
+		if items[i].Status == MessageStatusRead {
+			continue
+		}
+		items[i].Status = MessageStatusRead
+		updated++
+	}
+	r.items[conversationID] = items
+	return updated, nil
+}
+
 type fakePublisher struct {
-	calls       int
-	lastMessage *model.Message
-	err         error
+	calls                int
+	lastMessage          *model.Message
+	statusCalls          int
+	lastStatusMessageID  uint64
+	lastStatus           string
+	rangeStatusCalls     int
+	lastRangeSenderType  string
+	lastRangeUpToMessage uint64
+	lastRangeStatus      string
+	err                  error
 }
 
 func (p *fakePublisher) PublishMessageCreated(_ context.Context, message *model.Message) error {
 	p.calls++
 	copyMessage := *message
 	p.lastMessage = &copyMessage
+	return p.err
+}
+
+func (p *fakePublisher) PublishMessageStatus(_ context.Context, _ uint64, messageID uint64, status string) error {
+	p.statusCalls++
+	p.lastStatusMessageID = messageID
+	p.lastStatus = status
+	return p.err
+}
+
+func (p *fakePublisher) PublishMessageStatusRange(_ context.Context, _ uint64, senderType string, upToMessageID uint64, status string) error {
+	p.rangeStatusCalls++
+	p.lastRangeSenderType = senderType
+	p.lastRangeUpToMessage = upToMessageID
+	p.lastRangeStatus = status
 	return p.err
 }
 
@@ -336,6 +417,191 @@ func TestCreateMessagePublishEvent(t *testing.T) {
 	}
 	if len(messageRepo.items[1]) != 1 {
 		t.Fatalf("message not persisted")
+	}
+	if out.Status != MessageStatusSent {
+		t.Fatalf("expected status sent, got %s", out.Status)
+	}
+	if publisher.lastMessage == nil || publisher.lastMessage.Status != MessageStatusSent {
+		t.Fatalf("expected published status sent, got %+v", publisher.lastMessage)
+	}
+}
+
+func TestCreateMessageIdempotentByClientMsgID(t *testing.T) {
+	svc, _, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open"},
+	})
+
+	first, err := svc.CreateMessage(context.Background(), CreateMessageInput{
+		ConversationID: 1,
+		SenderType:     "visitor",
+		Content:        "hello",
+		ClientMsgID:    "dup_1",
+		VisitorToken:   "vt_1",
+	})
+	if err != nil {
+		t.Fatalf("first CreateMessage failed: %v", err)
+	}
+
+	second, err := svc.CreateMessage(context.Background(), CreateMessageInput{
+		ConversationID: 1,
+		SenderType:     "visitor",
+		Content:        "hello again",
+		ClientMsgID:    "dup_1",
+		VisitorToken:   "vt_1",
+	})
+	if err != nil {
+		t.Fatalf("second CreateMessage failed: %v", err)
+	}
+
+	if first.ID != second.ID {
+		t.Fatalf("expected idempotent same message id, got %d and %d", first.ID, second.ID)
+	}
+	if len(messageRepo.items[1]) != 1 {
+		t.Fatalf("expected only one message persisted, got %d", len(messageRepo.items[1]))
+	}
+	if publisher.calls != 1 {
+		t.Fatalf("expected publish only once, got %d", publisher.calls)
+	}
+}
+
+func TestMarkMessageDeliveredOnlySentToDelivered(t *testing.T) {
+	svc, _, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open"},
+	})
+	if err := messageRepo.Create(context.Background(), &model.Message{
+		ConversationID: 1,
+		SenderType:     "visitor",
+		Content:        "hello",
+		ClientMsgID:    "m_1",
+		Status:         MessageStatusSent,
+	}); err != nil {
+		t.Fatalf("seed message failed: %v", err)
+	}
+
+	out, err := svc.MarkMessageDelivered(context.Background(), 1, 1)
+	if err != nil {
+		t.Fatalf("MarkMessageDelivered failed: %v", err)
+	}
+	if !out.Updated || out.Status != MessageStatusDelivered {
+		t.Fatalf("unexpected first delivered result: %+v", out)
+	}
+	if publisher.statusCalls != 1 || publisher.lastStatusMessageID != 1 || publisher.lastStatus != MessageStatusDelivered {
+		t.Fatalf("expected publish delivered status once, got %+v", publisher)
+	}
+
+	out, err = svc.MarkMessageDelivered(context.Background(), 1, 1)
+	if err != nil {
+		t.Fatalf("MarkMessageDelivered second call failed: %v", err)
+	}
+	if out.Updated || out.Status != MessageStatusDelivered {
+		t.Fatalf("expected idempotent delivered status, got %+v", out)
+	}
+	if publisher.statusCalls != 1 {
+		t.Fatalf("idempotent delivered should not republish, got calls=%d", publisher.statusCalls)
+	}
+}
+
+func TestMarkMessagesReadSuccess(t *testing.T) {
+	svc, _, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open"},
+	})
+	_ = messageRepo.Create(context.Background(), &model.Message{
+		ConversationID: 1,
+		SenderType:     "visitor",
+		Content:        "v1",
+		ClientMsgID:    "m_1",
+		Status:         MessageStatusSent,
+	})
+	_ = messageRepo.Create(context.Background(), &model.Message{
+		ConversationID: 1,
+		SenderType:     "visitor",
+		Content:        "v2",
+		ClientMsgID:    "m_2",
+		Status:         MessageStatusDelivered,
+	})
+	_ = messageRepo.Create(context.Background(), &model.Message{
+		ConversationID: 1,
+		SenderType:     "agent",
+		Content:        "a1",
+		ClientMsgID:    "m_3",
+		Status:         MessageStatusSent,
+	})
+
+	updatedCount, err := svc.MarkMessagesRead(context.Background(), MarkMessagesReadInput{
+		ConversationID:    1,
+		LastReadMessageID: 3,
+		ActorType:         "agent",
+		ActorAgentID:      7,
+	})
+	if err != nil {
+		t.Fatalf("MarkMessagesRead failed: %v", err)
+	}
+	if updatedCount != 2 {
+		t.Fatalf("expected updated_count=2, got %d", updatedCount)
+	}
+
+	msg1, _ := messageRepo.GetByID(context.Background(), 1, 1)
+	msg2, _ := messageRepo.GetByID(context.Background(), 1, 2)
+	msg3, _ := messageRepo.GetByID(context.Background(), 1, 3)
+	if msg1.Status != MessageStatusRead || msg2.Status != MessageStatusRead {
+		t.Fatalf("visitor messages should be read, got %#v %#v", msg1.Status, msg2.Status)
+	}
+	if msg3.Status != MessageStatusSent {
+		t.Fatalf("agent message should remain sent, got %s", msg3.Status)
+	}
+	if publisher.rangeStatusCalls != 1 {
+		t.Fatalf("expected one read-range publish, got %d", publisher.rangeStatusCalls)
+	}
+	if publisher.lastRangeSenderType != "visitor" || publisher.lastRangeUpToMessage != 3 || publisher.lastRangeStatus != MessageStatusRead {
+		t.Fatalf("unexpected read-range payload: %+v", publisher)
+	}
+}
+
+func TestMarkMessagesReadVisitorTokenMismatch(t *testing.T) {
+	svc, _, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_expected", Status: "open"},
+	})
+
+	_, err := svc.MarkMessagesRead(context.Background(), MarkMessagesReadInput{
+		ConversationID:    1,
+		LastReadMessageID: 10,
+		ActorType:         "visitor",
+		VisitorToken:      "vt_other",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if err.Error() != "visitor token does not match conversation" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMarkMessagesReadIdempotentWhenNoRows(t *testing.T) {
+	svc, _, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open"},
+	})
+	_ = messageRepo.Create(context.Background(), &model.Message{
+		ConversationID: 1,
+		SenderType:     "visitor",
+		Content:        "v1",
+		ClientMsgID:    "m_1",
+		Status:         MessageStatusRead,
+	})
+
+	updatedCount, err := svc.MarkMessagesRead(context.Background(), MarkMessagesReadInput{
+		ConversationID:    1,
+		LastReadMessageID: 1,
+		ActorType:         "agent",
+		ActorAgentID:      7,
+	})
+	if err != nil {
+		t.Fatalf("MarkMessagesRead failed: %v", err)
+	}
+	if updatedCount != 0 {
+		t.Fatalf("expected updated_count=0, got %d", updatedCount)
+	}
+	if publisher.rangeStatusCalls != 0 {
+		t.Fatalf("updated_count=0 should not publish read-range event, got %d", publisher.rangeStatusCalls)
 	}
 }
 

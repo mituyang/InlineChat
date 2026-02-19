@@ -18,7 +18,14 @@ var (
 	ErrConversationAlreadyClaimed = errors.New("conversation already claimed by another agent")
 	ErrConversationUnassigned     = errors.New("conversation is unassigned")
 	ErrConversationClosed         = errors.New("conversation is already closed")
+	ErrMessageNotFound            = errors.New("message not found")
 	ErrForbidden                  = errors.New("forbidden")
+)
+
+const (
+	MessageStatusSent      = "sent"
+	MessageStatusDelivered = "delivered"
+	MessageStatusRead      = "read"
 )
 
 type ChatService struct {
@@ -30,11 +37,21 @@ type ChatService struct {
 
 type MessageEventPublisher interface {
 	PublishMessageCreated(ctx context.Context, message *model.Message) error
+	PublishMessageStatus(ctx context.Context, conversationID uint64, messageID uint64, status string) error
+	PublishMessageStatusRange(ctx context.Context, conversationID uint64, senderType string, upToMessageID uint64, status string) error
 }
 
 type noopMessageEventPublisher struct{}
 
 func (noopMessageEventPublisher) PublishMessageCreated(context.Context, *model.Message) error {
+	return nil
+}
+
+func (noopMessageEventPublisher) PublishMessageStatus(context.Context, uint64, uint64, string) error {
+	return nil
+}
+
+func (noopMessageEventPublisher) PublishMessageStatusRange(context.Context, uint64, string, uint64, string) error {
 	return nil
 }
 
@@ -77,6 +94,19 @@ type CloseConversationInput struct {
 	ConversationID uint64
 	ActorAgentID   uint64
 	ActorRole      string
+}
+
+type MarkMessagesReadInput struct {
+	ConversationID    uint64
+	LastReadMessageID uint64
+	ActorType         string
+	ActorAgentID      uint64
+	VisitorToken      string
+}
+
+type MarkMessageDeliveredResult struct {
+	Updated bool
+	Status  string
 }
 
 func New(conversationRepo repository.ConversationRepository, messageRepo repository.MessageRepository, logger *zap.Logger, publisher MessageEventPublisher) *ChatService {
@@ -157,15 +187,33 @@ func (s *ChatService) CreateMessage(ctx context.Context, input CreateMessageInpu
 		return nil, fmt.Errorf("visitor token does not match conversation")
 	}
 
+	existing, err := s.messageRepo.GetByClientMsgID(ctx, input.ConversationID, input.ClientMsgID)
+	if err == nil {
+		return existing, nil
+	}
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return nil, err
+	}
+
 	message := &model.Message{
 		ConversationID: input.ConversationID,
 		SenderType:     input.SenderType,
 		SenderID:       input.SenderID,
 		Content:        input.Content,
 		ClientMsgID:    input.ClientMsgID,
+		Status:         MessageStatusSent,
 	}
 
 	if err := s.messageRepo.Create(ctx, message); err != nil {
+		if isDuplicateMessageErr(err) {
+			existing, findErr := s.messageRepo.GetByClientMsgID(ctx, input.ConversationID, input.ClientMsgID)
+			if findErr == nil {
+				return existing, nil
+			}
+			if !errors.Is(findErr, repository.ErrNotFound) {
+				return nil, findErr
+			}
+		}
 		return nil, err
 	}
 
@@ -182,6 +230,117 @@ func (s *ChatService) CreateMessage(ctx context.Context, input CreateMessageInpu
 	}
 
 	return message, nil
+}
+
+func (s *ChatService) MarkMessageDelivered(ctx context.Context, conversationID uint64, messageID uint64) (MarkMessageDeliveredResult, error) {
+	if conversationID == 0 {
+		return MarkMessageDeliveredResult{}, fmt.Errorf("conversation_id is required")
+	}
+	if messageID == 0 {
+		return MarkMessageDeliveredResult{}, fmt.Errorf("message_id is required")
+	}
+
+	message, err := s.messageRepo.GetByID(ctx, conversationID, messageID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return MarkMessageDeliveredResult{}, ErrMessageNotFound
+		}
+		return MarkMessageDeliveredResult{}, err
+	}
+
+	switch message.Status {
+	case MessageStatusRead, MessageStatusDelivered:
+		return MarkMessageDeliveredResult{Updated: false, Status: message.Status}, nil
+	}
+
+	updated, err := s.messageRepo.MarkDelivered(ctx, conversationID, messageID)
+	if err != nil {
+		return MarkMessageDeliveredResult{}, err
+	}
+	if updated {
+		if err := s.publisher.PublishMessageStatus(ctx, conversationID, messageID, MessageStatusDelivered); err != nil {
+			s.logger.Warn("publish message.status delivered event failed",
+				zap.Error(err),
+				zap.Uint64("conversation_id", conversationID),
+				zap.Uint64("message_id", messageID),
+			)
+		}
+		return MarkMessageDeliveredResult{Updated: true, Status: MessageStatusDelivered}, nil
+	}
+
+	latest, err := s.messageRepo.GetByID(ctx, conversationID, messageID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return MarkMessageDeliveredResult{}, ErrMessageNotFound
+		}
+		return MarkMessageDeliveredResult{}, err
+	}
+	return MarkMessageDeliveredResult{Updated: false, Status: latest.Status}, nil
+}
+
+func (s *ChatService) MarkMessagesRead(ctx context.Context, input MarkMessagesReadInput) (uint64, error) {
+	if input.ConversationID == 0 {
+		return 0, fmt.Errorf("conversation_id is required")
+	}
+	if input.LastReadMessageID == 0 {
+		return 0, fmt.Errorf("last_read_message_id is required")
+	}
+
+	actorType, err := normalizeActorType(input.ActorType)
+	if err != nil {
+		return 0, err
+	}
+
+	conversation, err := s.conversationRepo.GetByID(ctx, input.ConversationID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return 0, ErrConversationNotFound
+		}
+		return 0, err
+	}
+
+	targetSenderType := "visitor"
+	if actorType == "visitor" {
+		if strings.TrimSpace(input.VisitorToken) == "" {
+			return 0, fmt.Errorf("visitor_token is required")
+		}
+		if conversation.VisitorToken != input.VisitorToken {
+			return 0, fmt.Errorf("visitor token does not match conversation")
+		}
+		targetSenderType = "agent"
+	} else {
+		if input.ActorAgentID == 0 {
+			return 0, fmt.Errorf("actor_agent_id is required")
+		}
+	}
+
+	rows, err := s.messageRepo.MarkReadByConversationAndSender(ctx, input.ConversationID, targetSenderType, input.LastReadMessageID)
+	if err != nil {
+		return 0, err
+	}
+	if rows < 0 {
+		rows = 0
+	}
+	if rows > 0 {
+		if err := s.publisher.PublishMessageStatusRange(ctx, input.ConversationID, targetSenderType, input.LastReadMessageID, MessageStatusRead); err != nil {
+			s.logger.Warn("publish message.status read-range event failed",
+				zap.Error(err),
+				zap.Uint64("conversation_id", input.ConversationID),
+				zap.String("sender_type", targetSenderType),
+				zap.Uint64("up_to_message_id", input.LastReadMessageID),
+				zap.Int64("updated_count", rows),
+			)
+		}
+	}
+	return uint64(rows), nil
+}
+
+func isDuplicateMessageErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "duplicate") || strings.Contains(msg, "unique") || strings.Contains(msg, "1062")
 }
 
 func (s *ChatService) ListMessages(ctx context.Context, conversationID uint64, limit int, beforeID uint64) ([]model.Message, error) {
@@ -316,4 +475,12 @@ func normalizeActorRole(role string) (string, error) {
 		return "", fmt.Errorf("invalid actor_role")
 	}
 	return role, nil
+}
+
+func normalizeActorType(actorType string) (string, error) {
+	actorType = strings.ToLower(strings.TrimSpace(actorType))
+	if actorType != "agent" && actorType != "visitor" {
+		return "", fmt.Errorf("invalid actor_type")
+	}
+	return actorType, nil
 }
