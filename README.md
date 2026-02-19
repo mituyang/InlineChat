@@ -54,7 +54,8 @@
   - 客服与超级管理员通过同一登录页鉴权，登录后按角色进入对应工作台。
   - 客服能力（会话列表、认领、转接、关闭、客服发言）仅 `agent` 可用；`super_admin` 不具备客服能力。
   - 客服工作台与管理后台均支持亮色/暗色主题切换，并使用同一主题偏好存储键进行跨页面保持。
-  - 客服端支持会话列表、会话认领/转接/关闭、消息收发、未读统计、快捷语、会话统计面板；活跃会话消息优先走 WebSocket，断连自动重连并降级轮询。
+  - 客服端支持会话列表、会话认领/转接/关闭、消息收发、未读统计、快捷语、会话统计面板；客服与访客都可通过 WebSocket 发消息，断连自动重连并降级轮询。
+  - 消息状态支持 `sent -> delivered -> read`：写入后为 `sent`，对端在线并成功入队后推进到 `delivered`，客户端显式上报已读后推进到 `read`。
   - 超级管理员账号只从 `.env` 读取并由 `auth-service` 启动时确保存在，管理台由超级管理员登录后创建客服账号。
 
 ## Widget 嵌入方式
@@ -83,6 +84,7 @@
 说明：
 - 脚本会在右下角渲染悬浮按钮，点击后打开聊天窗。
 - 聊天窗内部使用 `wss/ws` 连接 `/ws/:conversation_id` 实时通道，并带 HTTP 轮询兜底。
+  - 客服端连接 WS 需追加 `access_token`：`/ws/:conversation_id?access_token=...`。
 - 本地示例宿主页：`apps/widget-sdk/demo-host.html`
 - 业务网站示例请在 `apps/demo-site/config.js` 手动配置 `siteID`，然后访问 `http://localhost:8200/app/demo/` 验证嵌入效果。
 
@@ -123,6 +125,7 @@
 - `gateway-service` 通过 gRPC 调用 `chat-service`、`auth-service`、`admin-service`
 - `realtime-service` 通过 gRPC 调用 `chat-service`
 - `chat-service` 在消息写入成功后会发布 `message.new` 到 Redis 频道，`realtime-service` 订阅后广播给 WebSocket 客户端（访客与客服均可实时收到）
+- 广播时若检测到至少 1 个“对端角色”在线连接成功入队，`realtime-service` 会回写消息状态到 `delivered`
 - gRPC 协议定义：
   - `packages/shared-types/proto/inlinechat/chat.proto`
   - `packages/shared-types/proto/inlinechat/auth.proto`
@@ -140,6 +143,7 @@
   - `POST /api/chat/v1/conversations/:id/close`（需要 Bearer Token）
   - `POST /api/chat/v1/conversations/:id/messages`
   - `GET /api/chat/v1/conversations/:id/messages`
+  - `POST /api/chat/v1/conversations/:id/read`
 - Auth:
   - `POST /api/auth/v1/auth/login`
   - `GET /api/auth/v1/auth/me`
@@ -149,13 +153,20 @@
   - `POST /api/admin/v1/admin/agents`（需要 Bearer Token，且角色必须为 `super_admin`）
   - `GET /api/admin/v1/admin/agents`（需要 Bearer Token，且角色为 `admin/super_admin`）
 - Realtime:
-  - `GET /ws/:conversation_id`
+ - `GET /ws/:conversation_id`
 
 ## WebSocket 示例
 发送：
 ```json
-{"type":"message.send","payload":{"content":"你好","client_msg_id":"c1","visitor_token":"vt_xxx"}}
+{"type":"message.send","payload":{"sender_type":"visitor","content":"你好","client_msg_id":"c1","visitor_token":"vt_xxx"}}
 ```
+
+客服发送（需 `access_token`）：
+```json
+{"type":"message.send","payload":{"sender_type":"agent","content":"您好，请问有什么可以帮您？","client_msg_id":"a1"}}
+```
+
+`message.new` 中的 `message` 结构会包含 `status` 字段（`sent`/`delivered`/`read`）。
 
 ## 网关错误响应
 ```json

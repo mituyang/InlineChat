@@ -4,14 +4,14 @@ go 1.25
 
 require (
 	github.com/gin-gonic/gin v1.10.1
+	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/redis/go-redis/v9 v9.7.0
-	inlinechat/packages/discovery v0.0.0
-	inlinechat/packages/httpmiddleware v0.0.0
-	go.etcd.io/etcd/client/v3 v3.6.8
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.79.1
 	google.golang.org/protobuf v1.36.10
+	inlinechat/packages/discovery v0.0.0
+	inlinechat/packages/httpmiddleware v0.0.0
 )
 
 require (
@@ -43,6 +43,7 @@ require (
 	github.com/ugorji/go/codec v1.2.12 // indirect
 	go.etcd.io/etcd/api/v3 v3.6.8 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.6.8 // indirect
+	go.etcd.io/etcd/client/v3 v3.6.8 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.8.0 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
@@ -55,4 +56,5 @@ require (
 )
 
 replace inlinechat/packages/discovery => ../../packages/discovery
+
 replace inlinechat/packages/httpmiddleware => ../../packages/httpmiddleware

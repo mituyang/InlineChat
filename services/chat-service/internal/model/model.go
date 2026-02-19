@@ -21,6 +21,7 @@ type Message struct {
 	SenderID       string    `gorm:"size:64" json:"sender_id,omitempty"`
 	Content        string    `gorm:"type:text;not null" json:"content"`
 	ClientMsgID    string    `gorm:"size:64;not null;index:idx_conv_client_msg,unique" json:"client_msg_id"`
+	Status         string    `gorm:"size:16;not null;default:sent;index" json:"status"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }

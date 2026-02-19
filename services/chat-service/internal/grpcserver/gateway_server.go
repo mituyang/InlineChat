@@ -149,6 +149,33 @@ func (s *ChatGatewayServer) ListMessages(ctx context.Context, req *chatv1.ListMe
 	return resp, nil
 }
 
+func (s *ChatGatewayServer) MarkMessagesRead(ctx context.Context, req *chatv1.MarkMessagesReadRequest) (*chatv1.MarkMessagesReadResponse, error) {
+	if req.GetConversationId() == 0 {
+		return nil, status.Error(codes.InvalidArgument, "conversation_id is required")
+	}
+	if req.GetLastReadMessageId() == 0 {
+		return nil, status.Error(codes.InvalidArgument, "last_read_message_id is required")
+	}
+	if strings.TrimSpace(req.GetActorType()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "actor_type is required")
+	}
+
+	updatedCount, err := s.chatService.MarkMessagesRead(ctx, service.MarkMessagesReadInput{
+		ConversationID:    req.GetConversationId(),
+		LastReadMessageID: req.GetLastReadMessageId(),
+		ActorType:         req.GetActorType(),
+		ActorAgentID:      req.GetActorAgentId(),
+		VisitorToken:      req.GetVisitorToken(),
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+
+	return &chatv1.MarkMessagesReadResponse{
+		UpdatedCount: updatedCount,
+	}, nil
+}
+
 func (s *ChatGatewayServer) ClaimConversation(ctx context.Context, req *chatv1.ClaimConversationRequest) (*chatv1.Conversation, error) {
 	if req.GetConversationId() == 0 {
 		return nil, status.Error(codes.InvalidArgument, "conversation_id is required")
@@ -254,5 +281,6 @@ func toMessagePB(message *model.Message) *chatv1.Message {
 		ClientMsgId:    message.ClientMsgID,
 		CreatedAt:      message.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:      message.UpdatedAt.Format(time.RFC3339Nano),
+		Status:         message.Status,
 	}
 }

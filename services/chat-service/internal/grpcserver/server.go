@@ -57,11 +57,34 @@ func (s *ChatInternalServer) CreateMessage(ctx context.Context, req *chatv1.Crea
 		ClientMsgId:    message.ClientMsgID,
 		CreatedAt:      message.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:      message.UpdatedAt.Format(time.RFC3339Nano),
+		Status:         message.Status,
+	}, nil
+}
+
+func (s *ChatInternalServer) MarkMessageDelivered(ctx context.Context, req *chatv1.MarkMessageDeliveredRequest) (*chatv1.MarkMessageDeliveredResponse, error) {
+	if req.GetConversationId() == 0 {
+		return nil, status.Error(codes.InvalidArgument, "conversation_id is required")
+	}
+	if req.GetMessageId() == 0 {
+		return nil, status.Error(codes.InvalidArgument, "message_id is required")
+	}
+
+	result, err := s.chatService.MarkMessageDelivered(ctx, req.GetConversationId(), req.GetMessageId())
+	if err != nil {
+		return nil, mapError(err)
+	}
+
+	return &chatv1.MarkMessageDeliveredResponse{
+		Updated: result.Updated,
+		Status:  result.Status,
 	}, nil
 }
 
 func mapError(err error) error {
 	if errors.Is(err, service.ErrConversationNotFound) {
+		return status.Error(codes.NotFound, err.Error())
+	}
+	if errors.Is(err, service.ErrMessageNotFound) {
 		return status.Error(codes.NotFound, err.Error())
 	}
 	if errors.Is(err, service.ErrForbidden) {
@@ -76,7 +99,7 @@ func mapError(err error) error {
 
 	msg := strings.ToLower(err.Error())
 	switch {
-	case strings.Contains(msg, "invalid"):
+	case strings.Contains(msg, "invalid"), strings.Contains(msg, "required"):
 		return status.Error(codes.InvalidArgument, err.Error())
 	case strings.Contains(msg, "match conversation"):
 		return status.Error(codes.PermissionDenied, err.Error())

@@ -33,6 +33,13 @@ type Message struct {
 	Content        string `json:"content"`
 	ClientMsgID    string `json:"client_msg_id"`
 	CreatedAt      string `json:"created_at"`
+	UpdatedAt      string `json:"updated_at"`
+	Status         string `json:"status"`
+}
+
+type MarkMessageDeliveredResult struct {
+	Updated bool
+	Status  string
 }
 
 func New(target string, dialTimeout time.Duration) (*Client, error) {
@@ -86,5 +93,25 @@ func (c *Client) CreateMessage(ctx context.Context, conversationID uint64, reqBo
 		Content:        resp.GetContent(),
 		ClientMsgID:    resp.GetClientMsgId(),
 		CreatedAt:      resp.GetCreatedAt(),
+		UpdatedAt:      resp.GetUpdatedAt(),
+		Status:         resp.GetStatus(),
+	}, nil
+}
+
+func (c *Client) MarkMessageDelivered(ctx context.Context, conversationID uint64, messageID uint64) (*MarkMessageDeliveredResult, error) {
+	resp, err := c.rpc.MarkMessageDelivered(ctx, &chatv1.MarkMessageDeliveredRequest{
+		ConversationId: conversationID,
+		MessageId:      messageID,
+	})
+	if err != nil {
+		if st, ok := status.FromError(err); ok {
+			return nil, fmt.Errorf("chat-service grpc error [%s]: %s", st.Code().String(), st.Message())
+		}
+		return nil, err
+	}
+
+	return &MarkMessageDeliveredResult{
+		Updated: resp.GetUpdated(),
+		Status:  resp.GetStatus(),
 	}, nil
 }

@@ -41,6 +41,7 @@ func (h *HTTPHandler) RegisterRoutes(r *gin.Engine) {
 	chatV1.GET("/conversations/:id", h.getConversation)
 	chatV1.POST("/conversations/:id/messages", h.createMessage)
 	chatV1.GET("/conversations/:id/messages", h.listMessages)
+	chatV1.POST("/conversations/:id/read", h.markMessagesRead)
 	chatV1.POST("/conversations/:id/claim", h.claimConversation)
 	chatV1.POST("/conversations/:id/transfer", h.transferConversation)
 	chatV1.POST("/conversations/:id/close", h.closeConversation)
@@ -306,6 +307,62 @@ func (h *HTTPHandler) listMessages(c *gin.Context) {
 		items = append(items, messageToJSON(item))
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+type markMessagesReadRequest struct {
+	LastReadMessageID uint64 `json:"last_read_message_id" binding:"required"`
+	VisitorToken      string `json:"visitor_token"`
+}
+
+func (h *HTTPHandler) markMessagesRead(c *gin.Context) {
+	conversationID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation id"})
+		return
+	}
+
+	var req markMessagesReadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if req.LastReadMessageID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "last_read_message_id is required"})
+		return
+	}
+
+	actorType := "visitor"
+	var actorAgentID uint64
+	visitorToken := strings.TrimSpace(req.VisitorToken)
+	if strings.TrimSpace(c.GetHeader("Authorization")) != "" {
+		actor, actorErr := h.requireAgentActor(c)
+		if actorErr != nil {
+			handleGRPCError(c, actorErr)
+			return
+		}
+		actorType = "agent"
+		actorAgentID = actor.GetAgentId()
+	} else if visitorToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "visitor_token is required when Authorization is missing"})
+		return
+	}
+
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	resp, err := h.clients.Chat.MarkMessagesRead(ctx, &chatv1.MarkMessagesReadRequest{
+		ConversationId:    conversationID,
+		LastReadMessageId: req.LastReadMessageID,
+		ActorType:         actorType,
+		ActorAgentId:      actorAgentID,
+		VisitorToken:      visitorToken,
+	})
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"updated_count": resp.GetUpdatedCount()})
 }
 
 func (h *HTTPHandler) claimConversation(c *gin.Context) {
@@ -688,6 +745,7 @@ func messageToJSON(item *chatv1.Message) gin.H {
 		"sender_type":     item.GetSenderType(),
 		"content":         item.GetContent(),
 		"client_msg_id":   item.GetClientMsgId(),
+		"status":          item.GetStatus(),
 		"created_at":      item.GetCreatedAt(),
 		"updated_at":      item.GetUpdatedAt(),
 	}

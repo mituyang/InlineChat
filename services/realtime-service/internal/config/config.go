@@ -12,6 +12,8 @@ type Config struct {
 	RedisAddr                    string
 	RedisPassword                string
 	RedisDB                      int
+	JWTSecret                    string
+	JWTIssuer                    string
 	ChatGRPCDialTimeout          int
 	ChatGRPCCallTimeout          int
 	LogLevel                     string
@@ -32,6 +34,8 @@ func Load() (Config, error) {
 		RedisAddr:                    os.Getenv("REDIS_ADDR"),
 		RedisPassword:                os.Getenv("REDIS_PASSWORD"),
 		RedisDB:                      getIntEnv("REDIS_DB", 0),
+		JWTSecret:                    os.Getenv("JWT_SECRET"),
+		JWTIssuer:                    getEnv("JWT_ISSUER", "inlinechat-auth"),
 		ChatGRPCDialTimeout:          getIntEnv("CHAT_GRPC_DIAL_TIMEOUT_SEC", 8),
 		ChatGRPCCallTimeout:          getIntEnv("CHAT_GRPC_CALL_TIMEOUT_SEC", 8),
 		LogLevel:                     getEnv("LOG_LEVEL", "info"),
@@ -48,6 +52,12 @@ func Load() (Config, error) {
 
 	if cfg.RedisAddr == "" {
 		return Config{}, fmt.Errorf("REDIS_ADDR is required")
+	}
+	if cfg.JWTSecret == "" {
+		return Config{}, fmt.Errorf("JWT_SECRET is required")
+	}
+	if cfg.JWTIssuer == "" {
+		return Config{}, fmt.Errorf("JWT_ISSUER is required")
 	}
 	if len(cfg.ETCDEndpoints) == 0 {
 		return Config{}, fmt.Errorf("ETCD_ENDPOINTS is required")

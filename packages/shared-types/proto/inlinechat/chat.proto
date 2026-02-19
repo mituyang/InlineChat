@@ -6,6 +6,7 @@ option go_package = "inlinechat/packages/shared-types/proto/chatv1";
 
 service ChatInternalService {
   rpc CreateMessage(CreateMessageRequest) returns (CreateMessageResponse);
+  rpc MarkMessageDelivered(MarkMessageDeliveredRequest) returns (MarkMessageDeliveredResponse);
 }
 
 service ChatGatewayService {
@@ -14,6 +15,7 @@ service ChatGatewayService {
   rpc GetConversation(GetConversationRequest) returns (Conversation);
   rpc CreateMessage(CreateMessageRequest) returns (Message);
   rpc ListMessages(ListMessagesRequest) returns (ListMessagesResponse);
+  rpc MarkMessagesRead(MarkMessagesReadRequest) returns (MarkMessagesReadResponse);
   rpc ClaimConversation(ClaimConversationRequest) returns (Conversation);
   rpc TransferConversation(TransferConversationRequest) returns (Conversation);
   rpc CloseConversation(CloseConversationRequest) returns (Conversation);
@@ -40,6 +42,7 @@ message Message {
   string client_msg_id = 6;
   string created_at = 7;
   string updated_at = 8;
+  string status = 9;
 }
 
 message CreateConversationRequest {
@@ -100,6 +103,17 @@ message CreateMessageResponse {
   string client_msg_id = 6;
   string created_at = 7;
   string updated_at = 8;
+  string status = 9;
+}
+
+message MarkMessageDeliveredRequest {
+  uint64 conversation_id = 1;
+  uint64 message_id = 2;
+}
+
+message MarkMessageDeliveredResponse {
+  bool updated = 1;
+  string status = 2;
 }
 
 message ListMessagesRequest {
@@ -110,4 +124,16 @@ message ListMessagesRequest {
 
 message ListMessagesResponse {
   repeated Message items = 1;
+}
+
+message MarkMessagesReadRequest {
+  uint64 conversation_id = 1;
+  uint64 last_read_message_id = 2;
+  string actor_type = 3;
+  uint64 actor_agent_id = 4;
+  string visitor_token = 5;
+}
+
+message MarkMessagesReadResponse {
+  uint64 updated_count = 1;
 }
