@@ -3,13 +3,17 @@ SHELL := /bin/bash
 COMPOSE_FILE := infra/docker/docker-compose.yml
 ENV_FILE ?= .env
 CACHE_DIR := $(CURDIR)/.cache
-GO_TEST_SERVICES := services/chat-service services/realtime-service services/gateway-service services/auth-service services/admin-service
+GO_SERVICE_MODULES := services/chat-service services/realtime-service services/gateway-service services/auth-service services/admin-service
+GO_SHARED_MODULES := packages/discovery packages/httpmiddleware
+GO_TEST_MODULES := $(GO_SERVICE_MODULES) $(GO_SHARED_MODULES)
 GO_BUILD_OS ?= linux
 GO_BUILD_ARCH ?= $(shell go env GOARCH)
 GO_BUILD_OUTPUT := .bin/server
 GO_PROXY ?= https://proxy.golang.org,direct
 COVERAGE_THRESHOLD ?= 45
+COVERAGE_THRESHOLD_ALL ?= 12
 MIN_COVERED_PACKAGES ?= 10
+MIN_TOTAL_PACKAGES ?= 20
 
 .PHONY: help ensure-env config up up-fg down restart logs ps migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover quality proto build-local image-build smoke integration mvp-release
 
@@ -46,7 +50,7 @@ config:
 
 build-local:
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
-	@for svc in $(GO_TEST_SERVICES); do \
+	@for svc in $(GO_SERVICE_MODULES); do \
 		echo "==> go build $$svc ($(GO_BUILD_OS)/$(GO_BUILD_ARCH))"; \
 		( \
 			cd $$svc && \
@@ -93,13 +97,13 @@ migrate-admin: ensure-env
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) run --rm admin-migrate
 
 fmt:
-	@for svc in $(GO_TEST_SERVICES); do \
+	@for svc in $(GO_TEST_MODULES); do \
 		echo "==> gofmt $$svc"; \
 		find $$svc -name '*.go' -print0 | xargs -0 gofmt -w; \
 	done
 
 fmt-check:
-	@unformatted="$$(for svc in $(GO_TEST_SERVICES); do find $$svc -name '*.go' -print0 | xargs -0 gofmt -l; done)"; \
+	@unformatted="$$(for svc in $(GO_TEST_MODULES); do find $$svc -name '*.go' -print0 | xargs -0 gofmt -l; done)"; \
 	if [ -n "$$unformatted" ]; then \
 		echo "以下文件未执行 gofmt:"; \
 		echo "$$unformatted"; \
@@ -108,10 +112,11 @@ fmt-check:
 
 vet:
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
-	@for svc in $(GO_TEST_SERVICES); do \
+	@for svc in $(GO_TEST_MODULES); do \
 		echo "==> go vet $$svc"; \
 		( \
 			cd $$svc && \
+			GOPROXY=$(GO_PROXY) \
 			GOCACHE=$(CACHE_DIR)/go-build \
 			GOMODCACHE=$(CACHE_DIR)/go-mod \
 			go vet ./... \
@@ -122,10 +127,11 @@ lint: fmt-check vet
 
 test:
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
-	@for svc in $(GO_TEST_SERVICES); do \
+	@for svc in $(GO_TEST_MODULES); do \
 		echo "==> go test $$svc"; \
 		( \
 			cd $$svc && \
+			GOPROXY=$(GO_PROXY) \
 			GOCACHE=$(CACHE_DIR)/go-build \
 			GOMODCACHE=$(CACHE_DIR)/go-mod \
 			go test ./... \
@@ -134,10 +140,11 @@ test:
 
 test-race:
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
-	@for svc in $(GO_TEST_SERVICES); do \
+	@for svc in $(GO_TEST_MODULES); do \
 		echo "==> go test -race $$svc"; \
 		( \
 			cd $$svc && \
+			GOPROXY=$(GO_PROXY) \
 			GOCACHE=$(CACHE_DIR)/go-build \
 			GOMODCACHE=$(CACHE_DIR)/go-mod \
 			go test -race ./... \
@@ -145,7 +152,7 @@ test-race:
 	done
 
 test-cover:
-	CACHE_DIR=$(CACHE_DIR) COVERAGE_THRESHOLD=$(COVERAGE_THRESHOLD) MIN_COVERED_PACKAGES=$(MIN_COVERED_PACKAGES) ./scripts/coverage-threshold.sh $(GO_TEST_SERVICES)
+	GO_PROXY=$(GO_PROXY) CACHE_DIR=$(CACHE_DIR) COVERAGE_THRESHOLD=$(COVERAGE_THRESHOLD) COVERAGE_THRESHOLD_ALL=$(COVERAGE_THRESHOLD_ALL) MIN_COVERED_PACKAGES=$(MIN_COVERED_PACKAGES) MIN_TOTAL_PACKAGES=$(MIN_TOTAL_PACKAGES) ./scripts/coverage-threshold.sh $(GO_TEST_MODULES)
 
 quality: lint test test-race test-cover
 

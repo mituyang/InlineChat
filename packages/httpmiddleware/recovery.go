@@ -8,7 +8,13 @@ import (
 	"go.uber.org/zap"
 )
 
+type PanicHandler func(c *gin.Context, recovered any, requestID string)
+
 func Recovery(logger *zap.Logger) gin.HandlerFunc {
+	return RecoveryWithHandler(logger, nil)
+}
+
+func RecoveryWithHandler(logger *zap.Logger, panicHandler PanicHandler) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -23,6 +29,12 @@ func Recovery(logger *zap.Logger) gin.HandlerFunc {
 						zap.String("path", c.Request.URL.Path),
 					)
 				}
+
+				if panicHandler != nil {
+					panicHandler(c, rec, reqID)
+					return
+				}
+
 				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 					"error":      "internal error",
 					"request_id": reqID,

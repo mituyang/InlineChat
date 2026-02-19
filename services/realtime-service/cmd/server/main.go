@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os/signal"
 	"syscall"
@@ -61,7 +60,7 @@ func main() {
 		}
 	}()
 
-	chatTarget, err := resolveWithRetry(resolver, cfg.ChatServiceName, "grpc", 30*time.Second)
+	chatTarget, err := shareddiscovery.ResolveWithRetry(resolver, cfg.ChatServiceName, "grpc", 30*time.Second)
 	if err != nil {
 		appLogger.Fatal("failed to resolve chat grpc target from etcd", zap.Error(err), zap.String("service_name", cfg.ChatServiceName))
 	}
@@ -144,23 +143,4 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(shutdownCtx)
-}
-
-func resolveWithRetry(resolver *shareddiscovery.Resolver, serviceName string, protocol string, timeout time.Duration) (string, error) {
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		target, err := resolver.Resolve(ctx, serviceName, protocol)
-		cancel()
-		if err == nil {
-			return target, nil
-		}
-		lastErr = err
-		if time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	return "", fmt.Errorf("resolve %s/%s timeout: %w", serviceName, protocol, lastErr)
 }

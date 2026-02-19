@@ -47,19 +47,19 @@ func main() {
 		}
 	}()
 
-	chatTarget, err := resolveWithRetry(resolver, cfg.ChatServiceName, "grpc", 30*time.Second)
+	chatTarget, err := shareddiscovery.ResolveWithRetry(resolver, cfg.ChatServiceName, "grpc", 30*time.Second)
 	if err != nil {
 		appLogger.Fatal("failed to resolve chat-service grpc target from etcd", zap.Error(err), zap.String("service_name", cfg.ChatServiceName))
 	}
-	authTarget, err := resolveWithRetry(resolver, cfg.AuthServiceName, "grpc", 30*time.Second)
+	authTarget, err := shareddiscovery.ResolveWithRetry(resolver, cfg.AuthServiceName, "grpc", 30*time.Second)
 	if err != nil {
 		appLogger.Fatal("failed to resolve auth-service grpc target from etcd", zap.Error(err), zap.String("service_name", cfg.AuthServiceName))
 	}
-	adminTarget, err := resolveWithRetry(resolver, cfg.AdminServiceName, "grpc", 30*time.Second)
+	adminTarget, err := shareddiscovery.ResolveWithRetry(resolver, cfg.AdminServiceName, "grpc", 30*time.Second)
 	if err != nil {
 		appLogger.Fatal("failed to resolve admin-service grpc target from etcd", zap.Error(err), zap.String("service_name", cfg.AdminServiceName))
 	}
-	realtimeTarget, err := resolveWithRetry(resolver, cfg.RealtimeServiceName, "http", 30*time.Second)
+	realtimeTarget, err := shareddiscovery.ResolveWithRetry(resolver, cfg.RealtimeServiceName, "http", 30*time.Second)
 	if err != nil {
 		appLogger.Fatal("failed to resolve realtime-service http target from etcd", zap.Error(err), zap.String("service_name", cfg.RealtimeServiceName))
 	}
@@ -160,25 +160,6 @@ func main() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		appLogger.Warn("gateway-service shutdown failed", zap.Error(err))
 	}
-}
-
-func resolveWithRetry(resolver *shareddiscovery.Resolver, serviceName string, protocol string, timeout time.Duration) (string, error) {
-	deadline := time.Now().Add(timeout)
-	var lastErr error
-	for {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		target, err := resolver.Resolve(ctx, serviceName, protocol)
-		cancel()
-		if err == nil {
-			return target, nil
-		}
-		lastErr = err
-		if time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	return "", fmt.Errorf("resolve %s/%s timeout: %w", serviceName, protocol, lastErr)
 }
 
 func registerStaticRoute(r *gin.Engine, appLogger *zap.Logger, route string, candidates []string) {

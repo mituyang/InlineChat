@@ -5,6 +5,7 @@ go 1.25
 require (
 	github.com/gin-gonic/gin v1.10.1
 	inlinechat/packages/discovery v0.0.0
+	inlinechat/packages/httpmiddleware v0.0.0
 	go.etcd.io/etcd/client/v3 v3.6.8
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.79.1
@@ -50,3 +51,4 @@ require (
 )
 
 replace inlinechat/packages/discovery => ../../packages/discovery
+replace inlinechat/packages/httpmiddleware => ../../packages/httpmiddleware
