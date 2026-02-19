@@ -508,15 +508,15 @@ function sendMessageViaWS(payload) {
       })
     );
   } catch (error) {
-    clearPending(payload.client_msg_id);
+    clearPending(payload.client_msg_id, true);
     throw error instanceof Error ? error : new Error("消息发送失败");
   }
 }
 
 function beginPending(clientMsgID) {
-  clearPending(clientMsgID);
+  clearPending(clientMsgID, true);
   const timer = setTimeout(() => {
-    clearPending(clientMsgID);
+    clearPending(clientMsgID, true);
     markMessageFailedByClientMsgID(clientMsgID);
     setStatus("消息发送超时，请重发", true);
   }, ACK_TIMEOUT_MS);
@@ -525,17 +525,31 @@ function beginPending(clientMsgID) {
   };
 }
 
-function clearPending(clientMsgID) {
+function clearPending(clientMsgID, silent = false) {
   const pending = state.pendingMap[clientMsgID];
   if (pending && pending.timer) {
     clearTimeout(pending.timer);
   }
   delete state.pendingMap[clientMsgID];
+  if (!silent) {
+    syncSendingStatusText();
+  }
 }
 
 function resetPendingMap() {
   for (const clientMsgID of Object.keys(state.pendingMap)) {
-    clearPending(clientMsgID);
+    clearPending(clientMsgID, true);
+  }
+}
+
+function syncSendingStatusText() {
+  const hasPending = Object.keys(state.pendingMap).length > 0;
+  if (hasPending) {
+    return;
+  }
+  const current = String(els.statusLine?.textContent || "").trim();
+  if (current === "消息发送中..." || current === "消息重发中...") {
+    setStatus("消息已发送");
   }
 }
 
