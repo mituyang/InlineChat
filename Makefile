@@ -8,8 +8,10 @@ GO_BUILD_OS ?= linux
 GO_BUILD_ARCH ?= $(shell go env GOARCH)
 GO_BUILD_OUTPUT := .bin/server
 GO_PROXY ?= https://proxy.golang.org,direct
+COVERAGE_THRESHOLD ?= 45
+MIN_COVERED_PACKAGES ?= 10
 
-.PHONY: help ensure-env config up up-fg down restart logs ps migrate migrate-chat migrate-auth migrate-admin fmt test proto build-local image-build smoke integration mvp-release
+.PHONY: help ensure-env config up up-fg down restart logs ps migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover quality proto build-local image-build smoke integration mvp-release
 
 help:
 	@echo "可用命令:"
@@ -21,7 +23,11 @@ help:
 	@echo "  make ps             查看服务状态"
 	@echo "  make config         校验 docker compose 配置"
 	@echo "  make migrate        执行全部迁移任务"
+	@echo "  make lint           执行格式与静态检查（fmt-check + vet）"
 	@echo "  make test           运行后端 Go 测试"
+	@echo "  make test-race      运行后端 Go race 测试"
+	@echo "  make test-cover     校验覆盖率门禁（有覆盖包平均值 + 最小包数）"
+	@echo "  make quality        执行完整质量门禁（lint + test + test-race + test-cover）"
 	@echo "  make smoke          运行端到端冒烟（登录/管理/会话/消息）"
 	@echo "  make integration    运行系统集成检查（smoke + etcd + mysql + websocket）"
 	@echo "  make mvp-release    执行 MVP 验收流水（test + integration）"
@@ -92,6 +98,28 @@ fmt:
 		find $$svc -name '*.go' -print0 | xargs -0 gofmt -w; \
 	done
 
+fmt-check:
+	@unformatted="$$(for svc in $(GO_TEST_SERVICES); do find $$svc -name '*.go' -print0 | xargs -0 gofmt -l; done)"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "以下文件未执行 gofmt:"; \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+
+vet:
+	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
+	@for svc in $(GO_TEST_SERVICES); do \
+		echo "==> go vet $$svc"; \
+		( \
+			cd $$svc && \
+			GOCACHE=$(CACHE_DIR)/go-build \
+			GOMODCACHE=$(CACHE_DIR)/go-mod \
+			go vet ./... \
+		) || exit 1; \
+	done
+
+lint: fmt-check vet
+
 test:
 	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
 	@for svc in $(GO_TEST_SERVICES); do \
@@ -103,6 +131,23 @@ test:
 			go test ./... \
 		) || exit 1; \
 	done
+
+test-race:
+	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
+	@for svc in $(GO_TEST_SERVICES); do \
+		echo "==> go test -race $$svc"; \
+		( \
+			cd $$svc && \
+			GOCACHE=$(CACHE_DIR)/go-build \
+			GOMODCACHE=$(CACHE_DIR)/go-mod \
+			go test -race ./... \
+		) || exit 1; \
+	done
+
+test-cover:
+	CACHE_DIR=$(CACHE_DIR) COVERAGE_THRESHOLD=$(COVERAGE_THRESHOLD) MIN_COVERED_PACKAGES=$(MIN_COVERED_PACKAGES) ./scripts/coverage-threshold.sh $(GO_TEST_SERVICES)
+
+quality: lint test test-race test-cover
 
 smoke: ensure-env
 	ENV_FILE=$(ENV_FILE) ./scripts/smoke-e2e.sh

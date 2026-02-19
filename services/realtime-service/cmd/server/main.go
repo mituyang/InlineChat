@@ -12,9 +12,10 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
+	shareddiscovery "inlinechat/packages/discovery"
+	httpmiddleware "inlinechat/packages/httpmiddleware"
 	"inlinechat/services/realtime-service/internal/chatclient"
 	"inlinechat/services/realtime-service/internal/config"
-	"inlinechat/services/realtime-service/internal/discovery"
 	"inlinechat/services/realtime-service/internal/logger"
 	"inlinechat/services/realtime-service/internal/pubsub"
 	"inlinechat/services/realtime-service/internal/ws"
@@ -50,7 +51,7 @@ func main() {
 	callTimeout := time.Duration(cfg.ChatGRPCCallTimeout) * time.Second
 	etcdDialTimeout := time.Duration(cfg.ETCDDialTimeoutSec) * time.Second
 
-	resolver, err := discovery.NewResolver(cfg.ETCDEndpoints, etcdDialTimeout, cfg.DiscoveryPrefix)
+	resolver, err := shareddiscovery.NewResolver(cfg.ETCDEndpoints, etcdDialTimeout, cfg.DiscoveryPrefix)
 	if err != nil {
 		appLogger.Fatal("failed to create etcd resolver", zap.Error(err))
 	}
@@ -77,7 +78,7 @@ func main() {
 	wsHandler := ws.NewHandler(hub, chatClient, cfg.AllowedOrigins, callTimeout, appLogger)
 
 	registerCtx, cancelRegister := context.WithTimeout(context.Background(), etcdDialTimeout)
-	registrar, err := discovery.Register(registerCtx, discovery.RegisterRequest{
+	registrar, err := shareddiscovery.Register(registerCtx, shareddiscovery.RegisterRequest{
 		Prefix:       cfg.DiscoveryPrefix,
 		ServiceName:  cfg.ServiceName,
 		Protocol:     "http",
@@ -118,7 +119,7 @@ func main() {
 	}()
 
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(httpmiddleware.RequestContext(httpmiddleware.DefaultRequestIDHeader, appLogger), httpmiddleware.Recovery(appLogger))
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"service": "realtime-service", "status": "ok"})
@@ -145,7 +146,7 @@ func main() {
 	_ = srv.Shutdown(shutdownCtx)
 }
 
-func resolveWithRetry(resolver *discovery.Resolver, serviceName string, protocol string, timeout time.Duration) (string, error) {
+func resolveWithRetry(resolver *shareddiscovery.Resolver, serviceName string, protocol string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for {

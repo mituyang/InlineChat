@@ -91,7 +91,11 @@
 - `make down`: 停止并删除容器
 - `make logs`: 跟随日志
 - `make migrate`: 执行全部迁移
+- `make lint`: 执行格式与静态检查（`fmt-check + vet`）
 - `make test`: 运行后端测试
+- `make test-race`: 运行后端 race 测试
+- `make test-cover`: 校验覆盖率门禁（有覆盖包平均值 + 最小包数）
+- `make quality`: 执行完整质量门禁（`lint + test + test-race + test-cover`）
 - `make smoke`: 运行端到端冒烟（健康检查、登录、管理接口、会话与消息）
 - `make integration`: 运行系统集成检查（`smoke + etcd + mysql + websocket`）
 - `make mvp-release`: 执行 MVP 验收流水（`test + integration`）
@@ -104,7 +108,7 @@
   - `services/admin-service/internal/service/admin_service_test.go`
   - `services/chat-service/internal/service/chat_service_test.go`
 - CI 流水线：`.github/workflows/ci.yml`
-  - `test` Job：执行 `make test`
+  - `test` Job：执行 `make lint && make test && make test-race && make test-cover`
   - `integration` Job：执行 `cp .env.example .env && make up && make integration`，并在结束后自动 `make down`
 
 ## 数据库迁移

@@ -14,8 +14,9 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
+	shareddiscovery "inlinechat/packages/discovery"
+	httpmiddleware "inlinechat/packages/httpmiddleware"
 	"inlinechat/services/admin-service/internal/config"
-	"inlinechat/services/admin-service/internal/discovery"
 	adminv1 "inlinechat/services/admin-service/internal/gen/adminv1"
 	"inlinechat/services/admin-service/internal/grpcserver"
 	"inlinechat/services/admin-service/internal/handler"
@@ -41,7 +42,7 @@ func main() {
 
 	etcdDialTimeout := time.Duration(cfg.ETCDDialTimeoutSec) * time.Second
 	registerCtx, cancelRegister := context.WithTimeout(context.Background(), etcdDialTimeout)
-	registrar, err := discovery.Register(registerCtx, discovery.RegisterRequest{
+	registrar, err := shareddiscovery.Register(registerCtx, shareddiscovery.RegisterRequest{
 		Prefix:       cfg.DiscoveryPrefix,
 		ServiceName:  cfg.ServiceName,
 		Protocol:     "grpc",
@@ -76,7 +77,7 @@ func main() {
 	authz := middleware.NewAuthz(cfg.JWTSecret, cfg.JWTIssuer)
 
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(httpmiddleware.RequestContext(httpmiddleware.DefaultRequestIDHeader, appLogger), httpmiddleware.Recovery(appLogger))
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"service": "admin-service", "status": "ok"})

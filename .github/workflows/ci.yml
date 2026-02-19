@@ -8,9 +8,9 @@ on:
 
 jobs:
   test:
-    name: 后端测试
+    name: 后端质量门禁
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 35
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -20,8 +20,17 @@ jobs:
         with:
           go-version: '1.25.x'
 
+      - name: 运行格式与静态检查
+        run: make lint
+
       - name: 运行单元测试
         run: make test
+
+      - name: 运行竞态测试
+        run: make test-race
+
+      - name: 校验覆盖率门禁
+        run: make test-cover
 
   integration:
     name: 系统集成测试

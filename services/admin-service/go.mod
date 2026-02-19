@@ -5,6 +5,8 @@ go 1.25
 require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/golang-jwt/jwt/v5 v5.2.1
+	inlinechat/packages/discovery v0.0.0
+	inlinechat/packages/httpmiddleware v0.0.0
 	go.etcd.io/etcd/client/v3 v3.6.8
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.46.0
@@ -53,3 +55,6 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace inlinechat/packages/discovery => ../../packages/discovery
+replace inlinechat/packages/httpmiddleware => ../../packages/httpmiddleware

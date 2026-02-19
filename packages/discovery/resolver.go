@@ -72,7 +72,6 @@ func (r *Resolver) Resolve(ctx context.Context, serviceName string, protocol str
 	if len(endpoints) == 0 {
 		return "", fmt.Errorf("no endpoint found for %s/%s", serviceName, protocol)
 	}
-
 	if len(endpoints) == 1 {
 		return endpoints[0], nil
 	}
@@ -82,26 +81,5 @@ func (r *Resolver) Resolve(ctx context.Context, serviceName string, protocol str
 	idx := r.rrState[stateKey] % len(endpoints)
 	r.rrState[stateKey]++
 	r.mu.Unlock()
-
 	return endpoints[idx], nil
-}
-
-func normalizeEndpoints(raw []string) []string {
-	out := make([]string, 0, len(raw))
-	for _, item := range raw {
-		value := strings.TrimSpace(item)
-		if value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
-}
-
-func normalizePrefix(raw string) string {
-	value := strings.TrimSpace(raw)
-	if value == "" {
-		return "/inlinechat/services"
-	}
-	value = "/" + strings.Trim(value, "/")
-	return value
 }

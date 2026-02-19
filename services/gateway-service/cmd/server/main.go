@@ -5,14 +5,16 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	shareddiscovery "inlinechat/packages/discovery"
 	"inlinechat/services/gateway-service/internal/config"
-	"inlinechat/services/gateway-service/internal/discovery"
 	"inlinechat/services/gateway-service/internal/grpcclient"
 	"inlinechat/services/gateway-service/internal/handler"
 	"inlinechat/services/gateway-service/internal/logger"
@@ -35,7 +37,7 @@ func main() {
 	}()
 
 	etcdDialTimeout := time.Duration(cfg.ETCDDialTimeoutSec) * time.Second
-	resolver, err := discovery.NewResolver(cfg.ETCDEndpoints, etcdDialTimeout, cfg.DiscoveryPrefix)
+	resolver, err := shareddiscovery.NewResolver(cfg.ETCDEndpoints, etcdDialTimeout, cfg.DiscoveryPrefix)
 	if err != nil {
 		appLogger.Fatal("failed to create etcd resolver", zap.Error(err))
 	}
@@ -127,13 +129,40 @@ func main() {
 	r.NoRoute(middleware.NoRouteHandler())
 	r.NoMethod(middleware.NoMethodHandler())
 
-	appLogger.Info("gateway-service started", zap.String("port", cfg.HTTPPort))
-	if err := r.Run(":" + cfg.HTTPPort); err != nil {
-		appLogger.Fatal("gateway-service exited", zap.Error(err))
+	httpServer := &http.Server{
+		Addr:              ":" + cfg.HTTPPort,
+		Handler:           r,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	runCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		appLogger.Info("gateway-service started", zap.String("port", cfg.HTTPPort))
+		err := httpServer.ListenAndServe()
+		if err != nil && err != http.ErrServerClosed {
+			serverErr <- err
+		}
+	}()
+
+	select {
+	case <-runCtx.Done():
+		appLogger.Info("gateway-service shutdown signal received")
+	case err := <-serverErr:
+		appLogger.Error("gateway-service server error", zap.Error(err))
+		stop()
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		appLogger.Warn("gateway-service shutdown failed", zap.Error(err))
 	}
 }
 
-func resolveWithRetry(resolver *discovery.Resolver, serviceName string, protocol string, timeout time.Duration) (string, error) {
+func resolveWithRetry(resolver *shareddiscovery.Resolver, serviceName string, protocol string, timeout time.Duration) (string, error) {
 	deadline := time.Now().Add(timeout)
 	var lastErr error
 	for {
