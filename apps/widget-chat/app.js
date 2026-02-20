@@ -62,8 +62,8 @@ async function bootstrap() {
   const storedConversationID = localStorage.getItem(conversationKey()) || "";
   if (storedConversationID) {
     try {
-      const conversation = await apiRequest(`/api/chat/v1/conversations/${storedConversationID}`);
-      if (conversation.site_id === state.siteID && conversation.visitor_token === state.visitorToken) {
+      const conversation = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${storedConversationID}`));
+      if (conversation.site_id === state.siteID) {
         upsertConversationHistoryEntry({
           conversation_id: storedConversationID,
           status: normalizeConversationStatus(conversation.status) || "open",
@@ -147,6 +147,42 @@ function bindEvents() {
 
 function visitorTokenKey() {
   return `inlinechat.widget.visitor_token.${state.siteID}`;
+}
+
+function withVisitorToken(path) {
+  const rawPath = String(path || "").trim();
+  if (!rawPath) {
+    return rawPath;
+  }
+  const token = String(state.visitorToken || "").trim();
+  if (!token) {
+    return rawPath;
+  }
+
+  const hashIndex = rawPath.indexOf("#");
+  const base = hashIndex >= 0 ? rawPath.slice(0, hashIndex) : rawPath;
+  const hash = hashIndex >= 0 ? rawPath.slice(hashIndex) : "";
+  if (/[?&]visitor_token=/.test(base)) {
+    return rawPath;
+  }
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}visitor_token=${encodeURIComponent(token)}${hash}`;
+}
+
+function extractErrorMessage(value, fallback) {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text) {
+      return text;
+    }
+  }
+  if (value && typeof value === "object") {
+    const message = typeof value.message === "string" ? value.message.trim() : "";
+    if (message) {
+      return message;
+    }
+  }
+  return fallback;
 }
 
 function conversationKey() {
@@ -351,8 +387,8 @@ async function refreshHistoryConversationStatuses() {
       continue;
     }
     try {
-      const conversation = await apiRequest(`/api/chat/v1/conversations/${conversationID}`);
-      if (conversation.site_id !== state.siteID || conversation.visitor_token !== state.visitorToken) {
+      const conversation = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${conversationID}`));
+      if (conversation.site_id !== state.siteID) {
         continue;
       }
       upsertConversationHistoryEntry({
@@ -464,7 +500,7 @@ async function syncConversationStatus() {
   if (!state.conversationID) {
     return;
   }
-  const conversation = await apiRequest(`/api/chat/v1/conversations/${state.conversationID}`);
+  const conversation = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${state.conversationID}`));
   if (String(conversation.id || "") !== String(state.conversationID || "")) {
     return;
   }
@@ -490,8 +526,8 @@ async function prepareConversation(forceNew, createWhenMissing = true) {
 
   if (!forceNew && storedConversationID) {
     try {
-      const conversation = await apiRequest(`/api/chat/v1/conversations/${storedConversationID}`);
-      if (conversation.site_id === state.siteID && conversation.visitor_token === state.visitorToken) {
+      const conversation = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${storedConversationID}`));
+      if (conversation.site_id === state.siteID) {
         conversationID = String(conversation.id);
         conversationMeta = conversation;
       } else {
@@ -697,7 +733,7 @@ async function refreshMessages() {
   if (!state.conversationID) {
     return;
   }
-  const data = await apiRequest(`/api/chat/v1/conversations/${state.conversationID}/messages?limit=200`);
+  const data = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${state.conversationID}/messages?limit=200`));
   const items = Array.isArray(data.items) ? data.items : [];
   mergeMessages(items);
 }
@@ -721,7 +757,7 @@ function connectWebSocket() {
   state.wsConnected = false;
 
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  const wsURL = `${protocol}://${window.location.host}/ws/${conversationID}`;
+  const wsURL = `${protocol}://${window.location.host}/ws/${conversationID}?visitor_token=${encodeURIComponent(state.visitorToken)}`;
   const ws = new WebSocket(wsURL);
 
   ws.addEventListener("open", () => {
@@ -760,7 +796,7 @@ function connectWebSocket() {
           }
           break;
         case "error":
-          setStatus(data.error || "实时消息异常");
+          setStatus(extractErrorMessage(data.error, "实时消息异常"));
           break;
         default:
           break;
@@ -1192,7 +1228,7 @@ function handleMessageNack(payload) {
   if (errorText.includes("closed") || String(payload.error || "").includes("已关闭")) {
     applyConversationStatus("closed", true);
   }
-  setStatus(payload.error || "发送失败");
+  setStatus(extractErrorMessage(payload.error, "发送失败"));
 }
 
 function handleMessageStatusEvent(payload) {
@@ -1386,7 +1422,7 @@ async function apiRequest(path, options = {}) {
   }
 
   if (!response.ok) {
-    const message = data.error || data?.error?.message || `请求失败 (${response.status})`;
+    const message = extractErrorMessage(data?.error, extractErrorMessage(data?.message, `请求失败 (${response.status})`));
     throw new Error(message);
   }
 

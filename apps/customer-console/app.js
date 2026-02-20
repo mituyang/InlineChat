@@ -82,6 +82,42 @@ function loadVisitorToken() {
   return generated;
 }
 
+function withVisitorToken(path) {
+  const rawPath = String(path || "").trim();
+  if (!rawPath) {
+    return rawPath;
+  }
+  const token = String(state.visitorToken || "").trim();
+  if (!token) {
+    return rawPath;
+  }
+
+  const hashIndex = rawPath.indexOf("#");
+  const base = hashIndex >= 0 ? rawPath.slice(0, hashIndex) : rawPath;
+  const hash = hashIndex >= 0 ? rawPath.slice(hashIndex) : "";
+  if (/[?&]visitor_token=/.test(base)) {
+    return rawPath;
+  }
+  const sep = base.includes("?") ? "&" : "?";
+  return `${base}${sep}visitor_token=${encodeURIComponent(token)}${hash}`;
+}
+
+function extractErrorMessage(value, fallback) {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text) {
+      return text;
+    }
+  }
+  if (value && typeof value === "object") {
+    const message = typeof value.message === "string" ? value.message.trim() : "";
+    if (message) {
+      return message;
+    }
+  }
+  return fallback;
+}
+
 function getConversationMap() {
   const raw = localStorage.getItem(STORAGE_KEYS.conversationMap);
   if (!raw) {
@@ -176,7 +212,7 @@ async function syncConversationStatus() {
   if (!state.conversationId) {
     return;
   }
-  const conversation = await apiRequest(`/api/chat/v1/conversations/${state.conversationId}`);
+  const conversation = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${state.conversationId}`));
   if (String(conversation.id || "") !== String(state.conversationId || "")) {
     return;
   }
@@ -214,8 +250,8 @@ async function startSession(forceNew) {
       const map = getConversationMap();
       const existing = map[siteId];
       if (existing) {
-        const conversation = await apiRequest(`/api/chat/v1/conversations/${existing}`);
-        if (conversation.site_id === siteId && conversation.visitor_token === state.visitorToken) {
+        const conversation = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${existing}`));
+        if (conversation.site_id === siteId) {
           conversationId = String(conversation.id);
           conversationMeta = conversation;
         } else {
@@ -369,7 +405,7 @@ function connectWebSocket() {
   state.wsConversationId = conversationId;
   state.wsConnected = false;
 
-  const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/${conversationId}`;
+  const wsUrl = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/ws/${conversationId}?visitor_token=${encodeURIComponent(state.visitorToken)}`;
   const ws = new WebSocket(wsUrl);
 
   ws.addEventListener("open", () => {
@@ -409,7 +445,7 @@ function connectWebSocket() {
           }
           break;
         case "error":
-          setStatus(data.error || "WebSocket 消息异常", true);
+          setStatus(extractErrorMessage(data.error, "WebSocket 消息异常"), true);
           break;
         default:
           break;
@@ -497,7 +533,7 @@ async function refreshMessages() {
     return;
   }
 
-  const resp = await apiRequest(`/api/chat/v1/conversations/${state.conversationId}/messages?limit=200`);
+  const resp = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${state.conversationId}/messages?limit=200`));
   const items = Array.isArray(resp.items) ? resp.items : [];
   mergeMessages(items);
 }
@@ -799,7 +835,7 @@ function handleMessageNack(payload) {
   if (errorText.includes("closed") || String(payload.error || "").includes("已关闭")) {
     applyConversationStatus("closed", true);
   }
-  setStatus(payload.error || "发送失败", true);
+  setStatus(extractErrorMessage(payload.error, "发送失败"), true);
 }
 
 function handleMessageStatusEvent(payload) {
@@ -994,7 +1030,7 @@ async function apiRequest(path, options = {}) {
   }
 
   if (!response.ok) {
-    const message = data.error || data?.error?.message || `请求失败 (${response.status})`;
+    const message = extractErrorMessage(data?.error, extractErrorMessage(data?.message, `请求失败 (${response.status})`));
     throw new Error(message);
   }
 
