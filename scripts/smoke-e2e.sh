@@ -175,7 +175,7 @@ if [ -z "$message_id" ] || [ "$message_id" = "0" ]; then
   echo "  发消息失败: ${message_resp}"
   exit 1
 fi
-list_message_resp="$(http_json GET "${GATEWAY_URL}/api/chat/v1/conversations/${conversation_id}/messages?limit=20")"
+list_message_resp="$(http_json GET "${GATEWAY_URL}/api/chat/v1/conversations/${conversation_id}/messages?limit=20&visitor_token=${VISITOR_TOKEN}")"
 echo "  message_id=${message_id}"
 
 echo "[8/9] 坐席认领并拉取会话列表"

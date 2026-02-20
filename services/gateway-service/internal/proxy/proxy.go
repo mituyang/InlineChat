@@ -1,14 +1,19 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
+
+type TargetResolver func(ctx context.Context) (string, error)
 
 func NewReverseProxy(targetRawURL string, stripPrefix string, requestIDHeader string, logger *zap.Logger) (http.Handler, error) {
 	target, err := url.Parse(targetRawURL)
@@ -62,6 +67,43 @@ func NewReverseProxy(targetRawURL string, stripPrefix string, requestIDHeader st
 	}
 
 	return rp, nil
+}
+
+func NewDynamicReverseProxy(resolveTarget TargetResolver, stripPrefix string, requestIDHeader string, logger *zap.Logger) (http.Handler, error) {
+	if resolveTarget == nil {
+		return nil, fmt.Errorf("resolveTarget is required")
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		resolveCtx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+		target, err := resolveTarget(resolveCtx)
+		cancel()
+		requestID := strings.TrimSpace(req.Header.Get(requestIDHeader))
+		if err != nil {
+			if logger != nil {
+				logger.Error("resolve dynamic upstream failed",
+					zap.Error(err),
+					zap.String("request_id", requestID),
+					zap.String("path", req.URL.Path),
+				)
+			}
+			writeErrorResponse(w, http.StatusBadGateway, requestID, "upstream_unavailable", "upstream service unavailable")
+			return
+		}
+
+		reverseProxy, err := NewReverseProxy(strings.TrimSpace(target), stripPrefix, requestIDHeader, logger)
+		if err != nil {
+			if logger != nil {
+				logger.Error("create dynamic reverse proxy failed",
+					zap.Error(err),
+					zap.String("target", target),
+					zap.String("request_id", requestID),
+				)
+			}
+			writeErrorResponse(w, http.StatusBadGateway, requestID, "upstream_unavailable", "upstream service unavailable")
+			return
+		}
+		reverseProxy.ServeHTTP(w, req)
+	}), nil
 }
 
 func joinURLPath(base string, path string) string {

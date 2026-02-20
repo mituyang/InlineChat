@@ -24,10 +24,12 @@ type chatCall struct {
 }
 
 type fakeChatClient struct {
-	mu    sync.Mutex
-	calls []chatCall
-	resp  *chatclient.Message
-	err   error
+	mu              sync.Mutex
+	calls           []chatCall
+	resp            *chatclient.Message
+	err             error
+	conversation    *chatclient.Conversation
+	conversationErr error
 }
 
 func (f *fakeChatClient) CreateMessage(_ context.Context, conversationID uint64, req chatclient.CreateMessageRequest) (*chatclient.Message, error) {
@@ -42,6 +44,21 @@ func (f *fakeChatClient) CreateMessage(_ context.Context, conversationID uint64,
 		return &cp, nil
 	}
 	return &chatclient.Message{ID: 1, ConversationID: conversationID, Status: "sent"}, nil
+}
+
+func (f *fakeChatClient) GetConversation(_ context.Context, conversationID uint64) (*chatclient.Conversation, error) {
+	if f.conversationErr != nil {
+		return nil, f.conversationErr
+	}
+	if f.conversation != nil {
+		cp := *f.conversation
+		return &cp, nil
+	}
+	return &chatclient.Conversation{
+		ID:           conversationID,
+		VisitorToken: "vt_1",
+		Status:       "open",
+	}, nil
 }
 
 func (f *fakeChatClient) lastCall() (chatCall, bool) {
@@ -64,7 +81,7 @@ func TestHandlerMessageSendDefaultVisitor(t *testing.T) {
 	ts := httptest.NewServer(r)
 	defer ts.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/1"
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/1?visitor_token=vt_1"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
@@ -165,7 +182,7 @@ func TestHandlerMessageSendAgentWithoutToken(t *testing.T) {
 	ts := httptest.NewServer(r)
 	defer ts.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/3"
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/3?visitor_token=vt_1"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
@@ -215,7 +232,7 @@ func TestHandlerMessageSendCreateMessageFailedReturnsNack(t *testing.T) {
 	ts := httptest.NewServer(r)
 	defer ts.Close()
 
-	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/5"
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/5?visitor_token=vt_1"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
@@ -257,6 +274,25 @@ func TestHandlerRejectInvalidAccessToken(t *testing.T) {
 	defer ts.Close()
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/4?access_token=bad"
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err == nil {
+		t.Fatal("expected websocket handshake error")
+	}
+	if resp == nil || resp.StatusCode != 401 {
+		t.Fatalf("expected 401 handshake response, got %+v err=%v", resp, err)
+	}
+}
+
+func TestHandlerRejectMissingVisitorToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewHandler(NewHub(), &fakeChatClient{}, []string{"*"}, time.Second, "secret", "inlinechat-auth", zap.NewNop())
+	r := gin.New()
+	r.GET("/ws/:conversation_id", handler.Serve)
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6"
 	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
 	if err == nil {
 		t.Fatal("expected websocket handshake error")

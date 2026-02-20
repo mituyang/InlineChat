@@ -34,7 +34,7 @@ func (r *RedisPubSub) Consume(ctx context.Context, fn func(conversationID string
 			return ctx.Err()
 		case msg, ok := <-ch:
 			if !ok {
-				return nil
+				return fmt.Errorf("redis pubsub channel closed")
 			}
 			conversationID := strings.TrimPrefix(msg.Channel, channelPrefix)
 			fn(conversationID, []byte(msg.Payload))

@@ -59,19 +59,27 @@ func main() {
 	if err != nil {
 		appLogger.Fatal("failed to resolve admin-service grpc target from etcd", zap.Error(err), zap.String("service_name", cfg.AdminServiceName))
 	}
-	realtimeTarget, err := shareddiscovery.ResolveWithRetry(resolver, cfg.RealtimeServiceName, "http", 30*time.Second)
+	initialRealtimeTarget, err := shareddiscovery.ResolveWithRetry(resolver, cfg.RealtimeServiceName, "http", 30*time.Second)
 	if err != nil {
 		appLogger.Fatal("failed to resolve realtime-service http target from etcd", zap.Error(err), zap.String("service_name", cfg.RealtimeServiceName))
 	}
 
-	realtimeProxy, err := proxy.NewReverseProxy(realtimeTarget, "", cfg.RequestIDHeader, appLogger)
+	realtimeProxy, err := proxy.NewDynamicReverseProxy(func(ctx context.Context) (string, error) {
+		return resolver.Resolve(ctx, cfg.RealtimeServiceName, "http")
+	}, "", cfg.RequestIDHeader, appLogger)
 	if err != nil {
-		appLogger.Fatal("invalid realtime proxy target", zap.Error(err), zap.String("target", realtimeTarget))
+		appLogger.Fatal("invalid realtime dynamic proxy", zap.Error(err))
 	}
 
 	dialTimeout := time.Duration(cfg.GRPCDialTimeoutSec) * time.Second
 	callTimeout := time.Duration(cfg.GRPCCallTimeoutSec) * time.Second
-	clients, err := grpcclient.New(chatTarget, authTarget, adminTarget, dialTimeout)
+	clients, err := grpcclient.NewDynamic(
+		resolver,
+		cfg.ChatServiceName,
+		cfg.AuthServiceName,
+		cfg.AdminServiceName,
+		dialTimeout,
+	)
 	if err != nil {
 		appLogger.Fatal("failed to connect grpc upstream", zap.Error(err))
 	}
@@ -85,7 +93,7 @@ func main() {
 		zap.String("chat_grpc_target", chatTarget),
 		zap.String("auth_grpc_target", authTarget),
 		zap.String("admin_grpc_target", adminTarget),
-		zap.String("realtime_http_target", realtimeTarget),
+		zap.String("realtime_http_target", initialRealtimeTarget),
 	)
 
 	httpHandler := handler.NewHTTPHandler(clients, callTimeout)

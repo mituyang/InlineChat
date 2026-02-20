@@ -391,6 +391,27 @@ func TestCreateMessageVisitorTokenMismatch(t *testing.T) {
 	}
 }
 
+func TestCreateMessageVisitorTokenRequired(t *testing.T) {
+	svc, _, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_expected", Status: "open"},
+	})
+
+	_, err := svc.CreateMessage(context.Background(), CreateMessageInput{
+		ConversationID: 1,
+		SenderType:     "visitor",
+		SenderID:       "",
+		Content:        "hello",
+		ClientMsgID:    "c2",
+		VisitorToken:   "",
+	})
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if err.Error() != "visitor_token is required" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestCreateMessagePublishEvent(t *testing.T) {
 	svc, _, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
 		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open"},

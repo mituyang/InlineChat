@@ -65,13 +65,13 @@ type createConversationRequest struct {
 func (h *HTTPHandler) createConversation(c *gin.Context) {
 	var req createConversationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		abortBadRequest(c, err.Error())
 		return
 	}
 	req.SiteID = strings.TrimSpace(req.SiteID)
 	req.VisitorToken = strings.TrimSpace(req.VisitorToken)
 	if req.SiteID == "" || req.VisitorToken == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "site_id and visitor_token are required"})
+		abortBadRequest(c, "site_id and visitor_token are required")
 		return
 	}
 
@@ -83,14 +83,14 @@ func (h *HTTPHandler) createConversation(c *gin.Context) {
 	})
 	if err != nil {
 		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid site_id"})
+			abortBadRequest(c, "invalid site_id")
 			return
 		}
 		handleGRPCError(c, err)
 		return
 	}
 	if strings.TrimSpace(strings.ToLower(siteResp.GetStatus())) != "active" {
-		c.JSON(http.StatusConflict, gin.H{"error": "site is not active"})
+		abortConflict(c, "site is not active")
 		return
 	}
 
@@ -109,20 +109,34 @@ func (h *HTTPHandler) createConversation(c *gin.Context) {
 func (h *HTTPHandler) getConversation(c *gin.Context) {
 	conversationID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation id"})
+		abortBadRequest(c, "invalid conversation id")
 		return
 	}
 
-	ctx, cancel := h.newCallContext(c)
-	defer cancel()
-
-	resp, err := h.clients.Chat.GetConversation(ctx, &chatv1.GetConversationRequest{Id: conversationID})
-	if err != nil {
-		handleGRPCError(c, err)
-		return
+	var conversation *chatv1.Conversation
+	if strings.TrimSpace(c.GetHeader("Authorization")) != "" {
+		actor, actorErr := h.requireAgentActor(c)
+		if actorErr != nil {
+			handleGRPCError(c, actorErr)
+			return
+		}
+		conversation, err = h.requireConversationForAgent(c, conversationID, actor.GetAgentId())
+		if err != nil {
+			return
+		}
+	} else {
+		visitorToken := strings.TrimSpace(c.Query("visitor_token"))
+		if visitorToken == "" {
+			abortBadRequest(c, "visitor_token is required when Authorization is missing")
+			return
+		}
+		conversation, err = h.requireConversationForVisitor(c, conversationID, visitorToken)
+		if err != nil {
+			return
+		}
 	}
 
-	c.JSON(http.StatusOK, conversationToJSON(resp))
+	c.JSON(http.StatusOK, conversationToJSON(conversation))
 }
 
 func (h *HTTPHandler) listConversations(c *gin.Context) {
@@ -137,7 +151,7 @@ func (h *HTTPHandler) listConversations(c *gin.Context) {
 	if raw := c.Query("limit"); raw != "" {
 		v, convErr := strconv.Atoi(raw)
 		if convErr != nil || v <= 0 || v > 200 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid limit"})
+			abortBadRequest(c, "invalid limit")
 			return
 		}
 		limit = v
@@ -145,7 +159,7 @@ func (h *HTTPHandler) listConversations(c *gin.Context) {
 	if raw := c.Query("offset"); raw != "" {
 		v, convErr := strconv.Atoi(raw)
 		if convErr != nil || v < 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid offset"})
+			abortBadRequest(c, "invalid offset")
 			return
 		}
 		offset = v
@@ -153,7 +167,7 @@ func (h *HTTPHandler) listConversations(c *gin.Context) {
 
 	statusFilter := strings.TrimSpace(c.Query("status"))
 	if statusFilter != "" && statusFilter != "open" && statusFilter != "closed" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid status"})
+		abortBadRequest(c, "invalid status")
 		return
 	}
 
@@ -162,7 +176,7 @@ func (h *HTTPHandler) listConversations(c *gin.Context) {
 	if raw := strings.TrimSpace(c.Query("assigned_agent_id")); raw != "" {
 		v, convErr := strconv.ParseUint(raw, 10, 64)
 		if convErr != nil || v == 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid assigned_agent_id"})
+			abortBadRequest(c, "invalid assigned_agent_id")
 			return
 		}
 		assignedAgentID = v
@@ -172,7 +186,7 @@ func (h *HTTPHandler) listConversations(c *gin.Context) {
 	if raw := strings.TrimSpace(c.Query("unassigned_only")); raw != "" {
 		v, convErr := strconv.ParseBool(raw)
 		if convErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid unassigned_only"})
+			abortBadRequest(c, "invalid unassigned_only")
 			return
 		}
 		unassignedOnly = v
@@ -224,23 +238,41 @@ type createMessageRequest struct {
 func (h *HTTPHandler) createMessage(c *gin.Context) {
 	conversationID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation id"})
+		abortBadRequest(c, "invalid conversation id")
 		return
 	}
 
 	var req createMessageRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		abortBadRequest(c, err.Error())
 		return
 	}
 
-	if req.SenderType == "agent" {
+	req.SenderType = strings.ToLower(strings.TrimSpace(req.SenderType))
+	req.VisitorToken = strings.TrimSpace(req.VisitorToken)
+
+	switch req.SenderType {
+	case "agent":
 		actor, actorErr := h.requireAgentActor(c)
 		if actorErr != nil {
 			handleGRPCError(c, actorErr)
 			return
 		}
 		req.SenderID = strconv.FormatUint(actor.GetAgentId(), 10)
+		if _, convErr := h.requireConversationForAgent(c, conversationID, actor.GetAgentId()); convErr != nil {
+			return
+		}
+	case "visitor":
+		if req.VisitorToken == "" {
+			abortBadRequest(c, "visitor_token is required for visitor sender_type")
+			return
+		}
+		if _, convErr := h.requireConversationForVisitor(c, conversationID, req.VisitorToken); convErr != nil {
+			return
+		}
+	default:
+		abortBadRequest(c, "invalid sender_type")
+		return
 	}
 
 	ctx, cancel := h.newCallContext(c)
@@ -265,7 +297,7 @@ func (h *HTTPHandler) createMessage(c *gin.Context) {
 func (h *HTTPHandler) listMessages(c *gin.Context) {
 	conversationID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation id"})
+		abortBadRequest(c, "invalid conversation id")
 		return
 	}
 
@@ -273,7 +305,7 @@ func (h *HTTPHandler) listMessages(c *gin.Context) {
 	if raw := c.Query("limit"); raw != "" {
 		v, convErr := strconv.Atoi(raw)
 		if convErr != nil || v <= 0 || v > 200 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid limit"})
+			abortBadRequest(c, "invalid limit")
 			return
 		}
 		limit = v
@@ -283,10 +315,30 @@ func (h *HTTPHandler) listMessages(c *gin.Context) {
 	if raw := c.Query("before_id"); raw != "" {
 		v, convErr := strconv.ParseUint(raw, 10, 64)
 		if convErr != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid before_id"})
+			abortBadRequest(c, "invalid before_id")
 			return
 		}
 		beforeID = v
+	}
+
+	if strings.TrimSpace(c.GetHeader("Authorization")) != "" {
+		actor, actorErr := h.requireAgentActor(c)
+		if actorErr != nil {
+			handleGRPCError(c, actorErr)
+			return
+		}
+		if _, convErr := h.requireConversationForAgent(c, conversationID, actor.GetAgentId()); convErr != nil {
+			return
+		}
+	} else {
+		visitorToken := strings.TrimSpace(c.Query("visitor_token"))
+		if visitorToken == "" {
+			abortBadRequest(c, "visitor_token is required when Authorization is missing")
+			return
+		}
+		if _, convErr := h.requireConversationForVisitor(c, conversationID, visitorToken); convErr != nil {
+			return
+		}
 	}
 
 	ctx, cancel := h.newCallContext(c)
@@ -317,17 +369,17 @@ type markMessagesReadRequest struct {
 func (h *HTTPHandler) markMessagesRead(c *gin.Context) {
 	conversationID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation id"})
+		abortBadRequest(c, "invalid conversation id")
 		return
 	}
 
 	var req markMessagesReadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		abortBadRequest(c, err.Error())
 		return
 	}
 	if req.LastReadMessageID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "last_read_message_id is required"})
+		abortBadRequest(c, "last_read_message_id is required")
 		return
 	}
 
@@ -343,7 +395,7 @@ func (h *HTTPHandler) markMessagesRead(c *gin.Context) {
 		actorType = "agent"
 		actorAgentID = actor.GetAgentId()
 	} else if visitorToken == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "visitor_token is required when Authorization is missing"})
+		abortBadRequest(c, "visitor_token is required when Authorization is missing")
 		return
 	}
 
@@ -374,7 +426,7 @@ func (h *HTTPHandler) claimConversation(c *gin.Context) {
 
 	conversationID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || conversationID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation id"})
+		abortBadRequest(c, "invalid conversation id")
 		return
 	}
 
@@ -406,13 +458,13 @@ func (h *HTTPHandler) transferConversation(c *gin.Context) {
 
 	conversationID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || conversationID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation id"})
+		abortBadRequest(c, "invalid conversation id")
 		return
 	}
 
 	var req transferConversationRequest
 	if err := c.ShouldBindJSON(&req); err != nil || req.ToAgentID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "to_agent_id is required"})
+		abortBadRequest(c, "to_agent_id is required")
 		return
 	}
 
@@ -442,7 +494,7 @@ func (h *HTTPHandler) closeConversation(c *gin.Context) {
 
 	conversationID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || conversationID == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation id"})
+		abortBadRequest(c, "invalid conversation id")
 		return
 	}
 
@@ -470,7 +522,7 @@ type loginRequest struct {
 func (h *HTTPHandler) login(c *gin.Context) {
 	var req loginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		abortBadRequest(c, err.Error())
 		return
 	}
 
@@ -518,7 +570,7 @@ type createSiteRequest struct {
 func (h *HTTPHandler) createSite(c *gin.Context) {
 	var req createSiteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		abortBadRequest(c, err.Error())
 		return
 	}
 
@@ -545,7 +597,7 @@ func (h *HTTPHandler) listSites(c *gin.Context) {
 	if raw := c.Query("limit"); raw != "" {
 		v, err := strconv.Atoi(raw)
 		if err != nil || v <= 0 || v > 200 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid limit"})
+			abortBadRequest(c, "invalid limit")
 			return
 		}
 		limit = v
@@ -553,7 +605,7 @@ func (h *HTTPHandler) listSites(c *gin.Context) {
 	if raw := c.Query("offset"); raw != "" {
 		v, err := strconv.Atoi(raw)
 		if err != nil || v < 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid offset"})
+			abortBadRequest(c, "invalid offset")
 			return
 		}
 		offset = v
@@ -589,7 +641,7 @@ type createAgentRequest struct {
 func (h *HTTPHandler) createAgent(c *gin.Context) {
 	var req createAgentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		abortBadRequest(c, err.Error())
 		return
 	}
 
@@ -617,7 +669,7 @@ func (h *HTTPHandler) listAgents(c *gin.Context) {
 	if raw := c.Query("limit"); raw != "" {
 		v, err := strconv.Atoi(raw)
 		if err != nil || v <= 0 || v > 200 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid limit"})
+			abortBadRequest(c, "invalid limit")
 			return
 		}
 		limit = v
@@ -625,7 +677,7 @@ func (h *HTTPHandler) listAgents(c *gin.Context) {
 	if raw := c.Query("offset"); raw != "" {
 		v, err := strconv.Atoi(raw)
 		if err != nil || v < 0 {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid offset"})
+			abortBadRequest(c, "invalid offset")
 			return
 		}
 		offset = v
@@ -675,6 +727,38 @@ func (h *HTTPHandler) requireAgentActor(c *gin.Context) (*authv1.MeResponse, err
 	return actor, nil
 }
 
+func (h *HTTPHandler) fetchConversation(c *gin.Context, conversationID uint64) (*chatv1.Conversation, error) {
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+	return h.clients.Chat.GetConversation(ctx, &chatv1.GetConversationRequest{Id: conversationID})
+}
+
+func (h *HTTPHandler) requireConversationForVisitor(c *gin.Context, conversationID uint64, visitorToken string) (*chatv1.Conversation, error) {
+	conversation, err := h.fetchConversation(c, conversationID)
+	if err != nil {
+		handleGRPCError(c, err)
+		return nil, err
+	}
+	if conversation.GetVisitorToken() != visitorToken {
+		abortForbidden(c, "forbidden")
+		return nil, status.Error(codes.PermissionDenied, "forbidden")
+	}
+	return conversation, nil
+}
+
+func (h *HTTPHandler) requireConversationForAgent(c *gin.Context, conversationID uint64, agentID uint64) (*chatv1.Conversation, error) {
+	conversation, err := h.fetchConversation(c, conversationID)
+	if err != nil {
+		handleGRPCError(c, err)
+		return nil, err
+	}
+	if assignedAgentID := conversation.GetAssignedAgentId(); assignedAgentID != 0 && assignedAgentID != agentID {
+		abortForbidden(c, "forbidden")
+		return nil, status.Error(codes.PermissionDenied, "forbidden")
+	}
+	return conversation, nil
+}
+
 func handleGRPCError(c *gin.Context, err error) {
 	st, ok := status.FromError(err)
 	if !ok {
@@ -684,38 +768,49 @@ func handleGRPCError(c *gin.Context, err error) {
 
 	switch st.Code() {
 	case codes.InvalidArgument:
-		c.JSON(http.StatusBadRequest, gin.H{"error": st.Message()})
+		abortBadRequest(c, st.Message())
 	case codes.NotFound:
-		c.JSON(http.StatusNotFound, gin.H{"error": st.Message()})
+		middleware.AbortWithError(c, http.StatusNotFound, "not_found", st.Message())
 	case codes.AlreadyExists:
-		c.JSON(http.StatusConflict, gin.H{"error": st.Message()})
+		middleware.AbortWithError(c, http.StatusConflict, "already_exists", st.Message())
 	case codes.Unauthenticated:
-		c.JSON(http.StatusUnauthorized, gin.H{"error": st.Message()})
+		middleware.AbortWithError(c, http.StatusUnauthorized, "unauthorized", st.Message())
 	case codes.PermissionDenied:
-		c.JSON(http.StatusForbidden, gin.H{"error": st.Message()})
+		middleware.AbortWithError(c, http.StatusForbidden, "forbidden", st.Message())
 	case codes.DeadlineExceeded:
 		middleware.AbortWithError(c, http.StatusGatewayTimeout, "upstream_timeout", "upstream timeout")
 	case codes.Unavailable:
 		middleware.AbortWithError(c, http.StatusBadGateway, "upstream_unavailable", "upstream service unavailable")
 	case codes.FailedPrecondition:
-		c.JSON(http.StatusConflict, gin.H{"error": st.Message()})
+		middleware.AbortWithError(c, http.StatusConflict, "failed_precondition", st.Message())
 	default:
 		msg := strings.TrimSpace(st.Message())
 		if msg == "" || msg == "internal error" {
 			msg = "internal error"
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": msg})
+		middleware.AbortWithError(c, http.StatusInternalServerError, "internal_error", msg)
 	}
+}
+
+func abortBadRequest(c *gin.Context, message string) {
+	middleware.AbortWithError(c, http.StatusBadRequest, "invalid_argument", message)
+}
+
+func abortConflict(c *gin.Context, message string) {
+	middleware.AbortWithError(c, http.StatusConflict, "conflict", message)
+}
+
+func abortForbidden(c *gin.Context, message string) {
+	middleware.AbortWithError(c, http.StatusForbidden, "forbidden", message)
 }
 
 func conversationToJSON(item *chatv1.Conversation) gin.H {
 	payload := gin.H{
-		"id":            item.GetId(),
-		"site_id":       item.GetSiteId(),
-		"visitor_token": item.GetVisitorToken(),
-		"status":        item.GetStatus(),
-		"created_at":    item.GetCreatedAt(),
-		"updated_at":    item.GetUpdatedAt(),
+		"id":         item.GetId(),
+		"site_id":    item.GetSiteId(),
+		"status":     item.GetStatus(),
+		"created_at": item.GetCreatedAt(),
+		"updated_at": item.GetUpdatedAt(),
 	}
 	if item.GetAssignedAgentId() > 0 {
 		payload["assigned_agent_id"] = item.GetAssignedAgentId()

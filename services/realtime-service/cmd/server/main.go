@@ -63,14 +63,12 @@ func main() {
 		}
 	}()
 
-	chatTarget, err := shareddiscovery.ResolveWithRetry(resolver, cfg.ChatServiceName, "grpc", 30*time.Second)
-	if err != nil {
+	if _, err := shareddiscovery.ResolveWithRetry(resolver, cfg.ChatServiceName, "grpc", 30*time.Second); err != nil {
 		appLogger.Fatal("failed to resolve chat grpc target from etcd", zap.Error(err), zap.String("service_name", cfg.ChatServiceName))
 	}
-
-	chatClient, err := chatclient.New(chatTarget, dialTimeout)
+	chatClient, err := chatclient.NewDynamic(resolver, cfg.ChatServiceName, "grpc", dialTimeout)
 	if err != nil {
-		appLogger.Fatal("failed to connect chat grpc", zap.Error(err), zap.String("target", chatTarget))
+		appLogger.Fatal("failed to connect chat grpc", zap.Error(err), zap.String("service_name", cfg.ChatServiceName))
 	}
 	defer func() {
 		if err := chatClient.Close(); err != nil {
@@ -112,7 +110,7 @@ func main() {
 	}()
 
 	appLogger.Info("resolved and registered discovery endpoints",
-		zap.String("chat_grpc_target", chatTarget),
+		zap.String("chat_grpc_target", chatClient.Target()),
 		zap.String("realtime_http_advertise", cfg.ServiceAdvertiseHTTPEndpoint),
 		zap.String("service_name", cfg.ServiceName),
 	)
@@ -120,54 +118,72 @@ func main() {
 	consumeCtx, stopConsume := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopConsume()
 	go func() {
-		err := publisher.Consume(consumeCtx, func(conversationID string, payload []byte) {
-			eventType, ok := parseMessageEventType(payload)
-			if !ok {
-				return
-			}
-			if eventType == "message.status" {
-				_ = hub.Broadcast(conversationID, payload, "")
-				return
-			}
-			if eventType != "message.new" {
-				return
-			}
-
-			eventConversationID, messageID, senderType, ok := parseMessageNewEvent(payload)
-			if !ok {
-				return
-			}
-
-			delivered := hub.Broadcast(conversationID, payload, senderType)
-			if !delivered || senderType == "" || messageID == 0 {
-				return
-			}
-
-			targetConversationID := eventConversationID
-			if targetConversationID == 0 {
-				id, err := strconv.ParseUint(conversationID, 10, 64)
-				if err != nil {
-					appLogger.Warn("skip mark delivered due to invalid conversation id",
-						zap.String("conversation_id", conversationID),
-						zap.Error(err),
-					)
+		retryDelay := time.Second
+		for {
+			err := publisher.Consume(consumeCtx, func(conversationID string, payload []byte) {
+				eventType, ok := parseMessageEventType(payload)
+				if !ok {
 					return
 				}
-				targetConversationID = id
+				if eventType == "message.status" {
+					_ = hub.Broadcast(conversationID, payload, "")
+					return
+				}
+				if eventType != "message.new" {
+					return
+				}
+
+				eventConversationID, messageID, senderType, ok := parseMessageNewEvent(payload)
+				if !ok {
+					return
+				}
+
+				delivered := hub.Broadcast(conversationID, payload, senderType)
+				if !delivered || senderType == "" || messageID == 0 {
+					return
+				}
+
+				targetConversationID := eventConversationID
+				if targetConversationID == 0 {
+					id, err := strconv.ParseUint(conversationID, 10, 64)
+					if err != nil {
+						appLogger.Warn("skip mark delivered due to invalid conversation id",
+							zap.String("conversation_id", conversationID),
+							zap.Error(err),
+						)
+						return
+					}
+					targetConversationID = id
+				}
+
+				ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
+				defer cancel()
+				if _, err := chatClient.MarkMessageDelivered(ctx, targetConversationID, messageID); err != nil {
+					appLogger.Warn("mark message delivered failed",
+						zap.Error(err),
+						zap.Uint64("conversation_id", targetConversationID),
+						zap.Uint64("message_id", messageID),
+					)
+				}
+			})
+			if consumeCtx.Err() != nil {
+				return
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
-			defer cancel()
-			if _, err := chatClient.MarkMessageDelivered(ctx, targetConversationID, messageID); err != nil {
-				appLogger.Warn("mark message delivered failed",
-					zap.Error(err),
-					zap.Uint64("conversation_id", targetConversationID),
-					zap.Uint64("message_id", messageID),
-				)
+			appLogger.Warn("redis consume loop interrupted, retrying",
+				zap.Error(err),
+				zap.Duration("retry_after", retryDelay),
+			)
+			timer := time.NewTimer(retryDelay)
+			select {
+			case <-consumeCtx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
 			}
-		})
-		if err != nil && consumeCtx.Err() == nil {
-			appLogger.Error("redis consume loop exited", zap.Error(err))
+			if retryDelay < 5*time.Second {
+				retryDelay *= 2
+			}
 		}
 	}()
 

@@ -20,6 +20,10 @@ type Clients struct {
 	chatConn  *grpc.ClientConn
 	authConn  *grpc.ClientConn
 	adminConn *grpc.ClientConn
+
+	chatConnManager  *serviceConn
+	authConnManager  *serviceConn
+	adminConnManager *serviceConn
 }
 
 func New(chatTarget string, authTarget string, adminTarget string, dialTimeout time.Duration) (*Clients, error) {
@@ -53,6 +57,22 @@ func New(chatTarget string, authTarget string, adminTarget string, dialTimeout t
 
 func (c *Clients) Close() error {
 	var closeErr error
+
+	if c.chatConnManager != nil {
+		if err := c.chatConnManager.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if c.authConnManager != nil {
+		if err := c.authConnManager.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+	if c.adminConnManager != nil {
+		if err := c.adminConnManager.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
 
 	if c.chatConn != nil {
 		if err := c.chatConn.Close(); err != nil && closeErr == nil {

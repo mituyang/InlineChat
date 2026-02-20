@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -69,7 +70,7 @@ func main() {
 		fatalf("创建会话返回无效 conversation_id")
 	}
 
-	wsURL := toWSURL(gatewayURL) + "/ws/" + strconv.FormatUint(conversationResp.ID, 10)
+	wsURL := toWSURL(gatewayURL) + "/ws/" + strconv.FormatUint(conversationResp.ID, 10) + "?visitor_token=" + url.QueryEscape(visitorToken)
 	config, err := websocket.NewConfig(wsURL, gatewayURL)
 	if err != nil {
 		fatalf("构建 websocket 配置失败: %v", err)
@@ -103,7 +104,7 @@ func main() {
 	}
 
 	listResp := listMessagesResponse{}
-	if err := requestJSON(http.MethodGet, fmt.Sprintf("%s/api/chat/v1/conversations/%d/messages?limit=50", gatewayURL, conversationResp.ID), nil, &listResp); err != nil {
+	if err := requestJSON(http.MethodGet, fmt.Sprintf("%s/api/chat/v1/conversations/%d/messages?limit=50&visitor_token=%s", gatewayURL, conversationResp.ID, url.QueryEscape(visitorToken)), nil, &listResp); err != nil {
 		fatalf("拉取消息失败: %v", err)
 	}
 	if !hasClientMsgID(listResp.Items, clientMsgIDFromWS) {

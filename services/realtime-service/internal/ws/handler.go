@@ -12,6 +12,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"inlinechat/services/realtime-service/internal/chatclient"
 	"inlinechat/services/realtime-service/internal/security"
@@ -41,12 +43,14 @@ type sendMessagePayload struct {
 }
 
 type connectionContext struct {
-	Role    string
-	AgentID uint64
+	Role         string
+	AgentID      uint64
+	VisitorToken string
 }
 
 type messageClient interface {
 	CreateMessage(ctx context.Context, conversationID uint64, reqBody chatclient.CreateMessageRequest) (*chatclient.Message, error)
+	GetConversation(ctx context.Context, conversationID uint64) (*chatclient.Conversation, error)
 }
 
 func NewHandler(
@@ -82,7 +86,13 @@ func (h *Handler) Serve(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "conversation_id is required"})
 		return
 	}
-	connCtx, code, err := h.resolveConnectionContext(c)
+	conversationIDUint, err := strconv.ParseUint(conversationID, 10, 64)
+	if err != nil || conversationIDUint == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation_id"})
+		return
+	}
+
+	connCtx, code, err := h.resolveConnectionContext(c, conversationIDUint)
 	if err != nil {
 		c.JSON(code, gin.H{"error": err.Error()})
 		return
@@ -117,27 +127,55 @@ func (h *Handler) Serve(c *gin.Context) {
 	})
 }
 
-func (h *Handler) resolveConnectionContext(c *gin.Context) (connectionContext, int, error) {
+func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64) (connectionContext, int, error) {
 	accessToken := strings.TrimSpace(c.Query("access_token"))
-	if accessToken == "" {
-		return connectionContext{Role: "visitor"}, 0, nil
+	if accessToken != "" {
+		claims, err := security.ParseToken(h.jwtSecret, h.jwtIssuer, accessToken)
+		if err != nil {
+			h.logger.Warn("invalid ws access_token", zap.Error(err))
+			return connectionContext{}, http.StatusUnauthorized, fmt.Errorf("invalid access_token")
+		}
+		if claims.Role != "agent" {
+			return connectionContext{}, http.StatusForbidden, fmt.Errorf("agent role required")
+		}
+		if claims.AgentID == 0 {
+			return connectionContext{}, http.StatusUnauthorized, fmt.Errorf("invalid access_token")
+		}
+
+		return connectionContext{
+			Role:    "agent",
+			AgentID: claims.AgentID,
+		}, 0, nil
 	}
 
-	claims, err := security.ParseToken(h.jwtSecret, h.jwtIssuer, accessToken)
+	visitorToken := strings.TrimSpace(c.Query("visitor_token"))
+	if visitorToken == "" {
+		return connectionContext{}, http.StatusUnauthorized, fmt.Errorf("visitor_token is required")
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), h.chatCallTimeout)
+	defer cancel()
+
+	conversation, err := h.chatClient.GetConversation(ctx, conversationID)
 	if err != nil {
-		h.logger.Warn("invalid ws access_token", zap.Error(err))
-		return connectionContext{}, http.StatusUnauthorized, fmt.Errorf("invalid access_token")
+		if st, ok := status.FromError(err); ok {
+			switch st.Code() {
+			case codes.NotFound:
+				return connectionContext{}, http.StatusNotFound, fmt.Errorf("conversation not found")
+			case codes.DeadlineExceeded:
+				return connectionContext{}, http.StatusGatewayTimeout, fmt.Errorf("upstream timeout")
+			default:
+				return connectionContext{}, http.StatusBadGateway, fmt.Errorf("upstream unavailable")
+			}
+		}
+		return connectionContext{}, http.StatusBadGateway, fmt.Errorf("upstream unavailable")
 	}
-	if claims.Role != "agent" {
-		return connectionContext{}, http.StatusForbidden, fmt.Errorf("agent role required")
+	if strings.TrimSpace(conversation.VisitorToken) == "" || conversation.VisitorToken != visitorToken {
+		return connectionContext{}, http.StatusForbidden, fmt.Errorf("invalid visitor_token")
 	}
-	if claims.AgentID == 0 {
-		return connectionContext{}, http.StatusUnauthorized, fmt.Errorf("invalid access_token")
-	}
-
 	return connectionContext{
-		Role:    "agent",
-		AgentID: claims.AgentID,
+		Role:         "visitor",
+		VisitorToken: visitorToken,
 	}, 0, nil
 }
 
@@ -185,6 +223,14 @@ func (h *Handler) onSendMessage(ctx context.Context, conversationID string, raw 
 	case "visitor":
 		if connCtx.Role != "visitor" {
 			h.sendNack(client, payload.ClientMsgID, "agent connection cannot send visitor message")
+			return nil
+		}
+		payload.VisitorToken = strings.TrimSpace(payload.VisitorToken)
+		if payload.VisitorToken == "" {
+			payload.VisitorToken = connCtx.VisitorToken
+		}
+		if payload.VisitorToken != connCtx.VisitorToken {
+			h.sendNack(client, payload.ClientMsgID, "invalid visitor_token")
 			return nil
 		}
 	case "agent":

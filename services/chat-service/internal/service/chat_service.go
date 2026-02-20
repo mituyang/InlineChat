@@ -183,8 +183,18 @@ func (s *ChatService) CreateMessage(ctx context.Context, input CreateMessageInpu
 		return nil, err
 	}
 
-	if input.SenderType == "visitor" && input.VisitorToken != "" && conversation.VisitorToken != input.VisitorToken {
-		return nil, fmt.Errorf("visitor token does not match conversation")
+	if conversation.Status == "closed" {
+		return nil, ErrConversationClosed
+	}
+
+	if input.SenderType == "visitor" {
+		input.VisitorToken = strings.TrimSpace(input.VisitorToken)
+		if input.VisitorToken == "" {
+			return nil, fmt.Errorf("visitor_token is required")
+		}
+		if conversation.VisitorToken != input.VisitorToken {
+			return nil, fmt.Errorf("visitor token does not match conversation")
+		}
 	}
 
 	existing, err := s.messageRepo.GetByClientMsgID(ctx, input.ConversationID, input.ClientMsgID)

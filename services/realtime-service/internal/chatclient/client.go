@@ -2,19 +2,18 @@ package chatclient
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/status"
 
 	chatv1 "inlinechat/services/realtime-service/internal/gen/chatv1"
 )
 
 type Client struct {
-	conn *grpc.ClientConn
-	rpc  chatv1.ChatInternalServiceClient
+	conn    *grpc.ClientConn
+	rpc     chatv1.ChatInternalServiceClient
+	gateway chatv1.ChatGatewayServiceClient
 }
 
 type CreateMessageRequest struct {
@@ -37,6 +36,13 @@ type Message struct {
 	Status         string `json:"status"`
 }
 
+type Conversation struct {
+	ID              uint64
+	VisitorToken    string
+	AssignedAgentID uint64
+	Status          string
+}
+
 type MarkMessageDeliveredResult struct {
 	Updated bool
 	Status  string
@@ -57,8 +63,9 @@ func New(target string, dialTimeout time.Duration) (*Client, error) {
 	}
 
 	return &Client{
-		conn: conn,
-		rpc:  chatv1.NewChatInternalServiceClient(conn),
+		conn:    conn,
+		rpc:     chatv1.NewChatInternalServiceClient(conn),
+		gateway: chatv1.NewChatGatewayServiceClient(conn),
 	}, nil
 }
 
@@ -79,9 +86,6 @@ func (c *Client) CreateMessage(ctx context.Context, conversationID uint64, reqBo
 		VisitorToken:   reqBody.VisitorToken,
 	})
 	if err != nil {
-		if st, ok := status.FromError(err); ok {
-			return nil, fmt.Errorf("chat-service grpc error [%s]: %s", st.Code().String(), st.Message())
-		}
 		return nil, err
 	}
 
@@ -104,14 +108,24 @@ func (c *Client) MarkMessageDelivered(ctx context.Context, conversationID uint64
 		MessageId:      messageID,
 	})
 	if err != nil {
-		if st, ok := status.FromError(err); ok {
-			return nil, fmt.Errorf("chat-service grpc error [%s]: %s", st.Code().String(), st.Message())
-		}
 		return nil, err
 	}
 
 	return &MarkMessageDeliveredResult{
 		Updated: resp.GetUpdated(),
 		Status:  resp.GetStatus(),
+	}, nil
+}
+
+func (c *Client) GetConversation(ctx context.Context, conversationID uint64) (*Conversation, error) {
+	resp, err := c.gateway.GetConversation(ctx, &chatv1.GetConversationRequest{Id: conversationID})
+	if err != nil {
+		return nil, err
+	}
+	return &Conversation{
+		ID:              resp.GetId(),
+		VisitorToken:    resp.GetVisitorToken(),
+		AssignedAgentID: resp.GetAssignedAgentId(),
+		Status:          resp.GetStatus(),
 	}, nil
 }
