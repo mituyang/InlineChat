@@ -331,7 +331,7 @@ function setActionPending(action, pending) {
   updateConversationActionState();
 }
 
-function updateConversationActionState() {
+function getActiveConversationCapability() {
   const loggedIn = Boolean(state.token && state.me);
   const conversation = state.activeConversation;
   const hasConversation =
@@ -347,18 +347,28 @@ function updateConversationActionState() {
   const isMine = meID > 0 && assignedAgentID > 0 && assignedAgentID === meID;
   const isUnassigned = assignedAgentID <= 0;
 
+  return {
+    hasConversation,
+    isOpen,
+    isMine,
+    isUnassigned,
+  };
+}
+
+function updateConversationActionState() {
+  const capability = getActiveConversationCapability();
+  const hasConversation = capability.hasConversation;
+  const isOpen = capability.isOpen;
+  const isMine = capability.isMine;
+  const isUnassigned = capability.isUnassigned;
+
   const selectPending = Boolean(state.actionPending.select);
   const canClaim =
     hasConversation && isOpen && isUnassigned && !selectPending && !state.actionPending.claim;
   const canTransfer =
     hasConversation && isOpen && isMine && !selectPending && !state.actionPending.transfer;
-  const canClose =
-    hasConversation &&
-    isOpen &&
-    !selectPending &&
-    !state.actionPending.close &&
-    (isMine || isUnassigned);
-  const canSend = hasConversation && isOpen && !selectPending && !state.actionPending.send;
+  const canClose = hasConversation && isOpen && isMine && !selectPending && !state.actionPending.close;
+  const canSend = hasConversation && isOpen && isMine && !selectPending && !state.actionPending.send;
 
   if (els.claimBtn) {
     els.claimBtn.disabled = !canClaim;
@@ -1550,6 +1560,19 @@ async function closeConversation() {
     setStatus("请先选择会话", true);
     return;
   }
+  const capability = getActiveConversationCapability();
+  if (!capability.hasConversation) {
+    setStatus("会话状态未就绪，请稍后重试。", true);
+    return;
+  }
+  if (!capability.isOpen) {
+    setStatus("会话已关闭，无法继续操作。", true);
+    return;
+  }
+  if (!capability.isMine) {
+    setStatus("请先认领会话后再关闭。", true);
+    return;
+  }
   if (!window.confirm("确认关闭当前会话吗？关闭后将不可继续接待。")) {
     return;
   }
@@ -1575,6 +1598,19 @@ async function sendAgentMessage() {
   }
   if (!state.activeConversationId) {
     setStatus("请先选择会话", true);
+    return;
+  }
+  const capability = getActiveConversationCapability();
+  if (!capability.hasConversation) {
+    setStatus("会话状态未就绪，请稍后重试。", true);
+    return;
+  }
+  if (!capability.isOpen) {
+    setStatus("会话已关闭，无法继续发送，请切换其他会话。", true);
+    return;
+  }
+  if (!capability.isMine) {
+    setStatus("请先认领会话后再发送消息。", true);
     return;
   }
   if (!state.me?.agent_id) {
