@@ -27,6 +27,7 @@ const state = {
   queueShortcut: "all",
   conversationSearch: "",
   conversations: [],
+  statsConversations: [],
   activeConversationId: "",
   activeConversation: null,
   selectionSeq: 0,
@@ -169,9 +170,18 @@ function bindEvents() {
     await refreshConversations();
   });
 
-  els.filterForm?.addEventListener("change", async () => {
-    state.queueShortcut = "all";
+  els.filterForm?.addEventListener("change", async (event) => {
+    const target = event.target;
+    if (target === els.statusFilter) {
+      const mode = String(els.statusFilter.value || "").trim();
+      state.queueMode = mode === "open" || mode === "closed" ? mode : "all";
+    }
+
+    enforceOwnershipFilterExclusivity(target);
+    syncStatusFilterWithQueueMode();
+    state.queueShortcut = resolveQueueShortcutFromFilters();
     renderQueueShortcuts();
+    renderQueueTabsMeta();
     await refreshConversations();
   });
 
@@ -185,7 +195,8 @@ function bindEvents() {
       return;
     }
     state.queueMode = mode;
-    state.queueShortcut = "all";
+    syncStatusFilterWithQueueMode();
+    state.queueShortcut = resolveQueueShortcutFromFilters();
     renderQueueShortcuts();
     renderQueueTabsMeta();
     await refreshConversations();
@@ -253,26 +264,22 @@ function bindEvents() {
 }
 
 function applyQueueShortcut(shortcut) {
-  state.queueShortcut = shortcut;
-
   if (shortcut === "unassigned-open") {
     state.queueMode = "open";
-    els.statusFilter.value = "";
     els.unassignedOnlyCheckbox.checked = true;
     els.mineOnlyCheckbox.checked = false;
   } else if (shortcut === "mine-open") {
     state.queueMode = "open";
-    els.statusFilter.value = "";
     els.unassignedOnlyCheckbox.checked = false;
     els.mineOnlyCheckbox.checked = true;
   } else {
     state.queueMode = "all";
-    els.statusFilter.value = "";
     els.unassignedOnlyCheckbox.checked = false;
-    els.mineOnlyCheckbox.checked = true;
-    state.queueShortcut = "all";
+    els.mineOnlyCheckbox.checked = false;
   }
 
+  syncStatusFilterWithQueueMode();
+  state.queueShortcut = resolveQueueShortcutFromFilters();
   renderQueueShortcuts();
   renderQueueTabsMeta();
 }
@@ -286,18 +293,34 @@ function renderQueueShortcuts() {
 }
 
 function resolveQueueShortcutFromFilters() {
-  const explicitStatus = (els.statusFilter.value || "").trim();
-  const status = explicitStatus || state.queueMode;
+  const status = state.queueMode;
   const unassignedOnly = Boolean(els.unassignedOnlyCheckbox.checked);
   const mineOnly = Boolean(els.mineOnlyCheckbox.checked);
 
-  if (status === "open" && unassignedOnly) {
+  if (status === "open" && unassignedOnly && !mineOnly) {
     return "unassigned-open";
   }
   if (status === "open" && !unassignedOnly && mineOnly) {
     return "mine-open";
   }
   return "all";
+}
+
+function syncStatusFilterWithQueueMode() {
+  const targetStatus = state.queueMode === "all" ? "" : state.queueMode;
+  if (els.statusFilter && els.statusFilter.value !== targetStatus) {
+    els.statusFilter.value = targetStatus;
+  }
+}
+
+function enforceOwnershipFilterExclusivity(target) {
+  if (target === els.unassignedOnlyCheckbox && els.unassignedOnlyCheckbox.checked) {
+    els.mineOnlyCheckbox.checked = false;
+    return;
+  }
+  if (target === els.mineOnlyCheckbox && els.mineOnlyCheckbox.checked) {
+    els.unassignedOnlyCheckbox.checked = false;
+  }
 }
 
 function setActionPending(action, pending) {
@@ -369,6 +392,7 @@ function applyAuthUI(loggedIn) {
   if (!loggedIn) {
     els.userBox.textContent = "未登录";
     state.conversations = [];
+    state.statsConversations = [];
     state.activeConversationId = "";
     state.activeConversation = null;
     state.selectionSeq = 0;
@@ -573,8 +597,8 @@ async function refreshConversations() {
   const search = new URLSearchParams();
   search.set("limit", "120");
 
-  const explicitStatus = (els.statusFilter.value || "").trim();
-  const status = explicitStatus || (state.queueMode === "all" ? "" : state.queueMode);
+  syncStatusFilterWithQueueMode();
+  const status = state.queueMode === "all" ? "" : state.queueMode;
   if (status) {
     search.set("status", status);
   }
@@ -593,12 +617,24 @@ async function refreshConversations() {
     search.set("assigned_agent_id", String(state.me.agent_id));
   }
 
-  const data = await apiRequest(`/api/chat/v1/conversations?${search.toString()}`, {
-    auth: true,
-  });
+  const [queueData, statsData] = await Promise.all([
+    apiRequest(`/api/chat/v1/conversations?${search.toString()}`, {
+      auth: true,
+    }),
+    // 顶部统计独立于队列筛选，始终基于全量会话快照。
+    apiRequest("/api/chat/v1/conversations?limit=200", {
+      auth: true,
+    }),
+  ]);
 
-  state.conversations = Array.isArray(data.items) ? data.items : [];
+  state.conversations = Array.isArray(queueData.items) ? queueData.items : [];
   state.conversations.sort((a, b) => {
+    const ta = new Date(a.updated_at || a.created_at || 0).getTime();
+    const tb = new Date(b.updated_at || b.created_at || 0).getTime();
+    return tb - ta;
+  });
+  state.statsConversations = Array.isArray(statsData.items) ? statsData.items : [];
+  state.statsConversations.sort((a, b) => {
     const ta = new Date(a.updated_at || a.created_at || 0).getTime();
     const tb = new Date(b.updated_at || b.created_at || 0).getTime();
     return tb - ta;
@@ -628,7 +664,7 @@ async function refreshConversations() {
   renderStats();
   renderQueueTabsMeta();
   renderQueueShortcuts();
-  void refreshUnreadCounts(state.conversations);
+  void refreshUnreadCounts(state.statsConversations);
 }
 
 async function refreshUnreadCounts(items) {
@@ -748,9 +784,10 @@ function renderConversations(items) {
 }
 
 function renderQueueTabsMeta() {
-  const all = state.conversations.length;
-  const open = state.conversations.filter((item) => item.status === "open").length;
-  const closed = state.conversations.filter((item) => item.status === "closed").length;
+  const items = Array.isArray(state.statsConversations) ? state.statsConversations : [];
+  const all = items.length;
+  const open = items.filter((item) => item.status === "open").length;
+  const closed = items.filter((item) => item.status === "closed").length;
 
   if (els.queueTabAll) {
     els.queueTabAll.textContent = `全部 ${all}`;
@@ -1376,7 +1413,7 @@ async function reportConversationRead(conversationID, lastReadMessageID) {
 }
 
 function renderStats() {
-  const items = Array.isArray(state.conversations) ? state.conversations : [];
+  const items = Array.isArray(state.statsConversations) ? state.statsConversations : [];
   const meID = Number(state.me?.agent_id || 0);
 
   const total = items.length;
