@@ -719,31 +719,37 @@ function renderMessages(items) {
   els.messages.innerHTML = "";
 
   for (const item of items) {
-    const block = document.createElement("article");
-    block.className = `message ${item.sender_type === "visitor" ? "self" : "other"}`;
+    const isSelf = item.sender_type === "visitor";
+    const row = document.createElement("article");
+    row.className = `message-row ${isSelf ? "self" : "other"}`;
 
-    const content = document.createElement("div");
-    content.textContent = item.content || "";
+    const bubble = document.createElement("div");
+    bubble.className = "message";
+    bubble.textContent = item.content || "";
 
     const meta = document.createElement("div");
     meta.className = "meta";
-    const isSelf = item.sender_type === "visitor";
-    const sender = isSelf ? "我" : item.sender_type === "agent" ? "客服" : "系统";
-    const statusText = formatMessageStatus(item.status);
-    meta.textContent = statusText
-      ? `${sender} · ${formatTime(item.created_at)} · ${statusText}`
-      : `${sender} · ${formatTime(item.created_at)}`;
+    meta.textContent = formatMessageMeta(item, isSelf);
     if (isSelf && item.status === "failed" && item.client_msg_id) {
-      meta.style.cursor = "pointer";
-      meta.title = "点击重发";
-      meta.addEventListener("click", () => {
+      const retry = () => {
         void resendMessage(item.client_msg_id);
+      };
+      meta.classList.add("retryable");
+      meta.setAttribute("role", "button");
+      meta.tabIndex = 0;
+      meta.title = "点击重发";
+      meta.addEventListener("click", retry);
+      meta.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          retry();
+        }
       });
     }
 
-    block.appendChild(content);
-    block.appendChild(meta);
-    els.messages.appendChild(block);
+    row.appendChild(bubble);
+    row.appendChild(meta);
+    els.messages.appendChild(row);
   }
 
   els.messages.scrollTop = els.messages.scrollHeight;
@@ -795,9 +801,50 @@ function formatTime(value) {
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return value;
+    return "";
   }
-  return date.toLocaleString("zh-CN", { hour12: false });
+
+  const now = new Date();
+  const time = date.toLocaleTimeString("zh-CN", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const isSameYear = date.getFullYear() === now.getFullYear();
+  const isSameDay =
+    isSameYear && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+
+  if (isSameDay) {
+    return time;
+  }
+  if (isSameYear) {
+    const monthDay = date.toLocaleDateString("zh-CN", {
+      month: "numeric",
+      day: "numeric",
+    });
+    return `${monthDay} ${time}`;
+  }
+
+  const fullDate = date.toLocaleDateString("zh-CN", {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  });
+  return `${fullDate} ${time}`;
+}
+
+function formatMessageMeta(message, isSelf) {
+  const timeText = formatTime(message?.created_at);
+  if (!isSelf) {
+    return timeText;
+  }
+
+  const statusText = formatMessageStatus(message?.status);
+  if (timeText && statusText) {
+    return `${timeText} ${statusText}`;
+  }
+  return timeText || statusText;
 }
 
 function formatMessageStatus(status) {
@@ -806,12 +853,6 @@ function formatMessageStatus(status) {
   }
   if (status === "failed") {
     return "发送失败";
-  }
-  if (status === "sent") {
-    return "已发送";
-  }
-  if (status === "delivered") {
-    return "已发送";
   }
   if (status === "read") {
     return "已读";

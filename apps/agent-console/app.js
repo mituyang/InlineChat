@@ -1123,35 +1123,36 @@ function renderMessages(items) {
   for (const item of items) {
     const mine = isMineMessage(item);
 
-    const block = document.createElement("article");
-    block.className = `message ${mine ? "mine" : "other"}`;
+    const row = document.createElement("article");
+    row.className = `message-row ${mine ? "mine" : "other"}`;
 
-    const content = document.createElement("div");
-    content.textContent = item.content || "";
+    const bubble = document.createElement("div");
+    bubble.className = "message";
+    bubble.textContent = item.content || "";
 
     const meta = document.createElement("div");
     meta.className = "meta";
-    const sender =
-      item.sender_type === "visitor"
-        ? "访客"
-        : item.sender_type === "agent"
-          ? `客服 ${item.sender_id || ""}`
-          : "系统";
-    const statusText = formatMessageStatus(item.status);
-    meta.textContent = statusText
-      ? `${sender} · ${formatTime(item.created_at)} · ${statusText}`
-      : `${sender} · ${formatTime(item.created_at)}`;
+    meta.textContent = formatMessageMeta(item, mine);
     if (mine && item.status === "failed" && item.client_msg_id) {
-      meta.style.cursor = "pointer";
-      meta.title = "点击重发";
-      meta.addEventListener("click", () => {
+      const retry = () => {
         void resendMessage(item.client_msg_id);
+      };
+      meta.classList.add("retryable");
+      meta.setAttribute("role", "button");
+      meta.tabIndex = 0;
+      meta.title = "点击重发";
+      meta.addEventListener("click", retry);
+      meta.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          retry();
+        }
       });
     }
 
-    block.appendChild(content);
-    block.appendChild(meta);
-    els.agentMessages.appendChild(block);
+    row.appendChild(bubble);
+    row.appendChild(meta);
+    els.agentMessages.appendChild(row);
   }
 
   els.agentMessages.scrollTop = els.agentMessages.scrollHeight;
@@ -1679,18 +1680,55 @@ function formatTime(value) {
   return date.toLocaleString("zh-CN", { hour12: false });
 }
 
+function formatMessageTime(value) {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const now = new Date();
+  const timeText = date.toLocaleTimeString("zh-CN", {
+    hour12: false,
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const isSameYear = date.getFullYear() === now.getFullYear();
+  const isSameDay =
+    isSameYear && date.getMonth() === now.getMonth() && date.getDate() === now.getDate();
+  if (isSameDay) {
+    return timeText;
+  }
+
+  const dateText = date.toLocaleDateString("zh-CN", {
+    year: isSameYear ? undefined : "numeric",
+    month: "numeric",
+    day: "numeric",
+  });
+  return `${dateText} ${timeText}`;
+}
+
+function formatMessageMeta(message, mine) {
+  const timeText = formatMessageTime(message?.created_at);
+  if (!mine) {
+    return timeText;
+  }
+  const statusText = formatMessageStatus(message?.status);
+  if (timeText && statusText) {
+    return `${timeText} ${statusText}`;
+  }
+  return timeText || statusText;
+}
+
 function formatMessageStatus(status) {
   if (status === "sending") {
     return "发送中";
   }
   if (status === "failed") {
     return "发送失败";
-  }
-  if (status === "sent") {
-    return "已发送";
-  }
-  if (status === "delivered") {
-    return "已发送";
   }
   if (status === "read") {
     return "已读";

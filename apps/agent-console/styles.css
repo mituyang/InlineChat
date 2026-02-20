@@ -1,21 +1,21 @@
 :root {
   color-scheme: light;
-  --bg-0: #f3f7fc;
-  --bg-1: #e8f2fc;
+  --bg-0: #f8fafc;
+  --bg-1: #edf4fb;
   --panel: #ffffff;
-  --panel-soft: #f8fbff;
-  --line: #d8e4f0;
-  --line-strong: #c5d4e5;
-  --text-main: #0f1c2e;
-  --text-sub: #56657c;
-  --brand: #0b6fb8;
-  --brand-hover: #095d9b;
-  --brand-soft: #e6f3fd;
+  --panel-soft: #f8fafc;
+  --line: #dbe4ee;
+  --line-strong: #c7d4e1;
+  --text-main: #0f172a;
+  --text-sub: #64748b;
+  --brand: #0891b2;
+  --brand-hover: #0e7490;
+  --brand-soft: #e6f7fb;
   --ghost: #334155;
   --danger: #b4232f;
   --danger-hover: #961d28;
-  --mine: #dff0ff;
-  --other: #f2f6fc;
+  --mine: #e2f7fc;
+  --other: #f1f5f9;
   --badge: #dc2626;
   --ok-bg: #eafbf1;
   --ok-text: #1b7a46;
@@ -23,27 +23,28 @@
   --warn-text: #a25f0f;
   --offline-bg: #f1f5f9;
   --offline-text: #64748b;
-  --shadow: 0 16px 30px rgba(15, 23, 42, 0.08);
+  --focus: rgba(34, 211, 238, 0.28);
+  --shadow: 0 10px 24px rgba(15, 23, 42, 0.07);
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg-0: #0b1220;
-  --bg-1: #101a2c;
-  --panel: #121d30;
-  --panel-soft: #0f1828;
-  --line: #25344b;
-  --line-strong: #334863;
-  --text-main: #e4edf7;
-  --text-sub: #9bb0c8;
-  --brand: #2998e5;
-  --brand-hover: #1f83c7;
-  --brand-soft: #193855;
-  --ghost: #4b617b;
+  --bg-0: #0f172a;
+  --bg-1: #111d31;
+  --panel: #132036;
+  --panel-soft: #102039;
+  --line: #2a3a52;
+  --line-strong: #37506f;
+  --text-main: #e2ebf5;
+  --text-sub: #9db1c8;
+  --brand: #22b8d6;
+  --brand-hover: #06a7c8;
+  --brand-soft: #193b52;
+  --ghost: #adc0d7;
   --danger: #c43c4b;
   --danger-hover: #ab3340;
-  --mine: #174369;
-  --other: #172538;
+  --mine: #17455e;
+  --other: #1a2b41;
   --badge: #f05050;
   --ok-bg: #113727;
   --ok-text: #87d6a8;
@@ -51,7 +52,8 @@
   --warn-text: #f0c475;
   --offline-bg: #223246;
   --offline-text: #a6bdd7;
-  --shadow: 0 16px 34px rgba(0, 0, 0, 0.38);
+  --focus: rgba(34, 211, 238, 0.4);
+  --shadow: 0 10px 26px rgba(0, 0, 0, 0.34);
 }
 
 * {
@@ -68,17 +70,13 @@ body {
 body {
   font-family: "PingFang SC", "Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
   color: var(--text-main);
-  background: radial-gradient(circle at 8% 6%, rgba(11, 111, 184, 0.16), transparent 36%),
-    radial-gradient(circle at 92% 2%, rgba(14, 165, 233, 0.1), transparent 40%),
-    linear-gradient(140deg, var(--bg-0), var(--bg-1));
+  background: linear-gradient(180deg, var(--bg-0), var(--bg-1));
   font-size: 14px;
   line-height: 1.45;
 }
 
 :root[data-theme="dark"] body {
-  background: radial-gradient(circle at 8% 6%, rgba(41, 152, 229, 0.2), transparent 38%),
-    radial-gradient(circle at 92% 2%, rgba(59, 130, 246, 0.14), transparent 40%),
-    linear-gradient(140deg, var(--bg-0), var(--bg-1));
+  background: linear-gradient(180deg, var(--bg-0), var(--bg-1));
 }
 
 body.auth-guard .shell {
@@ -97,7 +95,7 @@ body.auth-guard .shell {
 .card {
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 16px;
+  border-radius: 12px;
   box-shadow: var(--shadow);
 }
 
@@ -359,7 +357,7 @@ body.auth-guard .shell {
   cursor: pointer;
   display: grid;
   gap: 3px;
-  transition: border-color 0.15s ease, transform 0.15s ease, background 0.2s ease;
+  transition: border-color 0.18s ease, background-color 0.18s ease;
 }
 
 :root[data-theme="dark"] .conversation-item {
@@ -369,7 +367,6 @@ body.auth-guard .shell {
 
 .conversation-item:hover {
   border-color: #8ed2fb;
-  transform: translateY(-1px);
 }
 
 .conversation-item.active {
@@ -472,9 +469,9 @@ body.auth-guard .shell {
   background: #f8fafc;
   padding: 10px;
   overflow: auto;
-  display: grid;
-  align-content: start;
-  gap: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
   min-height: 0;
 }
 
@@ -482,26 +479,67 @@ body.auth-guard .shell {
   background: #0e1828;
 }
 
-.message {
+.message-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: fit-content;
   max-width: 80%;
-  border-radius: 12px;
-  padding: 9px 11px;
-  display: grid;
-  gap: 5px;
 }
 
-.message.mine {
+.message-row.mine {
   margin-left: auto;
+  align-items: flex-end;
+}
+
+.message-row.other {
+  margin-right: auto;
+  align-items: flex-start;
+}
+
+.message {
+  border-radius: 12px;
+  padding: 9px 11px;
+  width: fit-content;
+  max-width: 100%;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message-row.mine .message {
   background: var(--mine);
 }
 
-.message.other {
+.message-row.other .message {
   background: var(--other);
 }
 
-.message .meta {
+.message-row .meta {
   color: var(--text-sub);
   font-size: 11px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+}
+
+.message-row.mine .meta {
+  text-align: right;
+}
+
+.message-row.other .meta {
+  text-align: left;
+}
+
+.message-row .meta.retryable {
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.message-row .meta.retryable:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
+  border-radius: 6px;
 }
 
 .send-form {
@@ -657,8 +695,9 @@ textarea {
   border: 1px solid #c9d7e6;
   border-radius: 10px;
   padding: 7px 9px;
-  min-height: 36px;
+  min-height: 42px;
   background: #ffffff;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
 }
 
 :root[data-theme="dark"] input,
@@ -669,6 +708,14 @@ textarea {
   color: #d8e6f5;
 }
 
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  border-color: #06b6d4;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
 button {
   border: 0;
   border-radius: 10px;
@@ -676,8 +723,9 @@ button {
   cursor: pointer;
   color: #ffffff;
   background: var(--brand);
-  min-height: 36px;
+  min-height: 42px;
   font-size: 13px;
+  transition: background-color 0.18s ease, opacity 0.18s ease, border-color 0.18s ease, color 0.18s ease;
 }
 
 button:hover {
@@ -685,7 +733,9 @@ button:hover {
 }
 
 button.ghost {
-  background: var(--ghost);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--ghost);
 }
 
 button.danger {
@@ -699,6 +749,21 @@ button.danger:hover {
 button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
+}
+
+button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @media (max-width: 1460px) {
