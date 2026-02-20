@@ -259,7 +259,12 @@ func (h *HTTPHandler) createMessage(c *gin.Context) {
 			return
 		}
 		req.SenderID = strconv.FormatUint(actor.GetAgentId(), 10)
-		if _, convErr := h.requireConversationForAgent(c, conversationID, actor.GetAgentId()); convErr != nil {
+		conversation, convErr := h.requireConversationForAgent(c, conversationID, actor.GetAgentId())
+		if convErr != nil {
+			return
+		}
+		if conversation.GetAssignedAgentId() == 0 {
+			abortConflict(c, "conversation must be claimed before agent can send message")
 			return
 		}
 	case "visitor":

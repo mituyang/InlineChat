@@ -916,8 +916,15 @@ async function resendMessage(clientMsgID) {
   }
 }
 
+function shouldReportReadProgress() {
+  if (typeof document !== "undefined" && document.visibilityState && document.visibilityState !== "visible") {
+    return false;
+  }
+  return true;
+}
+
 async function reportReadProgress() {
-  if (!state.conversationId || !state.visitorToken || !Array.isArray(state.messages) || state.messages.length === 0) {
+  if (!shouldReportReadProgress() || !state.conversationId || !state.visitorToken || !Array.isArray(state.messages) || state.messages.length === 0) {
     return;
   }
 
@@ -1073,6 +1080,12 @@ function formatMessageStatus(status) {
   }
   return "";
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    void reportReadProgress();
+  }
+});
 
 window.addEventListener("beforeunload", () => {
   resetPendingMap();

@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
 
+	authv1 "inlinechat/services/gateway-service/internal/gen/authv1"
 	chatv1 "inlinechat/services/gateway-service/internal/gen/chatv1"
 	"inlinechat/services/gateway-service/internal/grpcclient"
 )
@@ -21,6 +22,11 @@ type chatAccessStub struct {
 	getConversationFn func(ctx context.Context, in *chatv1.GetConversationRequest, opts ...grpc.CallOption) (*chatv1.Conversation, error)
 	listMessagesFn    func(ctx context.Context, in *chatv1.ListMessagesRequest, opts ...grpc.CallOption) (*chatv1.ListMessagesResponse, error)
 	createMessageFn   func(ctx context.Context, in *chatv1.CreateMessageRequest, opts ...grpc.CallOption) (*chatv1.Message, error)
+}
+
+type authAccessStub struct {
+	authv1.AuthGatewayServiceClient
+	meFn func(ctx context.Context, in *authv1.MeRequest, opts ...grpc.CallOption) (*authv1.MeResponse, error)
 }
 
 func (s *chatAccessStub) GetConversation(ctx context.Context, in *chatv1.GetConversationRequest, opts ...grpc.CallOption) (*chatv1.Conversation, error) {
@@ -42,6 +48,13 @@ func (s *chatAccessStub) CreateMessage(ctx context.Context, in *chatv1.CreateMes
 		return s.createMessageFn(ctx, in, opts...)
 	}
 	return &chatv1.Message{}, nil
+}
+
+func (s *authAccessStub) Me(ctx context.Context, in *authv1.MeRequest, opts ...grpc.CallOption) (*authv1.MeResponse, error) {
+	if s.meFn != nil {
+		return s.meFn(ctx, in, opts...)
+	}
+	return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
 }
 
 func TestGetConversationRequiresVisitorTokenWithoutAuth(t *testing.T) {
@@ -187,5 +200,43 @@ func TestCreateMessageVisitorRequiresToken(t *testing.T) {
 	}
 	if createCalled {
 		t.Fatal("CreateMessage should not be called when visitor_token is missing")
+	}
+}
+
+func TestCreateMessageAgentRequiresClaimedConversation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	createCalled := false
+	h := NewHTTPHandler(&grpcclient.Clients{
+		Chat: &chatAccessStub{
+			getConversationFn: func(_ context.Context, _ *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
+				return &chatv1.Conversation{Id: 1, Status: "open", AssignedAgentId: 0}, nil
+			},
+			createMessageFn: func(_ context.Context, _ *chatv1.CreateMessageRequest, _ ...grpc.CallOption) (*chatv1.Message, error) {
+				createCalled = true
+				return &chatv1.Message{}, nil
+			},
+		},
+		Auth: &authAccessStub{
+			meFn: func(_ context.Context, _ *authv1.MeRequest, _ ...grpc.CallOption) (*authv1.MeResponse, error) {
+				return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
+			},
+		},
+	}, time.Second)
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	body := []byte(`{"sender_type":"agent","content":"hello","client_msg_id":"a1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/v1/conversations/1/messages", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer token")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusConflict, rr.Code, rr.Body.String())
+	}
+	if createCalled {
+		t.Fatal("CreateMessage should not be called when conversation is unclaimed")
 	}
 }

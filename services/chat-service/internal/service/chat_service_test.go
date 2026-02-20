@@ -412,9 +412,45 @@ func TestCreateMessageVisitorTokenRequired(t *testing.T) {
 	}
 }
 
-func TestCreateMessagePublishEvent(t *testing.T) {
-	svc, _, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
+func TestCreateMessageAgentRequiresClaimedConversation(t *testing.T) {
+	svc, _, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
 		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open"},
+	})
+
+	_, err := svc.CreateMessage(context.Background(), CreateMessageInput{
+		ConversationID: 1,
+		SenderType:     "agent",
+		SenderID:       "7",
+		Content:        "agent message",
+		ClientMsgID:    "agent_unclaimed_1",
+	})
+	if !errors.Is(err, ErrConversationUnassigned) {
+		t.Fatalf("expected ErrConversationUnassigned, got %v", err)
+	}
+}
+
+func TestCreateMessageAgentForbiddenForNonOwner(t *testing.T) {
+	owner := uint64(9)
+	svc, _, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open", AssignedAgentID: &owner},
+	})
+
+	_, err := svc.CreateMessage(context.Background(), CreateMessageInput{
+		ConversationID: 1,
+		SenderType:     "agent",
+		SenderID:       "7",
+		Content:        "agent message",
+		ClientMsgID:    "agent_forbidden_1",
+	})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestCreateMessagePublishEvent(t *testing.T) {
+	owner := uint64(7)
+	svc, _, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open", AssignedAgentID: &owner},
 	})
 
 	out, err := svc.CreateMessage(context.Background(), CreateMessageInput{

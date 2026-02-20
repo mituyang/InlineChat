@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -194,6 +195,23 @@ func (s *ChatService) CreateMessage(ctx context.Context, input CreateMessageInpu
 		}
 		if conversation.VisitorToken != input.VisitorToken {
 			return nil, fmt.Errorf("visitor token does not match conversation")
+		}
+	}
+
+	if input.SenderType == "agent" {
+		input.SenderID = strings.TrimSpace(input.SenderID)
+		if input.SenderID == "" {
+			return nil, fmt.Errorf("sender_id is required for agent sender_type")
+		}
+		senderAgentID, parseErr := strconv.ParseUint(input.SenderID, 10, 64)
+		if parseErr != nil || senderAgentID == 0 {
+			return nil, fmt.Errorf("invalid sender_id")
+		}
+		if conversation.AssignedAgentID == nil {
+			return nil, ErrConversationUnassigned
+		}
+		if *conversation.AssignedAgentID != senderAgentID {
+			return nil, ErrForbidden
 		}
 	}
 

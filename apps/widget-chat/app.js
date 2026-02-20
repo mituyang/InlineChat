@@ -415,6 +415,22 @@ function setViewMode(mode) {
   if (els.backBtn) {
     els.backBtn.hidden = nextMode !== "chat";
   }
+  if (nextMode === "chat") {
+    void reportReadProgress();
+  }
+}
+
+function shouldReportReadProgress() {
+  if (state.viewMode !== "chat") {
+    return false;
+  }
+  if (state.composeMode) {
+    return false;
+  }
+  if (typeof document !== "undefined" && document.visibilityState && document.visibilityState !== "visible") {
+    return false;
+  }
+  return true;
 }
 
 function normalizeConversationStatus(status) {
@@ -1310,7 +1326,7 @@ async function resendMessage(clientMsgID) {
 }
 
 async function reportReadProgress() {
-  if (!state.conversationID || !state.visitorToken || !Array.isArray(state.messages) || state.messages.length === 0) {
+  if (!shouldReportReadProgress() || !state.conversationID || !state.visitorToken || !Array.isArray(state.messages) || state.messages.length === 0) {
     return;
   }
 
@@ -1500,6 +1516,12 @@ function formatMessageStatus(status) {
   }
   return "";
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && state.viewMode === "chat") {
+    void reportReadProgress();
+  }
+});
 
 window.addEventListener("beforeunload", () => {
   resetPendingMap();
