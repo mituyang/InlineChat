@@ -447,7 +447,37 @@ func (h *HTTPHandler) claimConversation(c *gin.Context) {
 		return
 	}
 
+	h.tryMarkConversationReadAfterClaim(c, conversationID, actor.GetAgentId())
+
 	c.JSON(http.StatusOK, conversationToJSON(resp))
+}
+
+func (h *HTTPHandler) tryMarkConversationReadAfterClaim(c *gin.Context, conversationID uint64, agentID uint64) {
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	listResp, err := h.clients.Chat.ListMessages(ctx, &chatv1.ListMessagesRequest{
+		ConversationId: conversationID,
+		Limit:          1,
+	})
+	if err != nil {
+		return
+	}
+	items := listResp.GetItems()
+	if len(items) == 0 {
+		return
+	}
+	lastReadMessageID := items[0].GetId()
+	if lastReadMessageID == 0 {
+		return
+	}
+
+	_, _ = h.clients.Chat.MarkMessagesRead(ctx, &chatv1.MarkMessagesReadRequest{
+		ConversationId:    conversationID,
+		LastReadMessageId: lastReadMessageID,
+		ActorType:         "agent",
+		ActorAgentId:      agentID,
+	})
 }
 
 type transferConversationRequest struct {

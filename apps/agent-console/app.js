@@ -713,13 +713,42 @@ async function refreshUnreadCounts(items) {
     return;
   }
 
-  if (state.activeConversationId) {
+  if (state.activeConversationId && canAgentMarkConversationRead(state.activeConversationId)) {
     nextUnreadMap[state.activeConversationId] = 0;
   }
   state.unreadMap = nextUnreadMap;
   renderConversations(state.conversations);
   renderStats();
   renderQueueTabsMeta();
+}
+
+function canAgentMarkConversationRead(conversationID) {
+  const id = String(conversationID || "").trim();
+  if (!id) {
+    return false;
+  }
+
+  const meID = Number(state.me?.agent_id || 0);
+  if (meID <= 0) {
+    return false;
+  }
+
+  let conversation = null;
+  if (state.activeConversation && String(state.activeConversation.id || "") === id) {
+    conversation = state.activeConversation;
+  }
+  if (!conversation && Array.isArray(state.conversations)) {
+    conversation = state.conversations.find((item) => String(item?.id || "") === id) || null;
+  }
+  if (!conversation && Array.isArray(state.statsConversations)) {
+    conversation = state.statsConversations.find((item) => String(item?.id || "") === id) || null;
+  }
+  if (!conversation) {
+    return false;
+  }
+
+  const assignedAgentID = Number(conversation.assigned_agent_id || 0);
+  return assignedAgentID > 0 && assignedAgentID === meID;
 }
 
 function filteredConversations(items) {
@@ -1376,6 +1405,9 @@ function markConversationRead(conversationID, messages) {
   if (!conversationID || !Array.isArray(messages)) {
     return;
   }
+  if (!canAgentMarkConversationRead(conversationID)) {
+    return;
+  }
 
   const maxMessageID = messages.reduce((max, msg) => {
     const id = Number(msg.id || 0);
@@ -1403,6 +1435,9 @@ function markConversationRead(conversationID, messages) {
 
 async function reportConversationRead(conversationID, lastReadMessageID) {
   if (!conversationID || !state.token || !Number.isFinite(lastReadMessageID) || lastReadMessageID <= 0) {
+    return;
+  }
+  if (!canAgentMarkConversationRead(conversationID)) {
     return;
   }
 
@@ -1503,14 +1538,48 @@ async function claimConversation() {
     setStatus("请先选择会话", true);
     return;
   }
+  const conversationID = String(state.activeConversationId || "").trim();
 
   setActionPending("claim", true);
   try {
-    await apiRequest(`/api/chat/v1/conversations/${state.activeConversationId}/claim`, {
+    const claimedConversation = await apiRequest(`/api/chat/v1/conversations/${state.activeConversationId}/claim`, {
       method: "POST",
       auth: true,
     });
+    const meID = Number(state.me?.agent_id || 0);
+    const claimedByMe = meID > 0 && Number(claimedConversation?.assigned_agent_id || 0) === meID;
+    if (conversationID && claimedByMe) {
+      if (state.activeConversation && String(state.activeConversation.id || "") === conversationID) {
+        state.activeConversation = {
+          ...state.activeConversation,
+          ...claimedConversation,
+          assigned_agent_id: meID,
+        };
+      }
+      if (Array.isArray(state.conversations)) {
+        state.conversations = state.conversations.map((item) =>
+          String(item?.id || "") === conversationID ? { ...item, ...claimedConversation, assigned_agent_id: meID } : item
+        );
+      }
+      if (Array.isArray(state.statsConversations)) {
+        state.statsConversations = state.statsConversations.map((item) =>
+          String(item?.id || "") === conversationID ? { ...item, ...claimedConversation, assigned_agent_id: meID } : item
+        );
+      }
+      markConversationRead(conversationID, state.messages);
+    }
     await refreshConversations();
+    if (conversationID && conversationID === String(state.activeConversationId || "")) {
+      try {
+        await refreshMessages({
+          conversationID,
+          force: true,
+        });
+      } catch {
+        // 认领已成功，消息刷新失败不阻断主流程。
+      }
+      markConversationRead(conversationID, state.messages);
+    }
     setStatus("认领成功");
   } catch (error) {
     setStatus(error.message || "认领失败", true);
