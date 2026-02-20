@@ -9,19 +9,35 @@
   <body>
     <main class="chat-shell">
       <header class="chat-header">
-        <div>
+        <div class="chat-header-main">
+          <button id="backBtn" type="button" aria-label="返回会话列表" hidden>返回</button>
           <h1 id="titleText">在线客服</h1>
-          <p id="statusText">正在连接...</p>
         </div>
+        <p id="statusText">正在连接...</p>
         <button id="closeBtn" type="button" aria-label="关闭">×</button>
       </header>
 
-      <section id="messages" class="messages"></section>
+      <section id="historyView" class="history-view">
+        <div id="historyList" class="history-list"></div>
+        <div id="historyEmpty" class="history-empty" hidden>暂无历史会话</div>
+        <div class="history-actions">
+          <button id="startChatBtn" class="start-chat-btn" type="button">向我们发送消息</button>
+        </div>
+      </section>
 
-      <form id="sendForm" class="send-form">
-        <textarea id="contentInput" rows="2" placeholder="请输入消息（回车发送，Shift+回车换行）"></textarea>
-        <button id="sendBtn" type="submit">发送</button>
-      </form>
+      <section id="chatView" class="chat-view" hidden>
+        <section id="messages" class="messages"></section>
+
+        <div id="sessionNotice" class="session-notice" hidden>
+          <span id="sessionNoticeText">当前会话已关闭，无法继续发送消息。</span>
+          <button id="newSessionBtn" type="button">新建聊天</button>
+        </div>
+
+        <form id="sendForm" class="send-form">
+          <textarea id="contentInput" rows="2" placeholder="请输入消息（回车发送，Shift+回车换行）"></textarea>
+          <button id="sendBtn" type="submit">发送</button>
+        </form>
+      </section>
     </main>
 
     <script src="/app/widget/app.js" defer></script>

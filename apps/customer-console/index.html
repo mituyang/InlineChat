@@ -38,6 +38,10 @@
 
         <section class="panel messages-panel">
           <div id="messages" class="messages"></div>
+          <div id="sessionNotice" class="session-notice" hidden>
+            <span id="sessionNoticeText">当前会话已关闭，无法继续发送消息。</span>
+            <button id="sessionNoticeNewBtn" type="button">新建聊天</button>
+          </div>
           <form id="sendForm" class="send-form">
             <textarea id="contentInput" placeholder="输入消息，回车发送（Shift+回车换行）" rows="3"></textarea>
             <button id="sendBtn" type="submit">发送</button>

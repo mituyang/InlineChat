@@ -9,6 +9,7 @@ const state = {
   siteId: "",
   visitorToken: "",
   conversationId: "",
+  conversationStatus: "",
   ws: null,
   wsConversationId: "",
   wsConnected: false,
@@ -16,9 +17,11 @@ const state = {
   wsReconnectAttempt: 0,
   messages: [],
   pollTimer: null,
+  pollInFlight: false,
   lastReadReported: 0,
   lastReadInFlight: 0,
   pendingMap: {},
+  sendPending: false,
 };
 
 const els = {
@@ -32,6 +35,9 @@ const els = {
   sendForm: document.getElementById("sendForm"),
   contentInput: document.getElementById("contentInput"),
   sendBtn: document.getElementById("sendBtn"),
+  sessionNotice: document.getElementById("sessionNotice"),
+  sessionNoticeText: document.getElementById("sessionNoticeText"),
+  sessionNoticeNewBtn: document.getElementById("sessionNoticeNewBtn"),
   statusLine: document.getElementById("statusLine"),
 };
 
@@ -48,6 +54,7 @@ function init() {
 
   els.startBtn.addEventListener("click", () => startSession(false));
   els.newBtn.addEventListener("click", () => startSession(true));
+  els.sessionNoticeNewBtn.addEventListener("click", () => startSession(true));
 
   els.sendForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -60,6 +67,8 @@ function init() {
       await sendMessage();
     }
   });
+
+  updateSessionUI();
 }
 
 function loadVisitorToken() {
@@ -101,6 +110,79 @@ function removeConversation(siteId) {
   localStorage.setItem(STORAGE_KEYS.conversationMap, JSON.stringify(map));
 }
 
+function normalizeConversationStatus(status) {
+  const text = String(status || "")
+    .trim()
+    .toLowerCase();
+  if (text === "open" || text === "closed") {
+    return text;
+  }
+  return "";
+}
+
+function updateSessionUI() {
+  const hasConversation = Boolean(state.conversationId);
+  const isClosed = state.conversationStatus === "closed";
+  const canSend = hasConversation && !isClosed && !state.sendPending;
+
+  if (!hasConversation) {
+    els.contentInput.placeholder = "请先进入会话，然后发送消息";
+  } else if (isClosed) {
+    els.contentInput.placeholder = "会话已关闭，请点击“新建聊天”开始新的对话";
+  } else {
+    els.contentInput.placeholder = "输入消息，回车发送（Shift+回车换行）";
+  }
+
+  els.contentInput.disabled = !canSend;
+  els.sendBtn.disabled = !canSend;
+
+  if (els.sessionNotice) {
+    if (!hasConversation) {
+      els.sessionNotice.hidden = false;
+      if (els.sessionNoticeText) {
+        els.sessionNoticeText.textContent = "尚未进入会话，点击“新建聊天”开始对话。";
+      }
+    } else if (isClosed) {
+      els.sessionNotice.hidden = false;
+      if (els.sessionNoticeText) {
+        els.sessionNoticeText.textContent = `会话 #${state.conversationId} 已关闭，无法继续发送消息。`;
+      }
+    } else {
+      els.sessionNotice.hidden = true;
+    }
+  }
+}
+
+function applyConversationStatus(nextStatus, announceClosed) {
+  const normalized = normalizeConversationStatus(nextStatus);
+  if (!normalized) {
+    return;
+  }
+  const prev = state.conversationStatus;
+  state.conversationStatus = normalized;
+
+  if (normalized === "closed") {
+    closeWebSocket();
+    resetPendingMap();
+    if (announceClosed && prev !== "closed") {
+      setStatus("会话已关闭，请点击“新建聊天”开始新的对话。");
+    }
+  }
+
+  updateSessionUI();
+}
+
+async function syncConversationStatus() {
+  if (!state.conversationId) {
+    return;
+  }
+  const conversation = await apiRequest(`/api/chat/v1/conversations/${state.conversationId}`);
+  if (String(conversation.id || "") !== String(state.conversationId || "")) {
+    return;
+  }
+  applyConversationStatus(conversation.status, true);
+}
+
 async function startSession(forceNew) {
   const siteId = els.siteIdInput.value.trim();
   if (!siteId) {
@@ -112,18 +194,30 @@ async function startSession(forceNew) {
   localStorage.setItem(STORAGE_KEYS.siteId, siteId);
   state.visitorToken = loadVisitorToken();
   els.visitorTokenInput.value = state.visitorToken;
+  closeWebSocket();
+  stopPolling();
+  resetPendingMap();
+  state.conversationId = "";
+  state.conversationStatus = "";
+  state.messages = [];
+  state.sendPending = false;
+  els.conversationIdInput.value = "";
+  renderMessages([]);
+  updateSessionUI();
 
   try {
     setStatus("正在准备会话...");
     let conversationId = "";
+    let conversationMeta = null;
 
     if (!forceNew) {
       const map = getConversationMap();
       const existing = map[siteId];
       if (existing) {
         const conversation = await apiRequest(`/api/chat/v1/conversations/${existing}`);
-        if (conversation.site_id === siteId && conversation.visitor_token === state.visitorToken && conversation.status === "open") {
+        if (conversation.site_id === siteId && conversation.visitor_token === state.visitorToken) {
           conversationId = String(conversation.id);
+          conversationMeta = conversation;
         } else {
           removeConversation(siteId);
         }
@@ -139,21 +233,32 @@ async function startSession(forceNew) {
         },
       });
       conversationId = String(created.id);
+      conversationMeta = created;
       saveConversation(siteId, conversationId);
     }
 
     state.conversationId = conversationId;
+    state.conversationStatus = normalizeConversationStatus(conversationMeta?.status) || "open";
     state.lastReadReported = 0;
     state.lastReadInFlight = 0;
-    resetPendingMap();
+    state.sendPending = false;
     state.messages = [];
     renderMessages([]);
     els.conversationIdInput.value = conversationId;
+    updateSessionUI();
 
     await refreshMessages();
-    connectWebSocket();
+    if (state.conversationStatus === "open") {
+      connectWebSocket();
+    } else {
+      setWsBadge(false);
+    }
     startPolling();
-    setStatus(`已进入会话 #${conversationId}`);
+    if (state.conversationStatus === "closed") {
+      setStatus(`会话 #${conversationId} 已关闭，请点击“新建聊天”开始新的对话。`);
+    } else {
+      setStatus(`已进入会话 #${conversationId}`);
+    }
   } catch (error) {
     setStatus(error.message || "进入会话失败", true);
   }
@@ -168,9 +273,18 @@ async function sendMessage() {
     setStatus("请先进入会话", true);
     return;
   }
+  if (state.conversationStatus === "closed") {
+    updateSessionUI();
+    setStatus("会话已关闭，无法继续发送，请点击“新建聊天”。");
+    return;
+  }
+  if (state.sendPending) {
+    return;
+  }
 
   const clientMsgId = `c_${safeUUID()}`;
-  els.sendBtn.disabled = true;
+  state.sendPending = true;
+  updateSessionUI();
 
   try {
     const payload = {
@@ -188,7 +302,8 @@ async function sendMessage() {
     markMessageFailedByClientMsgID(clientMsgId);
     setStatus(error.message || "发送失败", true);
   } finally {
-    els.sendBtn.disabled = false;
+    state.sendPending = false;
+    updateSessionUI();
     els.contentInput.focus();
   }
 }
@@ -198,15 +313,32 @@ function startPolling() {
     clearInterval(state.pollTimer);
   }
   state.pollTimer = setInterval(() => {
-    if (!state.conversationId) {
+    if (!state.conversationId || state.pollInFlight) {
       return;
     }
-    if (state.wsConnected && state.wsConversationId === state.conversationId) {
-      return;
-    }
-    refreshMessages().catch((error) => {
-      setStatus(error.message || "消息刷新失败", true);
-    });
+
+    state.pollInFlight = true;
+    Promise.resolve()
+      .then(async () => {
+        await syncConversationStatus();
+        if (!state.conversationId) {
+          return;
+        }
+        if (state.conversationStatus === "closed") {
+          await refreshMessages();
+          return;
+        }
+        if (state.wsConnected && state.wsConversationId === state.conversationId) {
+          return;
+        }
+        await refreshMessages();
+      })
+      .catch((error) => {
+        setStatus(error.message || "消息刷新失败", true);
+      })
+      .finally(() => {
+        state.pollInFlight = false;
+      });
   }, 3000);
 }
 
@@ -215,10 +347,15 @@ function stopPolling() {
     clearInterval(state.pollTimer);
     state.pollTimer = null;
   }
+  state.pollInFlight = false;
 }
 
 function connectWebSocket() {
   if (!state.conversationId) {
+    return;
+  }
+  if (state.conversationStatus === "closed") {
+    setWsBadge(false);
     return;
   }
 
@@ -263,6 +400,14 @@ function connectWebSocket() {
         case "message.status":
           handleMessageStatusEvent(data.payload || {});
           break;
+        case "conversation.closed":
+          applyConversationStatus("closed", true);
+          break;
+        case "conversation.status":
+          if (data.payload && data.payload.status) {
+            applyConversationStatus(data.payload.status, true);
+          }
+          break;
         case "error":
           setStatus(data.error || "WebSocket 消息异常", true);
           break;
@@ -282,6 +427,9 @@ function connectWebSocket() {
     state.wsConnected = false;
     setWsBadge(false);
     if (conversationId !== state.conversationId) {
+      return;
+    }
+    if (state.conversationStatus === "closed") {
       return;
     }
     scheduleWsReconnect(conversationId);
@@ -321,6 +469,9 @@ function clearWsReconnectTimer() {
 
 function scheduleWsReconnect(conversationId) {
   if (!conversationId || conversationId !== state.conversationId) {
+    return;
+  }
+  if (state.conversationStatus === "closed") {
     return;
   }
   if (state.wsReconnectTimer) {
@@ -644,6 +795,10 @@ function handleMessageNack(payload) {
   }
   clearPending(clientMsgID);
   markMessageFailedByClientMsgID(clientMsgID);
+  const errorText = String(payload.error || "").toLowerCase();
+  if (errorText.includes("closed") || String(payload.error || "").includes("已关闭")) {
+    applyConversationStatus("closed", true);
+  }
   setStatus(payload.error || "发送失败", true);
 }
 

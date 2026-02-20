@@ -28,7 +28,10 @@ const state = {
   conversationSearch: "",
   conversations: [],
   activeConversationId: "",
+  activeConversation: null,
+  selectionSeq: 0,
   messages: [],
+  messageAbortController: null,
   ws: null,
   wsConversationId: "",
   wsConnected: false,
@@ -41,6 +44,13 @@ const state = {
   unreadSeq: 0,
   quickReplies: [...DEFAULT_QUICK_REPLIES],
   pendingMap: {},
+  actionPending: {
+    select: false,
+    claim: false,
+    transfer: false,
+    close: false,
+    send: false,
+  },
 };
 
 const els = {
@@ -112,6 +122,7 @@ async function init() {
   renderQueueShortcuts();
   resetConversationDetail();
   setWsIndicator("warn", "实时通道：待连接");
+  updateConversationActionState();
 
   const savedToken = readStaffToken();
   if (!savedToken) {
@@ -289,20 +300,90 @@ function resolveQueueShortcutFromFilters() {
   return "all";
 }
 
-function applyAuthUI(loggedIn) {
-  els.claimBtn.disabled = !loggedIn;
-  els.transferBtn.disabled = !loggedIn;
-  els.closeBtn.disabled = !loggedIn;
-  els.agentSendBtn.disabled = !loggedIn;
+function setActionPending(action, pending) {
+  if (!state.actionPending || !(action in state.actionPending)) {
+    return;
+  }
+  state.actionPending[action] = Boolean(pending);
+  updateConversationActionState();
+}
 
+function updateConversationActionState() {
+  const loggedIn = Boolean(state.token && state.me);
+  const conversation = state.activeConversation;
+  const hasConversation =
+    loggedIn &&
+    Boolean(state.activeConversationId) &&
+    Boolean(conversation) &&
+    String(conversation.id || "") === String(state.activeConversationId);
+
+  const status = String(conversation?.status || "").trim().toLowerCase();
+  const isOpen = status === "open";
+  const assignedAgentID = Number(conversation?.assigned_agent_id || 0);
+  const meID = Number(state.me?.agent_id || 0);
+  const isMine = meID > 0 && assignedAgentID > 0 && assignedAgentID === meID;
+  const isUnassigned = assignedAgentID <= 0;
+
+  const selectPending = Boolean(state.actionPending.select);
+  const canClaim =
+    hasConversation && isOpen && isUnassigned && !selectPending && !state.actionPending.claim;
+  const canTransfer =
+    hasConversation && isOpen && isMine && !selectPending && !state.actionPending.transfer;
+  const canClose =
+    hasConversation &&
+    isOpen &&
+    !selectPending &&
+    !state.actionPending.close &&
+    (isMine || isUnassigned);
+  const canSend = hasConversation && isOpen && !selectPending && !state.actionPending.send;
+
+  if (els.claimBtn) {
+    els.claimBtn.disabled = !canClaim;
+  }
+  if (els.transferBtn) {
+    els.transferBtn.disabled = !canTransfer;
+  }
+  if (els.transferAgentIdInput) {
+    els.transferAgentIdInput.disabled = !canTransfer;
+  }
+  if (els.closeBtn) {
+    els.closeBtn.disabled = !canClose;
+  }
+  if (els.agentSendBtn) {
+    els.agentSendBtn.disabled = !canSend;
+  }
+  if (els.agentContentInput) {
+    els.agentContentInput.disabled = !canSend;
+  }
+}
+
+function abortMessageRequest() {
+  if (!state.messageAbortController) {
+    return;
+  }
+  state.messageAbortController.abort();
+  state.messageAbortController = null;
+}
+
+function applyAuthUI(loggedIn) {
   if (!loggedIn) {
     els.userBox.textContent = "未登录";
     state.conversations = [];
     state.activeConversationId = "";
+    state.activeConversation = null;
+    state.selectionSeq = 0;
     state.messages = [];
     state.unreadMap = {};
     state.readCursor = {};
     state.queueShortcut = "all";
+    state.actionPending = {
+      select: false,
+      claim: false,
+      transfer: false,
+      close: false,
+      send: false,
+    };
+    abortMessageRequest();
     renderConversations([]);
     renderMessages([]);
     renderStats();
@@ -320,6 +401,7 @@ function applyAuthUI(loggedIn) {
   }
   document.body.classList.remove("auth-guard");
   renderStats();
+  updateConversationActionState();
 }
 
 async function fetchMe() {
@@ -529,7 +611,11 @@ async function refreshConversations() {
       updateActiveConversationHeader(found);
     } else {
       state.activeConversationId = "";
+      state.activeConversation = null;
+      state.selectionSeq += 1;
+      setActionPending("select", false);
       state.messages = [];
+      abortMessageRequest();
       closeWebSocket();
       renderMessages([]);
       resetConversationDetail();
@@ -681,21 +767,53 @@ function renderQueueTabsMeta() {
 }
 
 async function selectConversation(conversation) {
-  state.activeConversationId = String(conversation.id);
+  const conversationID = String(conversation?.id || "").trim();
+  if (!conversationID) {
+    return;
+  }
+
+  const selectionSeq = state.selectionSeq + 1;
+  state.selectionSeq = selectionSeq;
+  setActionPending("select", true);
+
+  state.activeConversationId = conversationID;
+  state.activeConversation = conversation;
   resetPendingMap();
   state.messages = [];
+  abortMessageRequest();
   clearWsReconnectTimer();
   state.wsReconnectAttempt = 0;
   renderConversations(state.conversations);
   updateActiveConversationHeader(conversation);
-  renderMessages([]);
+  renderMessages([], { forceScrollBottom: true });
 
-  await refreshMessages();
-  connectWebSocket();
-  setStatus(`已切换到会话 #${conversation.id}`);
+  try {
+    await refreshMessages({
+      conversationID,
+      force: true,
+      forceScrollBottom: true,
+    });
+    if (selectionSeq !== state.selectionSeq || conversationID !== String(state.activeConversationId || "")) {
+      return;
+    }
+
+    connectWebSocket();
+    setStatus(`已切换到会话 #${conversation.id}`);
+  } catch (error) {
+    if (selectionSeq !== state.selectionSeq || conversationID !== String(state.activeConversationId || "")) {
+      return;
+    }
+    setStatus(error.message || "消息加载失败", true);
+  } finally {
+    if (selectionSeq === state.selectionSeq) {
+      setActionPending("select", false);
+    }
+  }
 }
 
 function updateActiveConversationHeader(conversation) {
+  state.activeConversation = conversation || null;
+
   const assigned = conversation.assigned_agent_id ? `坐席 ${conversation.assigned_agent_id}` : "未分配";
   els.activeConversationTitle.textContent = `会话 #${conversation.id}`;
   els.activeConversationMeta.textContent = `状态 ${conversation.status} · ${assigned} · site=${conversation.site_id}`;
@@ -706,9 +824,11 @@ function updateActiveConversationHeader(conversation) {
   els.detailAssigned.textContent = assigned;
   els.detailUpdatedAt.textContent = formatTime(conversation.updated_at || conversation.created_at);
   els.detailWaitingDuration.textContent = formatDurationSince(conversation.updated_at || conversation.created_at);
+  updateConversationActionState();
 }
 
 function resetConversationDetail() {
+  state.activeConversation = null;
   els.detailConversationId.textContent = "-";
   els.detailStatus.textContent = "-";
   els.detailSiteId.textContent = "-";
@@ -716,21 +836,53 @@ function resetConversationDetail() {
   els.detailUpdatedAt.textContent = "-";
   els.detailWaitingDuration.textContent = "-";
   els.detailWsState.textContent = "未连接";
+  updateConversationActionState();
 }
 
-async function refreshMessages() {
-  if (!state.activeConversationId) {
+async function refreshMessages(options = {}) {
+  const conversationID = String(options.conversationID || state.activeConversationId || "").trim();
+  if (!conversationID) {
     return;
   }
 
-  const data = await apiRequest(`/api/chat/v1/conversations/${state.activeConversationId}/messages?limit=200`, {
-    auth: true,
-  });
-  const items = Array.isArray(data.items) ? data.items : [];
-  mergeMessages(items);
+  if (state.messageAbortController && !options.force) {
+    return;
+  }
+  if (options.force) {
+    abortMessageRequest();
+  }
+
+  const controller = new AbortController();
+  state.messageAbortController = controller;
+
+  try {
+    const data = await apiRequest(`/api/chat/v1/conversations/${conversationID}/messages?limit=200`, {
+      auth: true,
+      signal: controller.signal,
+    });
+    if (state.messageAbortController !== controller) {
+      return;
+    }
+    if (conversationID !== String(state.activeConversationId || "")) {
+      return;
+    }
+    const items = Array.isArray(data.items) ? data.items : [];
+    mergeMessages(items, {
+      forceScrollBottom: Boolean(options.forceScrollBottom),
+    });
+  } catch (error) {
+    if (isAbortError(error)) {
+      return;
+    }
+    throw error;
+  } finally {
+    if (state.messageAbortController === controller) {
+      state.messageAbortController = null;
+    }
+  }
 }
 
-function mergeMessages(items) {
+function mergeMessages(items, options = {}) {
   const byKey = new Map();
   const clientMsgKey = new Map();
 
@@ -784,7 +936,9 @@ function mergeMessages(items) {
   }
 
   state.messages = Array.from(byKey.values()).sort(compareMessageOrder);
-  renderMessages(state.messages);
+  renderMessages(state.messages, {
+    forceScrollBottom: Boolean(options.forceScrollBottom),
+  });
 
   if (state.activeConversationId) {
     markConversationRead(state.activeConversationId, state.messages);
@@ -1113,7 +1267,18 @@ function isMineMessage(message) {
   );
 }
 
-function renderMessages(items) {
+function isNearBottom(container, threshold = 72) {
+  if (!container) {
+    return true;
+  }
+  const gap = container.scrollHeight - container.scrollTop - container.clientHeight;
+  return gap <= threshold;
+}
+
+function renderMessages(items, options = {}) {
+  const forceScrollBottom = Boolean(options.forceScrollBottom);
+  const shouldStickBottom = forceScrollBottom || isNearBottom(els.agentMessages);
+
   if (!Array.isArray(items) || items.length === 0) {
     els.agentMessages.innerHTML = '<div class="empty">暂无消息</div>';
     return;
@@ -1155,7 +1320,9 @@ function renderMessages(items) {
     els.agentMessages.appendChild(row);
   }
 
-  els.agentMessages.scrollTop = els.agentMessages.scrollHeight;
+  if (shouldStickBottom) {
+    els.agentMessages.scrollTop = els.agentMessages.scrollHeight;
+  }
 }
 
 function markConversationRead(conversationID, messages) {
@@ -1282,11 +1449,15 @@ function insertQuickReply(text) {
 }
 
 async function claimConversation() {
+  if (state.actionPending.claim) {
+    return;
+  }
   if (!state.activeConversationId) {
     setStatus("请先选择会话", true);
     return;
   }
 
+  setActionPending("claim", true);
   try {
     await apiRequest(`/api/chat/v1/conversations/${state.activeConversationId}/claim`, {
       method: "POST",
@@ -1296,10 +1467,15 @@ async function claimConversation() {
     setStatus("认领成功");
   } catch (error) {
     setStatus(error.message || "认领失败", true);
+  } finally {
+    setActionPending("claim", false);
   }
 }
 
 async function transferConversation() {
+  if (state.actionPending.transfer) {
+    return;
+  }
   if (!state.activeConversationId) {
     setStatus("请先选择会话", true);
     return;
@@ -1311,6 +1487,7 @@ async function transferConversation() {
     return;
   }
 
+  setActionPending("transfer", true);
   try {
     await apiRequest(`/api/chat/v1/conversations/${state.activeConversationId}/transfer`, {
       method: "POST",
@@ -1323,15 +1500,24 @@ async function transferConversation() {
     setStatus(`已转接到坐席 ${toAgentID}`);
   } catch (error) {
     setStatus(error.message || "转接失败", true);
+  } finally {
+    setActionPending("transfer", false);
   }
 }
 
 async function closeConversation() {
+  if (state.actionPending.close) {
+    return;
+  }
   if (!state.activeConversationId) {
     setStatus("请先选择会话", true);
     return;
   }
+  if (!window.confirm("确认关闭当前会话吗？关闭后将不可继续接待。")) {
+    return;
+  }
 
+  setActionPending("close", true);
   try {
     await apiRequest(`/api/chat/v1/conversations/${state.activeConversationId}/close`, {
       method: "POST",
@@ -1341,10 +1527,15 @@ async function closeConversation() {
     setStatus("会话已关闭");
   } catch (error) {
     setStatus(error.message || "关闭失败", true);
+  } finally {
+    setActionPending("close", false);
   }
 }
 
 async function sendAgentMessage() {
+  if (state.actionPending.send) {
+    return;
+  }
   if (!state.activeConversationId) {
     setStatus("请先选择会话", true);
     return;
@@ -1360,9 +1551,11 @@ async function sendAgentMessage() {
   }
   const clientMsgID = `a_${safeUUID()}`;
 
-  els.agentSendBtn.disabled = true;
+  setActionPending("send", true);
   try {
-    mergeMessages([createLocalOutgoingMessage(content, clientMsgID, "agent", String(state.me.agent_id))]);
+    mergeMessages([createLocalOutgoingMessage(content, clientMsgID, "agent", String(state.me.agent_id))], {
+      forceScrollBottom: true,
+    });
     sendMessageViaWS({
       sender_type: "agent",
       content,
@@ -1374,7 +1567,7 @@ async function sendAgentMessage() {
     markMessageFailedByClientMsgID(clientMsgID);
     setStatus(error.message || "发送失败", true);
   } finally {
-    els.agentSendBtn.disabled = false;
+    setActionPending("send", false);
     els.agentContentInput.focus();
   }
 }
@@ -1514,6 +1707,10 @@ function setStatus(text, isError = false) {
   els.statusLine.classList.toggle("error", Boolean(isError));
 }
 
+function isAbortError(error) {
+  return Boolean(error && typeof error === "object" && error.name === "AbortError");
+}
+
 async function apiRequest(path, options = {}) {
   const headers = {
     "Content-Type": "application/json",
@@ -1531,6 +1728,7 @@ async function apiRequest(path, options = {}) {
     method: options.method || "GET",
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
+    signal: options.signal,
   });
 
   const text = await response.text();
