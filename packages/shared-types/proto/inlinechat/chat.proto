@@ -18,6 +18,7 @@ service ChatGatewayService {
   rpc MarkMessagesRead(MarkMessagesReadRequest) returns (MarkMessagesReadResponse);
   rpc ClaimConversation(ClaimConversationRequest) returns (Conversation);
   rpc TransferConversation(TransferConversationRequest) returns (Conversation);
+  rpc ConfirmTransferConversation(ConfirmTransferConversationRequest) returns (Conversation);
   rpc CloseConversation(CloseConversationRequest) returns (Conversation);
 }
 
@@ -31,6 +32,9 @@ message Conversation {
   uint64 assigned_agent_id = 7;
   string closed_at = 8;
   uint64 closed_by_agent_id = 9;
+  uint64 pending_transfer_to_agent_id = 10;
+  uint64 pending_transfer_from_agent_id = 11;
+  string pending_transfer_requested_at = 12;
 }
 
 message Message {
@@ -77,6 +81,12 @@ message TransferConversationRequest {
   uint64 actor_agent_id = 2;
   string actor_role = 3;
   uint64 to_agent_id = 4;
+}
+
+message ConfirmTransferConversationRequest {
+  uint64 conversation_id = 1;
+  uint64 actor_agent_id = 2;
+  string actor_role = 3;
 }
 
 message CloseConversationRequest {

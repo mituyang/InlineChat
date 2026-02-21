@@ -44,6 +44,7 @@ func (h *HTTPHandler) RegisterRoutes(r *gin.Engine) {
 	chatV1.POST("/conversations/:id/read", h.markMessagesRead)
 	chatV1.POST("/conversations/:id/claim", h.claimConversation)
 	chatV1.POST("/conversations/:id/transfer", h.transferConversation)
+	chatV1.POST("/conversations/:id/transfer/confirm", h.confirmTransferConversation)
 	chatV1.POST("/conversations/:id/close", h.closeConversation)
 
 	authV1 := r.Group("/api/auth/v1/auth")
@@ -215,10 +216,12 @@ func (h *HTTPHandler) listConversations(c *gin.Context) {
 	items := make([]any, 0, len(resp.GetItems()))
 	for _, item := range resp.GetItems() {
 		conv := conversationToJSON(item)
-		// 普通坐席默认只能看到自己负责或未分配会话，除非明确传过滤条件。
+		// 普通坐席默认只能看到自己负责、未分配，或待自己确认转接的会话（除非明确传过滤条件）。
 		if actor.GetRole() == "agent" && assignedAgentID == 0 && !unassignedOnly {
 			if id, ok := conv["assigned_agent_id"].(uint64); ok && id != 0 && id != actor.GetAgentId() {
-				continue
+				if pendingTo, hasPending := conv["pending_transfer_to_agent_id"].(uint64); !hasPending || pendingTo != actor.GetAgentId() {
+					continue
+				}
 			}
 		}
 		items = append(items, conv)
@@ -399,6 +402,14 @@ func (h *HTTPHandler) markMessagesRead(c *gin.Context) {
 		}
 		actorType = "agent"
 		actorAgentID = actor.GetAgentId()
+		conversation, convErr := h.requireConversationForAgent(c, conversationID, actor.GetAgentId())
+		if convErr != nil {
+			return
+		}
+		if conversation.GetAssignedAgentId() != actor.GetAgentId() {
+			abortForbidden(c, "conversation must be assigned before mark read")
+			return
+		}
 	} else if visitorToken == "" {
 		abortBadRequest(c, "visitor_token is required when Authorization is missing")
 		return
@@ -516,6 +527,37 @@ func (h *HTTPHandler) transferConversation(c *gin.Context) {
 		handleGRPCError(c, err)
 		return
 	}
+
+	c.JSON(http.StatusOK, conversationToJSON(resp))
+}
+
+func (h *HTTPHandler) confirmTransferConversation(c *gin.Context) {
+	actor, err := h.requireAgentActor(c)
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+
+	conversationID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || conversationID == 0 {
+		abortBadRequest(c, "invalid conversation id")
+		return
+	}
+
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	resp, err := h.clients.Chat.ConfirmTransferConversation(ctx, &chatv1.ConfirmTransferConversationRequest{
+		ConversationId: conversationID,
+		ActorAgentId:   actor.GetAgentId(),
+		ActorRole:      actor.GetRole(),
+	})
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+
+	h.tryMarkConversationReadAfterClaim(c, conversationID, actor.GetAgentId())
 
 	c.JSON(http.StatusOK, conversationToJSON(resp))
 }
@@ -790,8 +832,10 @@ func (h *HTTPHandler) requireConversationForAgent(c *gin.Context, conversationID
 		return nil, err
 	}
 	if assignedAgentID := conversation.GetAssignedAgentId(); assignedAgentID != 0 && assignedAgentID != agentID {
-		abortForbidden(c, "forbidden")
-		return nil, status.Error(codes.PermissionDenied, "forbidden")
+		if conversation.GetPendingTransferToAgentId() != agentID {
+			abortForbidden(c, "forbidden")
+			return nil, status.Error(codes.PermissionDenied, "forbidden")
+		}
 	}
 	return conversation, nil
 }
@@ -857,6 +901,15 @@ func conversationToJSON(item *chatv1.Conversation) gin.H {
 	}
 	if item.GetClosedByAgentId() > 0 {
 		payload["closed_by_agent_id"] = item.GetClosedByAgentId()
+	}
+	if item.GetPendingTransferToAgentId() > 0 {
+		payload["pending_transfer_to_agent_id"] = item.GetPendingTransferToAgentId()
+	}
+	if item.GetPendingTransferFromAgentId() > 0 {
+		payload["pending_transfer_from_agent_id"] = item.GetPendingTransferFromAgentId()
+	}
+	if item.GetPendingTransferRequestedAt() != "" {
+		payload["pending_transfer_requested_at"] = item.GetPendingTransferRequestedAt()
 	}
 	return payload
 }

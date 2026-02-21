@@ -24,6 +24,7 @@ type MessageRepository interface {
 	GetByID(ctx context.Context, conversationID uint64, messageID uint64) (*model.Message, error)
 	GetByClientMsgID(ctx context.Context, conversationID uint64, clientMsgID string) (*model.Message, error)
 	GetLatestByConversation(ctx context.Context, conversationID uint64) (*model.Message, error)
+	GetLatestByConversationExcludingSystem(ctx context.Context, conversationID uint64) (*model.Message, error)
 	ListByConversation(ctx context.Context, conversationID uint64, limit int, beforeID uint64) ([]model.Message, error)
 	MarkDelivered(ctx context.Context, conversationID uint64, messageID uint64) (bool, error)
 	MarkReadByConversationAndSender(ctx context.Context, conversationID uint64, senderType string, lastReadMessageID uint64) (int64, error)
@@ -175,6 +176,20 @@ func (r *GormMessageRepository) GetLatestByConversation(ctx context.Context, con
 	var message model.Message
 	if err := r.db.WithContext(ctx).
 		Where("conversation_id = ?", conversationID).
+		Order("id DESC").
+		First(&message).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &message, nil
+}
+
+func (r *GormMessageRepository) GetLatestByConversationExcludingSystem(ctx context.Context, conversationID uint64) (*model.Message, error) {
+	var message model.Message
+	if err := r.db.WithContext(ctx).
+		Where("conversation_id = ? AND sender_type <> ?", conversationID, "system").
 		Order("id DESC").
 		First(&message).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

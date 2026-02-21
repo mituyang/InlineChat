@@ -152,6 +152,7 @@ type ChatGatewayServiceClient interface {
 	MarkMessagesRead(ctx context.Context, in *MarkMessagesReadRequest, opts ...grpc.CallOption) (*MarkMessagesReadResponse, error)
 	ClaimConversation(ctx context.Context, in *ClaimConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
 	TransferConversation(ctx context.Context, in *TransferConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
+	ConfirmTransferConversation(ctx context.Context, in *ConfirmTransferConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
 	CloseConversation(ctx context.Context, in *CloseConversationRequest, opts ...grpc.CallOption) (*Conversation, error)
 }
 
@@ -235,6 +236,15 @@ func (c *chatGatewayServiceClient) TransferConversation(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *chatGatewayServiceClient) ConfirmTransferConversation(ctx context.Context, in *ConfirmTransferConversationRequest, opts ...grpc.CallOption) (*Conversation, error) {
+	out := new(Conversation)
+	err := c.cc.Invoke(ctx, "/inlinechat.chat.v1.ChatGatewayService/ConfirmTransferConversation", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *chatGatewayServiceClient) CloseConversation(ctx context.Context, in *CloseConversationRequest, opts ...grpc.CallOption) (*Conversation, error) {
 	out := new(Conversation)
 	err := c.cc.Invoke(ctx, "/inlinechat.chat.v1.ChatGatewayService/CloseConversation", in, out, opts...)
@@ -256,6 +266,7 @@ type ChatGatewayServiceServer interface {
 	MarkMessagesRead(context.Context, *MarkMessagesReadRequest) (*MarkMessagesReadResponse, error)
 	ClaimConversation(context.Context, *ClaimConversationRequest) (*Conversation, error)
 	TransferConversation(context.Context, *TransferConversationRequest) (*Conversation, error)
+	ConfirmTransferConversation(context.Context, *ConfirmTransferConversationRequest) (*Conversation, error)
 	CloseConversation(context.Context, *CloseConversationRequest) (*Conversation, error)
 	mustEmbedUnimplementedChatGatewayServiceServer()
 }
@@ -287,6 +298,9 @@ func (UnimplementedChatGatewayServiceServer) ClaimConversation(context.Context, 
 }
 func (UnimplementedChatGatewayServiceServer) TransferConversation(context.Context, *TransferConversationRequest) (*Conversation, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TransferConversation not implemented")
+}
+func (UnimplementedChatGatewayServiceServer) ConfirmTransferConversation(context.Context, *ConfirmTransferConversationRequest) (*Conversation, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ConfirmTransferConversation not implemented")
 }
 func (UnimplementedChatGatewayServiceServer) CloseConversation(context.Context, *CloseConversationRequest) (*Conversation, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CloseConversation not implemented")
@@ -448,6 +462,24 @@ func _ChatGatewayService_TransferConversation_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ChatGatewayService_ConfirmTransferConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ConfirmTransferConversationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatGatewayServiceServer).ConfirmTransferConversation(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/inlinechat.chat.v1.ChatGatewayService/ConfirmTransferConversation",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatGatewayServiceServer).ConfirmTransferConversation(ctx, req.(*ConfirmTransferConversationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _ChatGatewayService_CloseConversation_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CloseConversationRequest)
 	if err := dec(in); err != nil {
@@ -504,6 +536,10 @@ var ChatGatewayService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "TransferConversation",
 			Handler:    _ChatGatewayService_TransferConversation_Handler,
+		},
+		{
+			MethodName: "ConfirmTransferConversation",
+			Handler:    _ChatGatewayService_ConfirmTransferConversation_Handler,
 		},
 		{
 			MethodName: "CloseConversation",

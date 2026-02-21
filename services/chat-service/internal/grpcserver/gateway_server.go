@@ -220,6 +220,28 @@ func (s *ChatGatewayServer) TransferConversation(ctx context.Context, req *chatv
 	return toConversationPB(conversation), nil
 }
 
+func (s *ChatGatewayServer) ConfirmTransferConversation(ctx context.Context, req *chatv1.ConfirmTransferConversationRequest) (*chatv1.Conversation, error) {
+	if req.GetConversationId() == 0 {
+		return nil, status.Error(codes.InvalidArgument, "conversation_id is required")
+	}
+	if req.GetActorAgentId() == 0 {
+		return nil, status.Error(codes.InvalidArgument, "actor_agent_id is required")
+	}
+	if strings.TrimSpace(req.GetActorRole()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "actor_role is required")
+	}
+
+	conversation, err := s.chatService.ConfirmTransferConversation(ctx, service.ConfirmTransferConversationInput{
+		ConversationID: req.GetConversationId(),
+		ActorAgentID:   req.GetActorAgentId(),
+		ActorRole:      req.GetActorRole(),
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return toConversationPB(conversation), nil
+}
+
 func (s *ChatGatewayServer) CloseConversation(ctx context.Context, req *chatv1.CloseConversationRequest) (*chatv1.Conversation, error) {
 	if req.GetConversationId() == 0 {
 		return nil, status.Error(codes.InvalidArgument, "conversation_id is required")
@@ -258,16 +280,34 @@ func toConversationPB(conversation *model.Conversation) *chatv1.Conversation {
 		closedByAgentID = *conversation.ClosedByAgentID
 	}
 
+	var pendingTransferToAgentID uint64
+	if conversation.PendingTransferToAgentID != nil {
+		pendingTransferToAgentID = *conversation.PendingTransferToAgentID
+	}
+
+	var pendingTransferFromAgentID uint64
+	if conversation.PendingTransferFromAgentID != nil {
+		pendingTransferFromAgentID = *conversation.PendingTransferFromAgentID
+	}
+
+	var pendingTransferRequestedAt string
+	if conversation.PendingTransferRequestedAt != nil {
+		pendingTransferRequestedAt = conversation.PendingTransferRequestedAt.Format(time.RFC3339Nano)
+	}
+
 	return &chatv1.Conversation{
-		Id:              conversation.ID,
-		SiteId:          conversation.SiteID,
-		VisitorToken:    conversation.VisitorToken,
-		Status:          conversation.Status,
-		CreatedAt:       conversation.CreatedAt.Format(time.RFC3339Nano),
-		UpdatedAt:       conversation.UpdatedAt.Format(time.RFC3339Nano),
-		AssignedAgentId: assignedAgentID,
-		ClosedAt:        closedAt,
-		ClosedByAgentId: closedByAgentID,
+		Id:                         conversation.ID,
+		SiteId:                     conversation.SiteID,
+		VisitorToken:               conversation.VisitorToken,
+		Status:                     conversation.Status,
+		CreatedAt:                  conversation.CreatedAt.Format(time.RFC3339Nano),
+		UpdatedAt:                  conversation.UpdatedAt.Format(time.RFC3339Nano),
+		AssignedAgentId:            assignedAgentID,
+		ClosedAt:                   closedAt,
+		ClosedByAgentId:            closedByAgentID,
+		PendingTransferToAgentId:   pendingTransferToAgentID,
+		PendingTransferFromAgentId: pendingTransferFromAgentID,
+		PendingTransferRequestedAt: pendingTransferRequestedAt,
 	}
 }
 

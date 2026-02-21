@@ -53,6 +53,7 @@ const state = {
     select: false,
     claim: false,
     transfer: false,
+    confirmTransfer: false,
     close: false,
     send: false,
   },
@@ -94,6 +95,7 @@ const els = {
   claimBtn: document.getElementById("claimBtn"),
   transferAgentIdInput: document.getElementById("transferAgentIdInput"),
   transferBtn: document.getElementById("transferBtn"),
+  confirmTransferBtn: document.getElementById("confirmTransferBtn"),
   closeBtn: document.getElementById("closeBtn"),
 
   detailConversationId: document.getElementById("detailConversationId"),
@@ -230,6 +232,10 @@ function bindEvents() {
     await transferConversation();
   });
 
+  els.confirmTransferBtn?.addEventListener("click", async () => {
+    await confirmTransferConversation();
+  });
+
   els.closeBtn?.addEventListener("click", async () => {
     await closeConversation();
   });
@@ -363,12 +369,17 @@ function getActiveConversationCapability() {
   const meID = Number(state.me?.agent_id || 0);
   const isMine = meID > 0 && assignedAgentID > 0 && assignedAgentID === meID;
   const isUnassigned = assignedAgentID <= 0;
+  const pendingTransferToAgentID = Number(conversation?.pending_transfer_to_agent_id || 0);
+  const hasPendingTransfer = pendingTransferToAgentID > 0;
+  const isPendingTransferTarget = meID > 0 && pendingTransferToAgentID === meID;
 
   return {
     hasConversation,
     isOpen,
     isMine,
     isUnassigned,
+    hasPendingTransfer,
+    isPendingTransferTarget,
   };
 }
 
@@ -378,12 +389,26 @@ function updateConversationActionState() {
   const isOpen = capability.isOpen;
   const isMine = capability.isMine;
   const isUnassigned = capability.isUnassigned;
+  const hasPendingTransfer = capability.hasPendingTransfer;
+  const isPendingTransferTarget = capability.isPendingTransferTarget;
 
   const selectPending = Boolean(state.actionPending.select);
   const canClaim =
     hasConversation && isOpen && isUnassigned && !selectPending && !state.actionPending.claim;
   const canTransfer =
-    hasConversation && isOpen && isMine && !selectPending && !state.actionPending.transfer;
+    hasConversation &&
+    isOpen &&
+    isMine &&
+    !hasPendingTransfer &&
+    !selectPending &&
+    !state.actionPending.transfer;
+  const canConfirmTransfer =
+    hasConversation &&
+    isOpen &&
+    isPendingTransferTarget &&
+    !isMine &&
+    !selectPending &&
+    !state.actionPending.confirmTransfer;
   const canClose = hasConversation && isOpen && isMine && !selectPending && !state.actionPending.close;
   const canSend = hasConversation && isOpen && isMine && !selectPending && !state.actionPending.send;
 
@@ -395,6 +420,9 @@ function updateConversationActionState() {
   }
   if (els.transferAgentIdInput) {
     els.transferAgentIdInput.disabled = !canTransfer;
+  }
+  if (els.confirmTransferBtn) {
+    els.confirmTransferBtn.disabled = !canConfirmTransfer;
   }
   if (els.closeBtn) {
     els.closeBtn.disabled = !canClose;
@@ -431,6 +459,7 @@ function applyAuthUI(loggedIn) {
       select: false,
       claim: false,
       transfer: false,
+      confirmTransfer: false,
       close: false,
       send: false,
     };
@@ -923,7 +952,9 @@ function renderConversations(items) {
     const meta1 = document.createElement("div");
     meta1.className = "meta";
     const assigned = item.assigned_agent_id ? `坐席 ${formatAgentID(item.assigned_agent_id)}` : "未分配";
-    meta1.textContent = `${assigned} · site=${item.site_id}`;
+    const pendingTransferTo = Number(item?.pending_transfer_to_agent_id || 0);
+    const pendingText = pendingTransferTo > 0 ? ` · 待确认转接→${formatAgentID(pendingTransferTo)}` : "";
+    meta1.textContent = `${assigned}${pendingText} · site=${item.site_id}`;
 
     const meta2 = document.createElement("div");
     meta2.className = "meta";
@@ -1011,13 +1042,16 @@ function updateActiveConversationHeader(conversation) {
   state.activeConversation = conversation || null;
 
   const assigned = conversation.assigned_agent_id ? `坐席 ${formatAgentID(conversation.assigned_agent_id)}` : "未分配";
+  const pendingTransferTo = Number(conversation?.pending_transfer_to_agent_id || 0);
+  const pendingText = pendingTransferTo > 0 ? ` · 转接待确认→坐席 ${formatAgentID(pendingTransferTo)}` : "";
   els.activeConversationTitle.textContent = `会话 #${conversation.id}`;
-  els.activeConversationMeta.textContent = `状态 ${conversation.status} · ${assigned} · site=${conversation.site_id}`;
+  els.activeConversationMeta.textContent = `状态 ${conversation.status} · ${assigned}${pendingText} · site=${conversation.site_id}`;
 
   els.detailConversationId.textContent = String(conversation.id || "-");
   els.detailStatus.textContent = String(conversation.status || "-");
   els.detailSiteId.textContent = String(conversation.site_id || "-");
-  els.detailAssigned.textContent = assigned;
+  els.detailAssigned.textContent =
+    pendingTransferTo > 0 ? `${assigned}（待确认转接 -> ${formatAgentID(pendingTransferTo)}）` : assigned;
   els.detailUpdatedAt.textContent = formatTime(conversation.updated_at || conversation.created_at);
   els.detailWaitingDuration.textContent = formatDurationSince(conversation.updated_at || conversation.created_at);
   updateConversationActionState();
@@ -1726,7 +1760,8 @@ async function transferConversation() {
 
   setActionPending("transfer", true);
   try {
-    await apiRequest(`/api/chat/v1/conversations/${state.activeConversationId}/transfer`, {
+    const conversationID = String(state.activeConversationId || "").trim();
+    await apiRequest(`/api/chat/v1/conversations/${conversationID}/transfer`, {
       method: "POST",
       auth: true,
       body: {
@@ -1734,11 +1769,70 @@ async function transferConversation() {
       },
     });
     await refreshConversations();
-    setStatus(`已转接到坐席 ${formatAgentID(toAgentID)}`);
+    if (conversationID && conversationID === String(state.activeConversationId || "")) {
+      try {
+        await refreshMessages({
+          conversationID,
+          force: true,
+        });
+      } catch {
+        // 转接发起成功后，消息刷新失败不阻断主流程。
+      }
+    }
+    setStatus(`已发起转接到坐席 ${formatAgentID(toAgentID)}，等待对方确认`);
   } catch (error) {
     setStatus(error.message || "转接失败", true);
   } finally {
     setActionPending("transfer", false);
+  }
+}
+
+async function confirmTransferConversation() {
+  if (state.actionPending.confirmTransfer) {
+    return;
+  }
+  if (!state.activeConversationId) {
+    setStatus("请先选择会话", true);
+    return;
+  }
+
+  const capability = getActiveConversationCapability();
+  if (!capability.hasConversation) {
+    setStatus("会话状态未就绪，请稍后重试。", true);
+    return;
+  }
+  if (!capability.isOpen) {
+    setStatus("会话已关闭，无法确认转接。", true);
+    return;
+  }
+  if (!capability.isPendingTransferTarget || capability.isMine) {
+    setStatus("当前会话没有待你确认的转接。", true);
+    return;
+  }
+
+  setActionPending("confirmTransfer", true);
+  try {
+    const conversationID = String(state.activeConversationId || "").trim();
+    await apiRequest(`/api/chat/v1/conversations/${conversationID}/transfer/confirm`, {
+      method: "POST",
+      auth: true,
+    });
+    await refreshConversations();
+    if (conversationID && conversationID === String(state.activeConversationId || "")) {
+      try {
+        await refreshMessages({
+          conversationID,
+          force: true,
+        });
+      } catch {
+        // 确认成功后，消息刷新失败不阻断主流程。
+      }
+    }
+    setStatus("已确认转接，当前会话已归你接待");
+  } catch (error) {
+    setStatus(error.message || "确认转接失败", true);
+  } finally {
+    setActionPending("confirmTransfer", false);
   }
 }
 

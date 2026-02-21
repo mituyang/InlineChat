@@ -15,12 +15,14 @@ import (
 )
 
 var (
-	ErrConversationNotFound       = errors.New("conversation not found")
-	ErrConversationAlreadyClaimed = errors.New("conversation already claimed by another agent")
-	ErrConversationUnassigned     = errors.New("conversation is unassigned")
-	ErrConversationClosed         = errors.New("conversation is already closed")
-	ErrMessageNotFound            = errors.New("message not found")
-	ErrForbidden                  = errors.New("forbidden")
+	ErrConversationNotFound           = errors.New("conversation not found")
+	ErrConversationAlreadyClaimed     = errors.New("conversation already claimed by another agent")
+	ErrConversationUnassigned         = errors.New("conversation is unassigned")
+	ErrConversationClosed             = errors.New("conversation is already closed")
+	ErrConversationTransferPending    = errors.New("conversation transfer is pending confirmation")
+	ErrConversationTransferNotPending = errors.New("conversation transfer is not pending confirmation")
+	ErrMessageNotFound                = errors.New("message not found")
+	ErrForbidden                      = errors.New("forbidden")
 )
 
 const (
@@ -96,6 +98,12 @@ type TransferConversationInput struct {
 	ActorAgentID   uint64
 	ActorRole      string
 	ToAgentID      uint64
+}
+
+type ConfirmTransferConversationInput struct {
+	ConversationID uint64
+	ActorAgentID   uint64
+	ActorRole      string
 }
 
 type CloseConversationInput struct {
@@ -427,7 +435,7 @@ func (s *ChatService) AutoCloseInactiveConversations(ctx context.Context, inacti
 
 	var closedCount int
 	for _, conversationID := range openConversationIDs {
-		latestMessage, err := s.messageRepo.GetLatestByConversation(ctx, conversationID)
+		latestMessage, err := s.messageRepo.GetLatestByConversationExcludingSystem(ctx, conversationID)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
 				continue
@@ -444,7 +452,7 @@ func (s *ChatService) AutoCloseInactiveConversations(ctx context.Context, inacti
 				return false, nil
 			}
 
-			latest, latestErr := s.messageRepo.GetLatestByConversation(ctx, conversation.ID)
+			latest, latestErr := s.messageRepo.GetLatestByConversationExcludingSystem(ctx, conversation.ID)
 			if latestErr != nil {
 				if errors.Is(latestErr, repository.ErrNotFound) {
 					return false, nil
@@ -507,6 +515,9 @@ func (s *ChatService) ClaimConversation(ctx context.Context, input ClaimConversa
 
 		agentID := input.AgentID
 		conversation.AssignedAgentID = &agentID
+		conversation.PendingTransferToAgentID = nil
+		conversation.PendingTransferFromAgentID = nil
+		conversation.PendingTransferRequestedAt = nil
 		return true, nil
 	})
 	if err != nil {
@@ -534,6 +545,8 @@ func (s *ChatService) TransferConversation(ctx context.Context, input TransferCo
 		return nil, err
 	}
 
+	changed := false
+	var targetAgentID uint64
 	conversation, err := s.conversationRepo.Mutate(ctx, input.ConversationID, func(conversation *model.Conversation) (bool, error) {
 		if conversation.Status != "open" {
 			return false, ErrConversationClosed
@@ -549,9 +562,23 @@ func (s *ChatService) TransferConversation(ctx context.Context, input TransferCo
 		if *conversation.AssignedAgentID == input.ToAgentID {
 			return false, nil
 		}
+		if conversation.PendingTransferToAgentID != nil {
+			if *conversation.PendingTransferToAgentID == input.ToAgentID {
+				return false, nil
+			}
+			return false, ErrConversationTransferPending
+		}
 
-		agentID := input.ToAgentID
-		conversation.AssignedAgentID = &agentID
+		pendingTo := input.ToAgentID
+		owner := *conversation.AssignedAgentID
+		now := time.Now()
+
+		conversation.PendingTransferToAgentID = &pendingTo
+		conversation.PendingTransferFromAgentID = &owner
+		conversation.PendingTransferRequestedAt = &now
+
+		targetAgentID = pendingTo
+		changed = true
 		return true, nil
 	})
 	if err != nil {
@@ -560,6 +587,63 @@ func (s *ChatService) TransferConversation(ctx context.Context, input TransferCo
 		}
 		return nil, err
 	}
+
+	if changed {
+		s.publishTransferSystemMessage(ctx, conversation.ID, "正在转接客服%s，等待对方确认。", targetAgentID)
+	}
+
+	return conversation, nil
+}
+
+func (s *ChatService) ConfirmTransferConversation(ctx context.Context, input ConfirmTransferConversationInput) (*model.Conversation, error) {
+	if input.ConversationID == 0 {
+		return nil, fmt.Errorf("conversation_id is required")
+	}
+	if input.ActorAgentID == 0 {
+		return nil, fmt.Errorf("actor_agent_id is required")
+	}
+
+	actorRole, err := normalizeActorRole(input.ActorRole)
+	if err != nil {
+		return nil, err
+	}
+
+	changed := false
+	var targetAgentID uint64
+	conversation, err := s.conversationRepo.Mutate(ctx, input.ConversationID, func(conversation *model.Conversation) (bool, error) {
+		if conversation.Status != "open" {
+			return false, ErrConversationClosed
+		}
+		if conversation.PendingTransferToAgentID == nil {
+			return false, ErrConversationTransferNotPending
+		}
+
+		isAdmin := actorRole == "admin" || actorRole == "super_admin"
+		if !isAdmin && *conversation.PendingTransferToAgentID != input.ActorAgentID {
+			return false, ErrForbidden
+		}
+
+		acceptedBy := *conversation.PendingTransferToAgentID
+		conversation.AssignedAgentID = &acceptedBy
+		conversation.PendingTransferToAgentID = nil
+		conversation.PendingTransferFromAgentID = nil
+		conversation.PendingTransferRequestedAt = nil
+
+		targetAgentID = acceptedBy
+		changed = true
+		return true, nil
+	})
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrConversationNotFound
+		}
+		return nil, err
+	}
+
+	if changed {
+		s.publishTransferSystemMessage(ctx, conversation.ID, "成功转接客服%s。", targetAgentID)
+	}
+
 	return conversation, nil
 }
 
@@ -594,6 +678,9 @@ func (s *ChatService) CloseConversation(ctx context.Context, input CloseConversa
 		conversation.Status = "closed"
 		conversation.ClosedAt = &now
 		conversation.ClosedByAgentID = &closedBy
+		conversation.PendingTransferToAgentID = nil
+		conversation.PendingTransferFromAgentID = nil
+		conversation.PendingTransferRequestedAt = nil
 		changed = true
 		return true, nil
 	})
@@ -622,6 +709,47 @@ func (s *ChatService) publishConversationClosed(ctx context.Context, conversatio
 			zap.Uint64("conversation_id", conversationID),
 		)
 	}
+}
+
+func (s *ChatService) publishTransferSystemMessage(ctx context.Context, conversationID uint64, template string, agentID uint64) {
+	if conversationID == 0 {
+		return
+	}
+
+	content := fmt.Sprintf(template, formatAgentID4(agentID))
+	msg := &model.Message{
+		ConversationID: conversationID,
+		SenderType:     "system",
+		Content:        content,
+		ClientMsgID:    systemClientMsgID(conversationID),
+		Status:         MessageStatusSent,
+	}
+	if err := s.messageRepo.Create(ctx, msg); err != nil {
+		s.logger.Warn("create transfer system message failed",
+			zap.Error(err),
+			zap.Uint64("conversation_id", conversationID),
+			zap.String("content", content),
+		)
+		return
+	}
+	if err := s.publisher.PublishMessageCreated(ctx, msg); err != nil {
+		s.logger.Warn("publish transfer system message event failed",
+			zap.Error(err),
+			zap.Uint64("conversation_id", conversationID),
+			zap.Uint64("message_id", msg.ID),
+		)
+	}
+}
+
+func systemClientMsgID(conversationID uint64) string {
+	return fmt.Sprintf("sys_transfer_%d_%d", conversationID, time.Now().UTC().UnixNano())
+}
+
+func formatAgentID4(agentID uint64) string {
+	if agentID > 0 && agentID <= 9999 {
+		return fmt.Sprintf("%04d", agentID)
+	}
+	return strconv.FormatUint(agentID, 10)
 }
 
 func normalizeActorRole(role string) (string, error) {

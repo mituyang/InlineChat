@@ -134,7 +134,7 @@ func (s *ChatService) StartAutoCloseScheduler(ctx context.Context) error {
 	var scheduledCount int
 
 	for _, conversationID := range conversationIDs {
-		latest, err := s.messageRepo.GetLatestByConversation(ctx, conversationID)
+		latest, err := s.messageRepo.GetLatestByConversationExcludingSystem(ctx, conversationID)
 		if err != nil {
 			if errors.Is(err, repository.ErrNotFound) {
 				continue
@@ -192,7 +192,7 @@ func (s *ChatService) autoCloseConversationByTimeout(ctx context.Context, conver
 			return false, nil
 		}
 
-		latest, latestErr := s.messageRepo.GetLatestByConversation(ctx, conversation.ID)
+		latest, latestErr := s.messageRepo.GetLatestByConversationExcludingSystem(ctx, conversation.ID)
 		if latestErr != nil {
 			if errors.Is(latestErr, repository.ErrNotFound) {
 				return false, nil

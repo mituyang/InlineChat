@@ -21,7 +21,15 @@ import (
 
 type chatReadClientStub struct {
 	chatv1.ChatGatewayServiceClient
+	getConversationFn  func(ctx context.Context, in *chatv1.GetConversationRequest, opts ...grpc.CallOption) (*chatv1.Conversation, error)
 	markMessagesReadFn func(ctx context.Context, in *chatv1.MarkMessagesReadRequest, opts ...grpc.CallOption) (*chatv1.MarkMessagesReadResponse, error)
+}
+
+func (s *chatReadClientStub) GetConversation(ctx context.Context, in *chatv1.GetConversationRequest, opts ...grpc.CallOption) (*chatv1.Conversation, error) {
+	if s.getConversationFn != nil {
+		return s.getConversationFn(ctx, in, opts...)
+	}
+	return nil, status.Error(codes.Unimplemented, "not implemented")
 }
 
 func (s *chatReadClientStub) MarkMessagesRead(ctx context.Context, in *chatv1.MarkMessagesReadRequest, opts ...grpc.CallOption) (*chatv1.MarkMessagesReadResponse, error) {
@@ -49,6 +57,9 @@ func TestMarkMessagesReadAgentPath(t *testing.T) {
 	var gotReq *chatv1.MarkMessagesReadRequest
 	h := NewHTTPHandler(&grpcclient.Clients{
 		Chat: &chatReadClientStub{
+			getConversationFn: func(_ context.Context, in *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
+				return &chatv1.Conversation{Id: in.GetId(), AssignedAgentId: 7}, nil
+			},
 			markMessagesReadFn: func(_ context.Context, in *chatv1.MarkMessagesReadRequest, _ ...grpc.CallOption) (*chatv1.MarkMessagesReadResponse, error) {
 				gotReq = in
 				return &chatv1.MarkMessagesReadResponse{UpdatedCount: 2}, nil
@@ -129,6 +140,46 @@ func TestMarkMessagesReadVisitorPath(t *testing.T) {
 	}
 	if resp["updated_count"] == nil {
 		t.Fatalf("missing updated_count: %v", resp)
+	}
+}
+
+func TestMarkMessagesReadAgentRequiresAssignedConversation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	called := false
+	h := NewHTTPHandler(&grpcclient.Clients{
+		Chat: &chatReadClientStub{
+			getConversationFn: func(_ context.Context, in *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
+				return &chatv1.Conversation{Id: in.GetId(), AssignedAgentId: 9}, nil
+			},
+			markMessagesReadFn: func(_ context.Context, in *chatv1.MarkMessagesReadRequest, _ ...grpc.CallOption) (*chatv1.MarkMessagesReadResponse, error) {
+				called = true
+				return &chatv1.MarkMessagesReadResponse{UpdatedCount: 1}, nil
+			},
+		},
+		Auth: &authMeClientStub{
+			meFn: func(_ context.Context, _ *authv1.MeRequest, _ ...grpc.CallOption) (*authv1.MeResponse, error) {
+				return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
+			},
+		},
+	}, time.Second)
+
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	body := []byte(`{"last_read_message_id":18}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/v1/conversations/12/read", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer token")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusForbidden, rr.Code, rr.Body.String())
+	}
+	if called {
+		t.Fatal("MarkMessagesRead should not be called when conversation is not assigned to actor")
 	}
 }
 

@@ -93,7 +93,10 @@ func mapError(err error) error {
 	if errors.Is(err, service.ErrConversationAlreadyClaimed) {
 		return status.Error(codes.AlreadyExists, err.Error())
 	}
-	if errors.Is(err, service.ErrConversationUnassigned) || errors.Is(err, service.ErrConversationClosed) {
+	if errors.Is(err, service.ErrConversationUnassigned) ||
+		errors.Is(err, service.ErrConversationClosed) ||
+		errors.Is(err, service.ErrConversationTransferPending) ||
+		errors.Is(err, service.ErrConversationTransferNotPending) {
 		return status.Error(codes.FailedPrecondition, err.Error())
 	}
 

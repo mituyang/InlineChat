@@ -175,6 +175,28 @@ func (r *fakeMessageRepository) GetLatestByConversation(_ context.Context, conve
 	return &cp, nil
 }
 
+func (r *fakeMessageRepository) GetLatestByConversationExcludingSystem(_ context.Context, conversationID uint64) (*model.Message, error) {
+	items := r.items[conversationID]
+	var (
+		latest model.Message
+		found  bool
+	)
+	for _, msg := range items {
+		if msg.SenderType == "system" {
+			continue
+		}
+		if !found || msg.ID > latest.ID {
+			latest = msg
+			found = true
+		}
+	}
+	if !found {
+		return nil, repository.ErrNotFound
+	}
+	cp := latest
+	return &cp, nil
+}
+
 func (r *fakeMessageRepository) ListByConversation(_ context.Context, conversationID uint64, limit int, beforeID uint64) ([]model.Message, error) {
 	messages := r.items[conversationID]
 	out := make([]model.Message, 0, len(messages))
@@ -278,6 +300,18 @@ func cloneConversation(c *model.Conversation) *model.Conversation {
 		id := *c.AssignedAgentID
 		cp.AssignedAgentID = &id
 	}
+	if c.PendingTransferToAgentID != nil {
+		id := *c.PendingTransferToAgentID
+		cp.PendingTransferToAgentID = &id
+	}
+	if c.PendingTransferFromAgentID != nil {
+		id := *c.PendingTransferFromAgentID
+		cp.PendingTransferFromAgentID = &id
+	}
+	if c.PendingTransferRequestedAt != nil {
+		at := *c.PendingTransferRequestedAt
+		cp.PendingTransferRequestedAt = &at
+	}
 	if c.ClosedAt != nil {
 		closedAt := *c.ClosedAt
 		cp.ClosedAt = &closedAt
@@ -351,9 +385,9 @@ func TestTransferConversationForbiddenForNonOwnerAgent(t *testing.T) {
 	}
 }
 
-func TestTransferConversationAllowedForSuperAdmin(t *testing.T) {
+func TestTransferConversationAllowedForSuperAdminStartsPending(t *testing.T) {
 	owner := uint64(9)
-	svc, repo, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+	svc, repo, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
 		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open", AssignedAgentID: &owner},
 	})
 
@@ -366,11 +400,161 @@ func TestTransferConversationAllowedForSuperAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TransferConversation failed: %v", err)
 	}
+	if out.AssignedAgentID == nil || *out.AssignedAgentID != 9 {
+		t.Fatalf("unexpected assigned_agent_id: %+v", out.AssignedAgentID)
+	}
+	if out.PendingTransferToAgentID == nil || *out.PendingTransferToAgentID != 8 {
+		t.Fatalf("unexpected pending_transfer_to_agent_id: %+v", out.PendingTransferToAgentID)
+	}
+	if out.PendingTransferFromAgentID == nil || *out.PendingTransferFromAgentID != 9 {
+		t.Fatalf("unexpected pending_transfer_from_agent_id: %+v", out.PendingTransferFromAgentID)
+	}
+	if out.PendingTransferRequestedAt == nil {
+		t.Fatalf("pending_transfer_requested_at should be set")
+	}
+
+	stored := repo.items[1]
+	if stored.AssignedAgentID == nil || *stored.AssignedAgentID != 9 {
+		t.Fatalf("conversation not persisted")
+	}
+	if stored.PendingTransferToAgentID == nil || *stored.PendingTransferToAgentID != 8 {
+		t.Fatalf("pending transfer not persisted")
+	}
+	if len(messageRepo.items[1]) != 1 {
+		t.Fatalf("transfer system message should be persisted")
+	}
+	if publisher.calls != 1 || publisher.lastMessage == nil {
+		t.Fatalf("transfer system message should be published, got %+v", publisher)
+	}
+	if publisher.lastMessage.SenderType != "system" {
+		t.Fatalf("expected system sender type, got %s", publisher.lastMessage.SenderType)
+	}
+	if publisher.lastMessage.Content != "正在转接客服0008，等待对方确认。" {
+		t.Fatalf("unexpected transfer message content: %s", publisher.lastMessage.Content)
+	}
+}
+
+func TestTransferConversationRejectsWhenPendingExists(t *testing.T) {
+	owner := uint64(9)
+	pendingTo := uint64(8)
+	pendingFrom := uint64(9)
+	requestedAt := time.Now()
+	svc, _, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {
+			ID:                         1,
+			SiteID:                     "site_demo",
+			VisitorToken:               "vt_1",
+			Status:                     "open",
+			AssignedAgentID:            &owner,
+			PendingTransferToAgentID:   &pendingTo,
+			PendingTransferFromAgentID: &pendingFrom,
+			PendingTransferRequestedAt: &requestedAt,
+		},
+	})
+
+	_, err := svc.TransferConversation(context.Background(), TransferConversationInput{
+		ConversationID: 1,
+		ActorAgentID:   9,
+		ActorRole:      "agent",
+		ToAgentID:      7,
+	})
+	if !errors.Is(err, ErrConversationTransferPending) {
+		t.Fatalf("expected ErrConversationTransferPending, got %v", err)
+	}
+}
+
+func TestConfirmTransferConversationByTargetAgentSuccess(t *testing.T) {
+	owner := uint64(9)
+	pendingTo := uint64(8)
+	pendingFrom := uint64(9)
+	requestedAt := time.Now()
+	svc, repo, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {
+			ID:                         1,
+			SiteID:                     "site_demo",
+			VisitorToken:               "vt_1",
+			Status:                     "open",
+			AssignedAgentID:            &owner,
+			PendingTransferToAgentID:   &pendingTo,
+			PendingTransferFromAgentID: &pendingFrom,
+			PendingTransferRequestedAt: &requestedAt,
+		},
+	})
+
+	out, err := svc.ConfirmTransferConversation(context.Background(), ConfirmTransferConversationInput{
+		ConversationID: 1,
+		ActorAgentID:   8,
+		ActorRole:      "agent",
+	})
+	if err != nil {
+		t.Fatalf("ConfirmTransferConversation failed: %v", err)
+	}
 	if out.AssignedAgentID == nil || *out.AssignedAgentID != 8 {
 		t.Fatalf("unexpected assigned_agent_id: %+v", out.AssignedAgentID)
 	}
-	if repo.items[1].AssignedAgentID == nil || *repo.items[1].AssignedAgentID != 8 {
-		t.Fatalf("conversation not persisted")
+	if out.PendingTransferToAgentID != nil || out.PendingTransferFromAgentID != nil || out.PendingTransferRequestedAt != nil {
+		t.Fatalf("pending transfer fields should be cleared: %+v", out)
+	}
+
+	stored := repo.items[1]
+	if stored.AssignedAgentID == nil || *stored.AssignedAgentID != 8 {
+		t.Fatalf("assigned agent should switch to pending target")
+	}
+	if stored.PendingTransferToAgentID != nil || stored.PendingTransferFromAgentID != nil || stored.PendingTransferRequestedAt != nil {
+		t.Fatalf("stored pending transfer fields should be cleared")
+	}
+	if len(messageRepo.items[1]) != 1 {
+		t.Fatalf("confirm transfer system message should be persisted")
+	}
+	if publisher.calls != 1 || publisher.lastMessage == nil {
+		t.Fatalf("confirm transfer system message should be published, got %+v", publisher)
+	}
+	if publisher.lastMessage.Content != "成功转接客服0008。" {
+		t.Fatalf("unexpected confirm transfer message content: %s", publisher.lastMessage.Content)
+	}
+}
+
+func TestConfirmTransferConversationForbiddenForNonTargetAgent(t *testing.T) {
+	owner := uint64(9)
+	pendingTo := uint64(8)
+	pendingFrom := uint64(9)
+	requestedAt := time.Now()
+	svc, _, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {
+			ID:                         1,
+			SiteID:                     "site_demo",
+			VisitorToken:               "vt_1",
+			Status:                     "open",
+			AssignedAgentID:            &owner,
+			PendingTransferToAgentID:   &pendingTo,
+			PendingTransferFromAgentID: &pendingFrom,
+			PendingTransferRequestedAt: &requestedAt,
+		},
+	})
+
+	_, err := svc.ConfirmTransferConversation(context.Background(), ConfirmTransferConversationInput{
+		ConversationID: 1,
+		ActorAgentID:   7,
+		ActorRole:      "agent",
+	})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("expected ErrForbidden, got %v", err)
+	}
+}
+
+func TestConfirmTransferConversationRequiresPending(t *testing.T) {
+	owner := uint64(9)
+	svc, _, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open", AssignedAgentID: &owner},
+	})
+
+	_, err := svc.ConfirmTransferConversation(context.Background(), ConfirmTransferConversationInput{
+		ConversationID: 1,
+		ActorAgentID:   8,
+		ActorRole:      "agent",
+	})
+	if !errors.Is(err, ErrConversationTransferNotPending) {
+		t.Fatalf("expected ErrConversationTransferNotPending, got %v", err)
 	}
 }
 
