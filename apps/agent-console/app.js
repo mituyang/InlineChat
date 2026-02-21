@@ -40,6 +40,10 @@ const state = {
   wsReconnectAttempt: 0,
   conversationTimer: null,
   messageTimer: null,
+  conversationRefreshPending: false,
+  conversationRefreshInFlight: false,
+  messageResyncInFlight: false,
+  messageResyncAttempt: 0,
   unreadMap: {},
   readCursor: {},
   unreadSeq: 0,
@@ -260,6 +264,18 @@ function bindEvents() {
     saveQuickReplies();
     renderQuickReplies();
     setStatus("快捷语已重置");
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") {
+      scheduleConversationRefresh(0);
+      scheduleMessageResync(0);
+    }
+  });
+
+  window.addEventListener("focus", () => {
+    scheduleConversationRefresh(0);
+    scheduleMessageResync(0);
   });
 }
 
@@ -565,38 +581,117 @@ function setWsIndicator(mode, text) {
 
 function startPolling() {
   stopPolling();
-
-  state.conversationTimer = setInterval(() => {
-    if (!state.token) {
-      return;
-    }
-    refreshConversations().catch((error) => {
-      setStatus(error.message || "会话刷新失败", true);
-    });
-  }, 7000);
-
-  state.messageTimer = setInterval(() => {
-    if (!state.token || !state.activeConversationId) {
-      return;
-    }
-    if (state.wsConnected && state.wsConversationId === state.activeConversationId) {
-      return;
-    }
-    refreshMessages().catch((error) => {
-      setStatus(error.message || "消息刷新失败", true);
-    });
-  }, 3000);
+  scheduleMessageResync(0);
 }
 
 function stopPolling() {
   if (state.conversationTimer) {
-    clearInterval(state.conversationTimer);
+    clearTimeout(state.conversationTimer);
     state.conversationTimer = null;
   }
+  state.conversationRefreshPending = false;
+  state.conversationRefreshInFlight = false;
   if (state.messageTimer) {
-    clearInterval(state.messageTimer);
+    clearTimeout(state.messageTimer);
     state.messageTimer = null;
   }
+  state.messageResyncInFlight = false;
+  state.messageResyncAttempt = 0;
+}
+
+function scheduleConversationRefresh(delayMs = 0) {
+  if (!state.token) {
+    return;
+  }
+  const delay = Number(delayMs) > 0 ? Number(delayMs) : 0;
+  if (state.conversationTimer) {
+    state.conversationRefreshPending = true;
+    return;
+  }
+
+  state.conversationTimer = setTimeout(async () => {
+    state.conversationTimer = null;
+    if (!state.token) {
+      state.conversationRefreshPending = false;
+      return;
+    }
+    if (state.conversationRefreshInFlight) {
+      state.conversationRefreshPending = true;
+      scheduleConversationRefresh(300);
+      return;
+    }
+
+    state.conversationRefreshInFlight = true;
+    try {
+      await refreshConversations();
+    } catch (error) {
+      setStatus(error.message || "会话刷新失败", true);
+    } finally {
+      state.conversationRefreshInFlight = false;
+      if (state.conversationRefreshPending) {
+        state.conversationRefreshPending = false;
+        scheduleConversationRefresh(300);
+      }
+    }
+  }, delay);
+}
+
+function shouldResyncMessages() {
+  if (!state.token || !state.activeConversationId) {
+    return false;
+  }
+  return !(state.wsConnected && state.wsConversationId === state.activeConversationId);
+}
+
+function computeMessageResyncDelay() {
+  const base = Math.min(2500 * 2 ** state.messageResyncAttempt, 15000);
+  const jitter = Math.floor(Math.random() * 250);
+  return base + jitter;
+}
+
+function scheduleMessageResync(delayMs) {
+  if (!shouldResyncMessages()) {
+    return;
+  }
+  if (state.messageTimer) {
+    return;
+  }
+  const delay = Number.isFinite(Number(delayMs)) ? Math.max(0, Number(delayMs)) : computeMessageResyncDelay();
+
+  state.messageTimer = setTimeout(async () => {
+    state.messageTimer = null;
+    if (!shouldResyncMessages()) {
+      state.messageResyncAttempt = 0;
+      return;
+    }
+    if (state.messageResyncInFlight) {
+      scheduleMessageResync(300);
+      return;
+    }
+
+    state.messageResyncInFlight = true;
+    try {
+      await refreshMessages();
+      state.messageResyncAttempt = 0;
+    } catch (error) {
+      state.messageResyncAttempt = Math.min(state.messageResyncAttempt + 1, 6);
+      setStatus(error.message || "消息刷新失败", true);
+    } finally {
+      state.messageResyncInFlight = false;
+      if (shouldResyncMessages()) {
+        scheduleMessageResync(undefined);
+      }
+    }
+  }, delay);
+}
+
+function cancelMessageResync() {
+  if (state.messageTimer) {
+    clearTimeout(state.messageTimer);
+    state.messageTimer = null;
+  }
+  state.messageResyncInFlight = false;
+  state.messageResyncAttempt = 0;
 }
 
 async function refreshConversations() {
@@ -874,6 +969,7 @@ async function selectConversation(conversation) {
     }
 
     connectWebSocket();
+    scheduleMessageResync(300);
     setStatus(`已切换到会话 #${conversation.id}`);
   } catch (error) {
     if (selectionSeq !== state.selectionSeq || conversationID !== String(state.activeConversationId || "")) {
@@ -1740,8 +1836,10 @@ function connectWebSocket() {
     }
     state.wsConnected = true;
     state.wsReconnectAttempt = 0;
+    cancelMessageResync();
     setWsIndicator("online", `实时通道：已连接 #${conversationID}`);
     setStatus(`WebSocket 已连接，会话 #${conversationID}`);
+    scheduleConversationRefresh(400);
   });
 
   ws.addEventListener("message", (event) => {
@@ -1755,6 +1853,7 @@ function connectWebSocket() {
               return;
             }
             mergeMessages([data.payload.message]);
+            scheduleConversationRefresh(500);
           }
           break;
         case "message.ack":
@@ -1765,6 +1864,7 @@ function connectWebSocket() {
           break;
         case "message.status":
           handleMessageStatusEvent(data.payload || {});
+          scheduleConversationRefresh(600);
           break;
         case "error":
           setStatus(data.error || "WebSocket 消息异常", true);
@@ -1788,6 +1888,7 @@ function connectWebSocket() {
     }
     setWsIndicator("warn", `实时通道：重连中 #${conversationID}`);
     scheduleWsReconnect(conversationID);
+    scheduleMessageResync(300);
     setStatus("WebSocket 已断开，正在自动重连", true);
   });
 
@@ -1797,6 +1898,7 @@ function connectWebSocket() {
     }
     state.wsConnected = false;
     setWsIndicator("warn", `实时通道：异常 #${conversationID}`);
+    scheduleMessageResync(300);
     setStatus("WebSocket 异常，正在自动重连", true);
   });
 
@@ -1812,6 +1914,7 @@ function closeWebSocket() {
   state.wsConnected = false;
   state.wsConversationId = "";
   state.wsReconnectAttempt = 0;
+  cancelMessageResync();
   setWsIndicator("offline", "实时通道：未连接");
 }
 

@@ -18,6 +18,7 @@ const state = {
   messages: [],
   pollTimer: null,
   pollInFlight: false,
+  pollAttempt: 0,
   lastReadReported: 0,
   lastReadInFlight: 0,
   pendingMap: {},
@@ -199,6 +200,7 @@ function applyConversationStatus(nextStatus, announceClosed) {
 
   if (normalized === "closed") {
     closeWebSocket();
+    stopPolling();
     resetPendingMap();
     if (announceClosed && prev !== "closed") {
       setStatus("会话已关闭，请点击“新建聊天”开始新的对话。");
@@ -344,46 +346,88 @@ async function sendMessage() {
   }
 }
 
-function startPolling() {
-  if (state.pollTimer) {
-    clearInterval(state.pollTimer);
+function startPolling(delayMs = 1200) {
+  stopPolling();
+  schedulePollingSync(delayMs);
+}
+
+function shouldRunPollingSync() {
+  if (!state.conversationId) {
+    return false;
   }
-  state.pollTimer = setInterval(() => {
-    if (!state.conversationId || state.pollInFlight) {
+  if (state.conversationStatus === "closed") {
+    return false;
+  }
+  return !(state.wsConnected && state.wsConversationId === state.conversationId);
+}
+
+function nextPollingDelay(success) {
+  if (success) {
+    state.pollAttempt = 0;
+    return 2500;
+  }
+  state.pollAttempt = Math.min(state.pollAttempt + 1, 6);
+  const base = Math.min(1000 * 2 ** state.pollAttempt, 15000);
+  const jitter = Math.floor(Math.random() * 250);
+  return base + jitter;
+}
+
+function schedulePollingSync(delayMs) {
+  if (!shouldRunPollingSync()) {
+    return;
+  }
+  if (state.pollTimer) {
+    return;
+  }
+  const delay = Number.isFinite(Number(delayMs)) ? Math.max(0, Number(delayMs)) : nextPollingDelay(true);
+  state.pollTimer = setTimeout(async () => {
+    state.pollTimer = null;
+    if (!shouldRunPollingSync()) {
+      state.pollAttempt = 0;
+      return;
+    }
+    if (state.pollInFlight) {
+      schedulePollingSync(300);
       return;
     }
 
     state.pollInFlight = true;
-    Promise.resolve()
-      .then(async () => {
-        await syncConversationStatus();
-        if (!state.conversationId) {
-          return;
-        }
-        if (state.conversationStatus === "closed") {
-          await refreshMessages();
-          return;
-        }
-        if (state.wsConnected && state.wsConversationId === state.conversationId) {
-          return;
-        }
+    let success = true;
+    try {
+      await syncConversationStatus();
+      if (!state.conversationId) {
+        state.pollAttempt = 0;
+        return;
+      }
+      if (state.conversationStatus === "closed") {
         await refreshMessages();
-      })
-      .catch((error) => {
-        setStatus(error.message || "消息刷新失败", true);
-      })
-      .finally(() => {
-        state.pollInFlight = false;
-      });
-  }, 3000);
+        state.pollAttempt = 0;
+        return;
+      }
+      if (state.wsConnected && state.wsConversationId === state.conversationId) {
+        state.pollAttempt = 0;
+        return;
+      }
+      await refreshMessages();
+    } catch (error) {
+      success = false;
+      setStatus(error.message || "消息刷新失败", true);
+    } finally {
+      state.pollInFlight = false;
+      if (shouldRunPollingSync()) {
+        schedulePollingSync(nextPollingDelay(success));
+      }
+    }
+  }, delay);
 }
 
 function stopPolling() {
   if (state.pollTimer) {
-    clearInterval(state.pollTimer);
+    clearTimeout(state.pollTimer);
     state.pollTimer = null;
   }
   state.pollInFlight = false;
+  state.pollAttempt = 0;
 }
 
 function connectWebSocket() {
@@ -414,6 +458,7 @@ function connectWebSocket() {
     }
     state.wsConnected = true;
     state.wsReconnectAttempt = 0;
+    stopPolling();
     setWsBadge(true);
     setStatus(`WebSocket 已连接，会话 #${conversationId}`);
   });
@@ -468,6 +513,7 @@ function connectWebSocket() {
     if (state.conversationStatus === "closed") {
       return;
     }
+    startPolling(0);
     scheduleWsReconnect(conversationId);
     setStatus("WebSocket 已断开，正在自动重连", true);
   });
@@ -478,6 +524,7 @@ function connectWebSocket() {
     }
     state.wsConnected = false;
     setWsBadge(false);
+    startPolling(0);
     setStatus("WebSocket 连接异常，正在自动重连", true);
   });
 
@@ -1084,6 +1131,7 @@ function formatMessageStatus(status) {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     void reportReadProgress();
+    schedulePollingSync(0);
   }
 });
 

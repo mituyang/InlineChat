@@ -19,6 +19,7 @@ const state = {
   wsReconnectAttempt: 0,
   pollTimer: null,
   pollInFlight: false,
+  pollAttempt: 0,
   lastReadReported: 0,
   lastReadInFlight: 0,
   pendingMap: {},
@@ -493,6 +494,7 @@ function applyConversationStatus(nextStatus, announceClosed) {
 
   if (normalized === "closed") {
     closeWebSocket();
+    stopPolling();
     resetPendingMap();
     state.sendPending = false;
     state.composeMode = false;
@@ -604,26 +606,60 @@ async function startNewConversation() {
   els.contentInput.focus();
 }
 
-function delay(ms) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+function isWebSocketReady() {
+  return (
+    state.ws &&
+    state.ws.readyState === WebSocket.OPEN &&
+    state.wsConversationID === state.conversationID &&
+    state.conversationStatus === "open"
+  );
 }
 
-async function waitForWebSocketReady(timeoutMs = 4000) {
-  const start = Date.now();
-  while (Date.now() - start <= timeoutMs) {
-    if (
-      state.ws &&
-      state.ws.readyState === WebSocket.OPEN &&
-      state.wsConversationID === state.conversationID &&
-      state.conversationStatus === "open"
-    ) {
-      return;
-    }
-    await delay(80);
+function waitForWebSocketReady(timeoutMs = 4000) {
+  if (isWebSocketReady()) {
+    return Promise.resolve();
   }
-  throw new Error("实时通道连接超时，请稍后重试。");
+  const ws = state.ws;
+  if (!ws) {
+    return Promise.reject(new Error("实时通道未建立，请稍后重试。"));
+  }
+
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error("实时通道连接超时，请稍后重试。"));
+    }, Math.max(500, Number(timeoutMs) || 4000));
+
+    function cleanup() {
+      if (done) {
+        return;
+      }
+      done = true;
+      clearTimeout(timeout);
+      ws.removeEventListener("open", onOpen);
+      ws.removeEventListener("close", onCloseOrError);
+      ws.removeEventListener("error", onCloseOrError);
+    }
+
+    function onOpen() {
+      if (!isWebSocketReady()) {
+        return;
+      }
+      cleanup();
+      resolve();
+    }
+
+    function onCloseOrError() {
+      cleanup();
+      reject(new Error("实时通道连接失败，请稍后重试。"));
+    }
+
+    ws.addEventListener("open", onOpen);
+    ws.addEventListener("close", onCloseOrError);
+    ws.addEventListener("error", onCloseOrError);
+    onOpen();
+  });
 }
 
 async function openHistoryConversation(conversationID) {
@@ -782,6 +818,7 @@ function connectWebSocket() {
     }
     state.wsConnected = true;
     state.wsReconnectAttempt = 0;
+    stopPolling();
     setStatus("实时连接已建立");
   });
 
@@ -834,6 +871,7 @@ function connectWebSocket() {
     if (state.conversationStatus === "closed") {
       return;
     }
+    startPolling(0);
     scheduleWsReconnect(conversationID);
     setStatus("实时连接已断开，正在自动重连");
   });
@@ -843,6 +881,7 @@ function connectWebSocket() {
       return;
     }
     state.wsConnected = false;
+    startPolling(0);
     setStatus("实时连接异常，正在自动重连");
   });
 
@@ -892,43 +931,88 @@ function scheduleWsReconnect(conversationID) {
   }, delay);
 }
 
-function startPolling() {
+function startPolling(delayMs = 1200) {
   stopPolling();
-  state.pollTimer = setInterval(() => {
-    if (!state.conversationID || state.pollInFlight) {
+  schedulePollingSync(delayMs);
+}
+
+function shouldRunPollingSync() {
+  if (!state.conversationID) {
+    return false;
+  }
+  if (state.conversationStatus === "closed") {
+    return false;
+  }
+  return !(state.wsConnected && state.wsConversationID === state.conversationID);
+}
+
+function nextPollingDelay(success) {
+  if (success) {
+    state.pollAttempt = 0;
+    return 2500;
+  }
+  state.pollAttempt = Math.min(state.pollAttempt + 1, 6);
+  const base = Math.min(1000 * 2 ** state.pollAttempt, 15000);
+  const jitter = Math.floor(Math.random() * 250);
+  return base + jitter;
+}
+
+function schedulePollingSync(delayMs) {
+  if (!shouldRunPollingSync()) {
+    return;
+  }
+  if (state.pollTimer) {
+    return;
+  }
+  const delay = Number.isFinite(Number(delayMs)) ? Math.max(0, Number(delayMs)) : nextPollingDelay(true);
+  state.pollTimer = setTimeout(async () => {
+    state.pollTimer = null;
+    if (!shouldRunPollingSync()) {
+      state.pollAttempt = 0;
       return;
     }
+    if (state.pollInFlight) {
+      schedulePollingSync(300);
+      return;
+    }
+
     state.pollInFlight = true;
-    Promise.resolve()
-      .then(async () => {
-        await syncConversationStatus();
-        if (!state.conversationID) {
-          return;
-        }
-        if (state.conversationStatus === "closed") {
-          await refreshMessages();
-          return;
-        }
-        if (state.wsConnected && state.wsConversationID === state.conversationID) {
-          return;
-        }
+    let success = true;
+    try {
+      await syncConversationStatus();
+      if (!state.conversationID) {
+        state.pollAttempt = 0;
+        return;
+      }
+      if (state.conversationStatus === "closed") {
         await refreshMessages();
-      })
-      .catch(() => {
-        setStatus("消息同步失败");
-      })
-      .finally(() => {
-        state.pollInFlight = false;
-      });
-  }, 3000);
+        state.pollAttempt = 0;
+        return;
+      }
+      if (state.wsConnected && state.wsConversationID === state.conversationID) {
+        state.pollAttempt = 0;
+        return;
+      }
+      await refreshMessages();
+    } catch {
+      success = false;
+      setStatus("消息同步失败");
+    } finally {
+      state.pollInFlight = false;
+      if (shouldRunPollingSync()) {
+        schedulePollingSync(nextPollingDelay(success));
+      }
+    }
+  }, delay);
 }
 
 function stopPolling() {
   if (state.pollTimer) {
-    clearInterval(state.pollTimer);
+    clearTimeout(state.pollTimer);
     state.pollTimer = null;
   }
   state.pollInFlight = false;
+  state.pollAttempt = 0;
 }
 
 function mergeMessages(items) {
@@ -1520,6 +1604,7 @@ function formatMessageStatus(status) {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.viewMode === "chat") {
     void reportReadProgress();
+    schedulePollingSync(0);
   }
 });
 
