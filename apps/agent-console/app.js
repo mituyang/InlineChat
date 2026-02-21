@@ -19,6 +19,7 @@ const ALLOWED_ROLES = new Set(["agent"]);
 const THEME_STORAGE_KEY = "inlinechat.ui.theme";
 const ACK_TIMEOUT_MS = 5000;
 const MAX_MESSAGE_CONTENT_CHARS = 2000;
+const BASE_PAGE_TITLE = document.title || "InlineChat 客服工作台";
 
 const state = {
   token: "",
@@ -50,6 +51,8 @@ const state = {
   unreadSeq: 0,
   quickReplies: [...DEFAULT_QUICK_REPLIES],
   pendingMap: {},
+  transferReminderInitialized: false,
+  pendingTransferConversationIDs: [],
   actionPending: {
     select: false,
     claim: false,
@@ -82,6 +85,8 @@ const els = {
   queueTabOpen: document.getElementById("queueTabOpen"),
   queueTabClosed: document.getElementById("queueTabClosed"),
   conversationSearchInput: document.getElementById("conversationSearchInput"),
+  transferReminderCount: document.getElementById("transferReminderCount"),
+  transferReminderList: document.getElementById("transferReminderList"),
 
   refreshConversationsBtn: document.getElementById("refreshConversationsBtn"),
   filterForm: document.getElementById("filterForm"),
@@ -96,6 +101,8 @@ const els = {
   claimBtn: document.getElementById("claimBtn"),
   transferAgentIdInput: document.getElementById("transferAgentIdInput"),
   transferBtn: document.getElementById("transferBtn"),
+  transferConfirmPanel: document.getElementById("transferConfirmPanel"),
+  transferConfirmText: document.getElementById("transferConfirmText"),
   confirmTransferBtn: document.getElementById("confirmTransferBtn"),
   closeBtn: document.getElementById("closeBtn"),
 
@@ -223,6 +230,24 @@ function bindEvents() {
   els.conversationSearchInput?.addEventListener("input", () => {
     state.conversationSearch = (els.conversationSearchInput.value || "").trim().toLowerCase();
     renderConversations(state.conversations);
+  });
+
+  els.transferReminderList?.addEventListener("click", async (event) => {
+    const target = event.target.closest("button.transfer-reminder-item");
+    if (!target) {
+      return;
+    }
+
+    const conversationID = String(target.dataset.conversationId || "").trim();
+    if (!conversationID) {
+      return;
+    }
+
+    try {
+      await jumpToTransferReminderConversation(conversationID);
+    } catch (error) {
+      setStatus(error?.message || "跳转待确认转接会话失败", true);
+    }
   });
 
   els.claimBtn?.addEventListener("click", async () => {
@@ -434,6 +459,7 @@ function updateConversationActionState() {
   if (els.agentContentInput) {
     els.agentContentInput.disabled = !canSend;
   }
+  syncTransferConfirmPanel(state.activeConversation);
 }
 
 function abortMessageRequest() {
@@ -456,6 +482,8 @@ function applyAuthUI(loggedIn) {
     state.unreadMap = {};
     state.readCursor = {};
     state.queueShortcut = "all";
+    state.transferReminderInitialized = false;
+    state.pendingTransferConversationIDs = [];
     state.actionPending = {
       select: false,
       claim: false,
@@ -470,7 +498,9 @@ function applyAuthUI(loggedIn) {
     renderStats();
     renderQueueTabsMeta();
     renderQueueShortcuts();
+    renderTransferReminders([]);
     resetConversationDetail();
+    updateDocumentTitleByTransferReminderCount(0);
     closeWebSocket();
     stopPolling();
     document.body.classList.add("auth-guard");
@@ -801,6 +831,7 @@ async function refreshConversations() {
     const tb = new Date(b.updated_at || b.created_at || 0).getTime();
     return tb - ta;
   });
+  syncTransferReminders(state.statsConversations);
   state.queueShortcut = resolveQueueShortcutFromFilters();
 
   if (state.activeConversationId) {
@@ -872,6 +903,133 @@ async function refreshUnreadCounts(items) {
   renderConversations(state.conversations);
   renderStats();
   renderQueueTabsMeta();
+}
+
+function collectPendingTransferConversations(items) {
+  const meID = Number(state.me?.agent_id || 0);
+  if (meID <= 0 || !Array.isArray(items)) {
+    return [];
+  }
+
+  return items
+    .filter((item) => {
+      const status = String(item?.status || "")
+        .trim()
+        .toLowerCase();
+      if (status !== "open") {
+        return false;
+      }
+      const targetAgentID = Number(item?.pending_transfer_to_agent_id || 0);
+      return targetAgentID > 0 && targetAgentID === meID;
+    })
+    .sort((a, b) => {
+      const ta = new Date(a.updated_at || a.created_at || 0).getTime();
+      const tb = new Date(b.updated_at || b.created_at || 0).getTime();
+      return tb - ta;
+    });
+}
+
+function syncTransferReminders(items) {
+  const pendingItems = collectPendingTransferConversations(items);
+  const pendingIDs = pendingItems.map((item) => String(item?.id || "").trim()).filter(Boolean);
+  const previousIDs = new Set(state.pendingTransferConversationIDs);
+  const incomingNewIDs = pendingIDs.filter((id) => !previousIDs.has(id));
+
+  state.pendingTransferConversationIDs = pendingIDs;
+  renderTransferReminders(pendingItems);
+  updateDocumentTitleByTransferReminderCount(pendingItems.length);
+
+  if (state.transferReminderInitialized && incomingNewIDs.length > 0) {
+    const total = pendingItems.length;
+    const text = total > 1 ? `你有 ${total} 个待确认转接请求` : "你有新的待确认转接请求";
+    setStatus(text);
+  }
+  state.transferReminderInitialized = true;
+}
+
+function renderTransferReminders(items) {
+  const list = Array.isArray(items) ? items : [];
+  if (els.transferReminderCount) {
+    els.transferReminderCount.textContent = String(list.length);
+  }
+  if (!els.transferReminderList) {
+    return;
+  }
+
+  if (list.length === 0) {
+    els.transferReminderList.innerHTML = '<div class="empty">暂无待确认转接</div>';
+    return;
+  }
+
+  const activeConversationID = String(state.activeConversationId || "");
+  els.transferReminderList.innerHTML = "";
+  for (const item of list) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "transfer-reminder-item";
+    button.dataset.conversationId = String(item?.id || "");
+    if (String(item?.id || "") === activeConversationID) {
+      button.classList.add("active");
+    }
+
+    const title = document.createElement("strong");
+    title.textContent = `会话 #${item.id}`;
+
+    const fromAgentID = Number(item?.assigned_agent_id || 0);
+    const fromText = fromAgentID > 0 ? `来源坐席 ${formatAgentID(fromAgentID)}` : "来源坐席 -";
+    const meta = document.createElement("span");
+    meta.textContent = `${fromText} · ${formatDurationSince(item.updated_at || item.created_at)}前`;
+
+    button.appendChild(title);
+    button.appendChild(meta);
+    els.transferReminderList.appendChild(button);
+  }
+}
+
+function updateDocumentTitleByTransferReminderCount(count) {
+  const total = Number(count || 0);
+  if (total > 0) {
+    document.title = `[待确认转接 ${total}] ${BASE_PAGE_TITLE}`;
+    return;
+  }
+  document.title = BASE_PAGE_TITLE;
+}
+
+async function jumpToTransferReminderConversation(conversationID) {
+  const id = String(conversationID || "").trim();
+  if (!id) {
+    return;
+  }
+
+  const rawConversation =
+    state.statsConversations.find((item) => String(item?.id || "") === id) ||
+    state.conversations.find((item) => String(item?.id || "") === id) ||
+    null;
+  if (!rawConversation) {
+    setStatus("待确认转接会话不存在或已关闭", true);
+    await refreshConversations();
+    return;
+  }
+
+  // 跳转提醒会话时放开“仅我的会话/仅未分配”筛选，避免会话被筛掉后详情被清空。
+  state.queueMode = "open";
+  if (els.unassignedOnlyCheckbox) {
+    els.unassignedOnlyCheckbox.checked = false;
+  }
+  if (els.mineOnlyCheckbox) {
+    els.mineOnlyCheckbox.checked = false;
+  }
+  syncStatusFilterWithQueueMode();
+  state.queueShortcut = resolveQueueShortcutFromFilters();
+  renderQueueShortcuts();
+  renderQueueTabsMeta();
+  await refreshConversations();
+
+  const conversation =
+    state.conversations.find((item) => String(item?.id || "") === id) ||
+    state.statsConversations.find((item) => String(item?.id || "") === id) ||
+    rawConversation;
+  await selectConversation(conversation);
 }
 
 function canAgentMarkConversationRead(conversationID) {
@@ -1058,6 +1216,8 @@ function updateActiveConversationHeader(conversation) {
     pendingTransferTo > 0 ? `${assigned}（待确认转接 -> ${formatAgentID(pendingTransferTo)}）` : assigned;
   els.detailUpdatedAt.textContent = formatTime(conversation.updated_at || conversation.created_at);
   els.detailWaitingDuration.textContent = formatDurationSince(conversation.updated_at || conversation.created_at);
+  syncTransferConfirmPanel(conversation);
+  renderTransferReminders(collectPendingTransferConversations(state.statsConversations));
   updateConversationActionState();
 }
 
@@ -1070,7 +1230,40 @@ function resetConversationDetail() {
   els.detailUpdatedAt.textContent = "-";
   els.detailWaitingDuration.textContent = "-";
   els.detailWsState.textContent = "未连接";
+  syncTransferConfirmPanel(null);
+  renderTransferReminders(collectPendingTransferConversations(state.statsConversations));
   updateConversationActionState();
+}
+
+function syncTransferConfirmPanel(conversation) {
+  if (!els.transferConfirmPanel || !els.transferConfirmText) {
+    return;
+  }
+
+  if (!conversation) {
+    els.transferConfirmPanel.hidden = true;
+    els.transferConfirmText.textContent = "当前会话有待你确认的转接请求。";
+    return;
+  }
+
+  const meID = Number(state.me?.agent_id || 0);
+  const status = String(conversation?.status || "")
+    .trim()
+    .toLowerCase();
+  const pendingToAgentID = Number(conversation?.pending_transfer_to_agent_id || 0);
+  const showPanel = meID > 0 && status === "open" && pendingToAgentID > 0 && pendingToAgentID === meID;
+  els.transferConfirmPanel.hidden = !showPanel;
+
+  if (!showPanel) {
+    return;
+  }
+
+  const fromAgentID = Number(conversation?.assigned_agent_id || 0);
+  if (fromAgentID > 0) {
+    els.transferConfirmText.textContent = `坐席 ${formatAgentID(fromAgentID)} 正在把会话 #${conversation.id} 转接给你，确认后由你接待。`;
+    return;
+  }
+  els.transferConfirmText.textContent = `会话 #${conversation.id} 有待你确认的转接请求，确认后由你接待。`;
 }
 
 async function refreshMessages(options = {}) {
