@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 
@@ -30,6 +31,7 @@ const (
 	MessageStatusSent      = "sent"
 	MessageStatusDelivered = "delivered"
 	MessageStatusRead      = "read"
+	MaxMessageContentChars = 2000
 )
 
 type ChatService struct {
@@ -249,6 +251,12 @@ func (s *ChatService) ListConversations(ctx context.Context, input ListConversat
 func (s *ChatService) CreateMessage(ctx context.Context, input CreateMessageInput) (*model.Message, error) {
 	if input.SenderType != "visitor" && input.SenderType != "agent" && input.SenderType != "system" {
 		return nil, fmt.Errorf("invalid sender_type")
+	}
+	if strings.TrimSpace(input.Content) == "" {
+		return nil, fmt.Errorf("content is required")
+	}
+	if utf8.RuneCountInString(input.Content) > MaxMessageContentChars {
+		return nil, fmt.Errorf("invalid content: too long (max %d characters)", MaxMessageContentChars)
 	}
 	var (
 		message *model.Message

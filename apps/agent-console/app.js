@@ -18,6 +18,7 @@ const ADMIN_HOME_URL = "/app/admin/";
 const ALLOWED_ROLES = new Set(["agent"]);
 const THEME_STORAGE_KEY = "inlinechat.ui.theme";
 const ACK_TIMEOUT_MS = 5000;
+const MAX_MESSAGE_CONTENT_CHARS = 2000;
 
 const state = {
   token: "",
@@ -691,6 +692,9 @@ function scheduleConversationRefresh(delayMs = 0) {
 
 function shouldResyncMessages() {
   if (!state.token || !state.activeConversationId) {
+    return false;
+  }
+  if (String(state.activeConversation?.status || "").trim().toLowerCase() === "closed") {
     return false;
   }
   return !(state.wsConnected && state.wsConversationId === state.activeConversationId);
@@ -1388,6 +1392,24 @@ function markMessageFailedByClientMsgID(clientMsgID) {
   });
 }
 
+function markAllSendingMessagesFailed() {
+  let changed = false;
+  state.messages = state.messages.map((item) => {
+    if (String(item?.status || "").trim().toLowerCase() !== "sending") {
+      return item;
+    }
+    changed = true;
+    return {
+      ...item,
+      status: "failed",
+      updated_at: new Date().toISOString(),
+    };
+  });
+  if (changed) {
+    renderMessages(state.messages);
+  }
+}
+
 function handleMessageAck(payload) {
   const clientMsgID = String(payload.client_msg_id || "").trim();
   if (!clientMsgID) {
@@ -1461,6 +1483,109 @@ function handleMessageStatusEvent(payload) {
   }
 }
 
+function applyConversationSnapshotPatch(conversationID, patch) {
+  const id = String(conversationID || "").trim();
+  if (!id || !patch || typeof patch !== "object") {
+    return;
+  }
+
+  if (Array.isArray(state.conversations)) {
+    state.conversations = state.conversations.map((item) =>
+      String(item?.id || "") === id ? { ...item, ...patch } : item
+    );
+  }
+  if (Array.isArray(state.statsConversations)) {
+    state.statsConversations = state.statsConversations.map((item) =>
+      String(item?.id || "") === id ? { ...item, ...patch } : item
+    );
+  }
+
+  if (state.activeConversation && String(state.activeConversation.id || "") === id) {
+    updateActiveConversationHeader({
+      ...state.activeConversation,
+      ...patch,
+    });
+  } else {
+    updateConversationActionState();
+  }
+}
+
+function handleConversationStatusEvent(payload, fallbackStatus = "") {
+  const conversationID = String(payload?.conversation_id || state.activeConversationId || "").trim();
+  if (!conversationID) {
+    return;
+  }
+
+  const status = String(payload?.status || fallbackStatus || "")
+    .trim()
+    .toLowerCase();
+  if (status !== "open" && status !== "closed") {
+    return;
+  }
+
+  applyConversationSnapshotPatch(conversationID, {
+    status,
+    updated_at: new Date().toISOString(),
+  });
+  renderConversations(state.conversations);
+  renderStats();
+  renderQueueTabsMeta();
+
+  if (conversationID === String(state.activeConversationId || "")) {
+    if (status === "closed") {
+      resetPendingMap();
+      markAllSendingMessagesFailed();
+      closeWebSocket();
+      setStatus("会话已关闭，无法继续发送消息。");
+    }
+  }
+
+  scheduleConversationRefresh(0);
+}
+
+function isWebSocketReady() {
+  return Boolean(
+    state.ws &&
+      state.ws.readyState === WebSocket.OPEN &&
+      state.wsConnected &&
+      state.wsConversationId === state.activeConversationId
+  );
+}
+
+async function sendMessageViaHTTP(payload) {
+  const conversationID = String(state.activeConversationId || "").trim();
+  if (!conversationID) {
+    throw new Error("会话状态未就绪，请稍后重试。");
+  }
+  return apiRequest(`/api/chat/v1/conversations/${conversationID}/messages`, {
+    method: "POST",
+    auth: true,
+    body: payload,
+  });
+}
+
+async function dispatchAgentMessage(payload) {
+  if (isWebSocketReady()) {
+    try {
+      sendMessageViaWS(payload);
+      return "ws";
+    } catch {
+      // 若发送瞬间实时通道不可用，继续降级 HTTP。
+    }
+  }
+
+  const created = await sendMessageViaHTTP(payload);
+  updateMessageByClientMsgID(payload.client_msg_id, {
+    id: Number(created.id || 0),
+    status: normalizeMessageStatus(created.status) || "sent",
+    updated_at: created.updated_at || new Date().toISOString(),
+    sender_id: created.sender_id,
+  });
+  mergeMessages([created]);
+  scheduleConversationRefresh(300);
+  return "http";
+}
+
 async function resendMessage(clientMsgID) {
   const key = String(clientMsgID || "").trim();
   if (!key) {
@@ -1477,12 +1602,16 @@ async function resendMessage(clientMsgID) {
       status: "sending",
       updated_at: new Date().toISOString(),
     });
-    sendMessageViaWS({
+    const mode = await dispatchAgentMessage({
       sender_type: "agent",
       content: message.content || "",
       client_msg_id: key,
     });
-    setStatus("消息重发中...");
+    if (mode === "http") {
+      setStatus("实时通道未连接，已通过 HTTP 重发");
+    } else {
+      setStatus("消息重发中...");
+    }
   } catch (error) {
     markMessageFailedByClientMsgID(key);
     setStatus(error.message || "重发失败", true);
@@ -1920,6 +2049,10 @@ async function sendAgentMessage() {
   if (!content) {
     return;
   }
+  if (countMessageChars(content) > MAX_MESSAGE_CONTENT_CHARS) {
+    setStatus(`消息过长，最多 ${MAX_MESSAGE_CONTENT_CHARS} 个字符`, true);
+    return;
+  }
   const clientMsgID = `a_${safeUUID()}`;
 
   setActionPending("send", true);
@@ -1927,13 +2060,17 @@ async function sendAgentMessage() {
     mergeMessages([createLocalOutgoingMessage(content, clientMsgID, "agent", String(state.me.agent_id))], {
       forceScrollBottom: true,
     });
-    sendMessageViaWS({
+    const mode = await dispatchAgentMessage({
       sender_type: "agent",
       content,
       client_msg_id: clientMsgID,
     });
     els.agentContentInput.value = "";
-    setStatus("消息发送中...");
+    if (mode === "http") {
+      setStatus("实时通道未连接，已通过 HTTP 发送");
+    } else {
+      setStatus("消息发送中...");
+    }
   } catch (error) {
     markMessageFailedByClientMsgID(clientMsgID);
     setStatus(error.message || "发送失败", true);
@@ -1999,6 +2136,12 @@ function connectWebSocket() {
           handleMessageStatusEvent(data.payload || {});
           scheduleConversationRefresh(600);
           break;
+        case "conversation.closed":
+          handleConversationStatusEvent(data.payload || {}, "closed");
+          break;
+        case "conversation.status":
+          handleConversationStatusEvent(data.payload || {});
+          break;
         case "error":
           setStatus(data.error || "WebSocket 消息异常", true);
           break;
@@ -2017,6 +2160,10 @@ function connectWebSocket() {
     state.ws = null;
     state.wsConnected = false;
     if (conversationID !== state.activeConversationId) {
+      return;
+    }
+    if (String(state.activeConversation?.status || "").trim().toLowerCase() === "closed") {
+      setWsIndicator("offline", `实时通道：会话已关闭 #${conversationID}`);
       return;
     }
     setWsIndicator("warn", `实时通道：重连中 #${conversationID}`);
@@ -2063,6 +2210,9 @@ function scheduleWsReconnect(conversationID) {
     return;
   }
   if (state.wsReconnectTimer) {
+    return;
+  }
+  if (String(state.activeConversation?.status || "").trim().toLowerCase() === "closed") {
     return;
   }
 
@@ -2214,6 +2364,10 @@ function safeUUID() {
     return window.crypto.randomUUID();
   }
   return `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function countMessageChars(value) {
+  return Array.from(String(value || "")).length;
 }
 
 function formatDurationSince(value) {

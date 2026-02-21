@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -712,6 +713,26 @@ func TestCreateMessageVisitorTokenRequired(t *testing.T) {
 	}
 	if err.Error() != "visitor_token is required" {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCreateMessageContentTooLong(t *testing.T) {
+	svc, _, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open"},
+	})
+
+	_, err := svc.CreateMessage(context.Background(), CreateMessageInput{
+		ConversationID: 1,
+		SenderType:     "visitor",
+		Content:        strings.Repeat("a", MaxMessageContentChars+1),
+		ClientMsgID:    "too_long_1",
+		VisitorToken:   "vt_1",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "too long") {
+		t.Fatalf("expected too long error, got %v", err)
 	}
 }
 

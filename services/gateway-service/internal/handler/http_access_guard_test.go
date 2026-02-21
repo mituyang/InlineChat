@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -254,6 +255,40 @@ func TestCreateMessageAgentRequiresClaimedConversation(t *testing.T) {
 	}
 	if createCalled {
 		t.Fatal("CreateMessage should not be called when conversation is unclaimed")
+	}
+}
+
+func TestCreateMessageRejectsTooLongContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	createCalled := false
+	h := NewHTTPHandler(&grpcclient.Clients{
+		Chat: &chatAccessStub{
+			getConversationFn: func(_ context.Context, in *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
+				return &chatv1.Conversation{Id: in.GetId(), VisitorToken: "vt_1", Status: "open"}, nil
+			},
+			createMessageFn: func(_ context.Context, _ *chatv1.CreateMessageRequest, _ ...grpc.CallOption) (*chatv1.Message, error) {
+				createCalled = true
+				return &chatv1.Message{}, nil
+			},
+		},
+		Auth: &authAccessStub{},
+	}, time.Second)
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	longContent := strings.Repeat("a", maxMessageContentChars+1)
+	body := []byte(`{"sender_type":"visitor","content":"` + longContent + `","client_msg_id":"c-too-long","visitor_token":"vt_1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/v1/conversations/1/messages", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusBadRequest, rr.Code, rr.Body.String())
+	}
+	if createCalled {
+		t.Fatal("CreateMessage should not be called when content is too long")
 	}
 }
 

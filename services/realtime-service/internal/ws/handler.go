@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -18,6 +19,8 @@ import (
 	"inlinechat/services/realtime-service/internal/chatclient"
 	"inlinechat/services/realtime-service/internal/security"
 )
+
+const maxMessageContentChars = 2000
 
 type Handler struct {
 	hub             *Hub
@@ -205,6 +208,10 @@ func (h *Handler) onSendMessage(ctx context.Context, conversationID string, raw 
 	}
 	if strings.TrimSpace(payload.Content) == "" {
 		h.sendNack(client, payload.ClientMsgID, "content is required")
+		return nil
+	}
+	if utf8.RuneCountInString(payload.Content) > maxMessageContentChars {
+		h.sendNack(client, payload.ClientMsgID, fmt.Sprintf("content is too long (max %d characters)", maxMessageContentChars))
 		return nil
 	}
 

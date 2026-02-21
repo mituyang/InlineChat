@@ -264,6 +264,53 @@ func TestHandlerMessageSendCreateMessageFailedReturnsNack(t *testing.T) {
 	}
 }
 
+func TestHandlerMessageSendTooLongReturnsNack(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	fakeClient := &fakeChatClient{}
+	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, "secret", "inlinechat-auth", zap.NewNop())
+
+	r := gin.New()
+	r.GET("/ws/:conversation_id", handler.Serve)
+	ts := httptest.NewServer(r)
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/8?visitor_token=vt_1"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial websocket failed: %v", err)
+	}
+	defer conn.Close()
+
+	longContent := strings.Repeat("a", maxMessageContentChars+1)
+	if err := conn.WriteJSON(map[string]any{
+		"type": "message.send",
+		"payload": map[string]any{
+			"content":       longContent,
+			"client_msg_id": "c-too-long",
+			"visitor_token": "vt_1",
+		},
+	}); err != nil {
+		t.Fatalf("write ws message failed: %v", err)
+	}
+
+	_, raw, err := readWSMessage(t, conn)
+	if err != nil {
+		t.Fatalf("read ws message failed: %v", err)
+	}
+
+	var env map[string]any
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("unmarshal nack envelope failed: %v", err)
+	}
+	if env["type"] != "message.nack" {
+		t.Fatalf("expected message.nack, got %v", env)
+	}
+	if _, ok := fakeClient.lastCall(); ok {
+		t.Fatal("CreateMessage should not be called when content is too long")
+	}
+}
+
 func TestHandlerRejectInvalidAccessToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

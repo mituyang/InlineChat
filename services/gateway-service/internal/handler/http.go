@@ -2,10 +2,12 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc/codes"
@@ -18,6 +20,8 @@ import (
 	authv1 "inlinechat/services/gateway-service/internal/gen/authv1"
 	chatv1 "inlinechat/services/gateway-service/internal/gen/chatv1"
 )
+
+const maxMessageContentChars = 2000
 
 type HTTPHandler struct {
 	clients     *grpcclient.Clients
@@ -253,6 +257,14 @@ func (h *HTTPHandler) createMessage(c *gin.Context) {
 
 	req.SenderType = strings.ToLower(strings.TrimSpace(req.SenderType))
 	req.VisitorToken = strings.TrimSpace(req.VisitorToken)
+	if strings.TrimSpace(req.Content) == "" {
+		abortBadRequest(c, "content is required")
+		return
+	}
+	if utf8.RuneCountInString(req.Content) > maxMessageContentChars {
+		abortBadRequest(c, fmt.Sprintf("content is too long (max %d characters)", maxMessageContentChars))
+		return
+	}
 
 	switch req.SenderType {
 	case "agent":
