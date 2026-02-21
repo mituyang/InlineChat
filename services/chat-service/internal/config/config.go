@@ -12,6 +12,7 @@ type Config struct {
 	GRPCPort                     string
 	MySQLDSN                     string
 	LogLevel                     string
+	AutoCloseAfterSec            int
 	RedisAddr                    string
 	RedisPassword                string
 	RedisDB                      int
@@ -30,6 +31,7 @@ func Load() (Config, error) {
 		GRPCPort:                     getEnv("GRPC_PORT", "8212"),
 		MySQLDSN:                     os.Getenv("MYSQL_DSN"),
 		LogLevel:                     getEnv("LOG_LEVEL", "info"),
+		AutoCloseAfterSec:            getIntEnv("AUTO_CLOSE_AFTER_SEC", 300),
 		RedisAddr:                    os.Getenv("REDIS_ADDR"),
 		RedisPassword:                os.Getenv("REDIS_PASSWORD"),
 		RedisDB:                      getIntEnv("REDIS_DB", 0),
@@ -47,6 +49,9 @@ func Load() (Config, error) {
 	}
 	if cfg.RedisAddr == "" {
 		return Config{}, fmt.Errorf("REDIS_ADDR is required")
+	}
+	if cfg.AutoCloseAfterSec <= 0 {
+		return Config{}, fmt.Errorf("AUTO_CLOSE_AFTER_SEC must be greater than 0")
 	}
 	if len(cfg.ETCDEndpoints) == 0 {
 		return Config{}, fmt.Errorf("ETCD_ENDPOINTS is required")

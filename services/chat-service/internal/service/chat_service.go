@@ -30,10 +30,12 @@ const (
 )
 
 type ChatService struct {
-	conversationRepo repository.ConversationRepository
-	messageRepo      repository.MessageRepository
-	publisher        MessageEventPublisher
-	logger           *zap.Logger
+	conversationRepo   repository.ConversationRepository
+	messageRepo        repository.MessageRepository
+	publisher          MessageEventPublisher
+	logger             *zap.Logger
+	autoCloseAfter     time.Duration
+	autoCloseScheduler *autoCloseScheduler
 }
 
 type MessageEventPublisher interface {
@@ -110,17 +112,26 @@ type MarkMessageDeliveredResult struct {
 	Status  string
 }
 
-func New(conversationRepo repository.ConversationRepository, messageRepo repository.MessageRepository, logger *zap.Logger, publisher MessageEventPublisher) *ChatService {
+func New(conversationRepo repository.ConversationRepository, messageRepo repository.MessageRepository, logger *zap.Logger, publisher MessageEventPublisher, autoCloseAfter time.Duration) *ChatService {
 	if publisher == nil {
 		publisher = noopMessageEventPublisher{}
 	}
 
-	return &ChatService{
+	svc := &ChatService{
 		conversationRepo: conversationRepo,
 		messageRepo:      messageRepo,
 		publisher:        publisher,
 		logger:           logger,
+		autoCloseAfter:   autoCloseAfter,
 	}
+
+	if autoCloseAfter > 0 {
+		svc.autoCloseScheduler = newAutoCloseScheduler(func(conversationID uint64, dueAt time.Time) {
+			svc.onAutoCloseDue(conversationID, dueAt)
+		})
+	}
+
+	return svc
 }
 
 func (s *ChatService) CreateConversation(ctx context.Context, input CreateConversationInput) (*model.Conversation, error) {
@@ -256,6 +267,7 @@ func (s *ChatService) CreateMessage(ctx context.Context, input CreateMessageInpu
 			zap.Uint64("message_id", message.ID),
 		)
 	}
+	s.onMessageCreatedForAutoClose(message)
 
 	return message, nil
 }
@@ -379,6 +391,95 @@ func (s *ChatService) ListMessages(ctx context.Context, conversationID uint64, l
 	return s.messageRepo.ListByConversation(ctx, conversationID, limit, beforeID)
 }
 
+func (s *ChatService) AutoCloseInactiveConversations(ctx context.Context, inactivity time.Duration) (int, error) {
+	if inactivity <= 0 {
+		return 0, fmt.Errorf("inactivity must be greater than 0")
+	}
+
+	const batchSize = 200
+	cutoff := time.Now().Add(-inactivity)
+	openConversationIDs := make([]uint64, 0, batchSize)
+
+	for offset := 0; ; offset += batchSize {
+		conversations, err := s.conversationRepo.List(ctx, repository.ListConversationsFilter{
+			Status: "open",
+			Limit:  batchSize,
+			Offset: offset,
+		})
+		if err != nil {
+			return 0, err
+		}
+		if len(conversations) == 0 {
+			break
+		}
+		for i := range conversations {
+			openConversationIDs = append(openConversationIDs, conversations[i].ID)
+		}
+		if len(conversations) < batchSize {
+			break
+		}
+	}
+
+	var closedCount int
+	for _, conversationID := range openConversationIDs {
+		latestMessage, err := s.messageRepo.GetLatestByConversation(ctx, conversationID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				continue
+			}
+			return closedCount, err
+		}
+		if latestMessage.SenderType != "agent" || latestMessage.CreatedAt.After(cutoff) {
+			continue
+		}
+
+		changed := false
+		_, err = s.conversationRepo.Mutate(ctx, conversationID, func(conversation *model.Conversation) (bool, error) {
+			if conversation.Status != "open" {
+				return false, nil
+			}
+
+			latest, latestErr := s.messageRepo.GetLatestByConversation(ctx, conversation.ID)
+			if latestErr != nil {
+				if errors.Is(latestErr, repository.ErrNotFound) {
+					return false, nil
+				}
+				return false, latestErr
+			}
+			if latest.SenderType != "agent" || latest.CreatedAt.After(cutoff) {
+				return false, nil
+			}
+
+			now := time.Now()
+			conversation.Status = "closed"
+			conversation.ClosedAt = &now
+			if conversation.AssignedAgentID != nil {
+				closedBy := *conversation.AssignedAgentID
+				conversation.ClosedByAgentID = &closedBy
+			} else {
+				conversation.ClosedByAgentID = nil
+			}
+			changed = true
+			return true, nil
+		})
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				continue
+			}
+			return closedCount, err
+		}
+		if changed {
+			closedCount++
+			s.logger.Info("conversation auto closed due to visitor inactivity",
+				zap.Uint64("conversation_id", conversationID),
+				zap.Duration("inactivity", inactivity),
+			)
+		}
+	}
+
+	return closedCount, nil
+}
+
 func (s *ChatService) ClaimConversation(ctx context.Context, input ClaimConversationInput) (*model.Conversation, error) {
 	if input.ConversationID == 0 {
 		return nil, fmt.Errorf("conversation_id is required")
@@ -493,6 +594,9 @@ func (s *ChatService) CloseConversation(ctx context.Context, input CloseConversa
 			return nil, ErrConversationNotFound
 		}
 		return nil, err
+	}
+	if conversation.Status == "closed" && s.autoCloseScheduler != nil {
+		s.autoCloseScheduler.Cancel(conversation.ID)
 	}
 	return conversation, nil
 }

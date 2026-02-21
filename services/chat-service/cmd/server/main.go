@@ -87,7 +87,12 @@ func main() {
 	conversationRepo := repository.NewConversationRepository(db)
 	messageRepo := repository.NewMessageRepository(db)
 	messagePublisher := pubsub.NewRedisMessagePublisher(redisClient, 2*time.Second)
-	chatSvc := service.New(conversationRepo, messageRepo, appLogger, messagePublisher)
+	autoCloseAfter := time.Duration(cfg.AutoCloseAfterSec) * time.Second
+	chatSvc := service.New(conversationRepo, messageRepo, appLogger, messagePublisher, autoCloseAfter)
+	if err := chatSvc.StartAutoCloseScheduler(context.Background()); err != nil {
+		appLogger.Fatal("failed to bootstrap auto-close scheduler", zap.Error(err))
+	}
+	defer chatSvc.StopAutoCloseScheduler()
 	h := handler.NewHTTPHandler(chatSvc)
 
 	r := gin.New()

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sort"
 	"testing"
 	"time"
 
@@ -50,7 +51,7 @@ func (r *fakeConversationRepository) GetByID(_ context.Context, id uint64) (*mod
 }
 
 func (r *fakeConversationRepository) List(_ context.Context, filter repository.ListConversationsFilter) ([]model.Conversation, error) {
-	out := make([]model.Conversation, 0, len(r.items))
+	filtered := make([]*model.Conversation, 0, len(r.items))
 	for _, item := range r.items {
 		if filter.Status != "" && item.Status != filter.Status {
 			continue
@@ -66,7 +67,29 @@ func (r *fakeConversationRepository) List(_ context.Context, filter repository.L
 				continue
 			}
 		}
-		out = append(out, *cloneConversation(item))
+		filtered = append(filtered, cloneConversation(item))
+	}
+
+	sort.Slice(filtered, func(i, j int) bool {
+		return filtered[i].ID > filtered[j].ID
+	})
+
+	start := filter.Offset
+	if start < 0 {
+		start = 0
+	}
+	if start >= len(filtered) {
+		return []model.Conversation{}, nil
+	}
+
+	end := len(filtered)
+	if filter.Limit > 0 && start+filter.Limit < end {
+		end = start + filter.Limit
+	}
+
+	out := make([]model.Conversation, 0, end-start)
+	for _, item := range filtered[start:end] {
+		out = append(out, *item)
 	}
 	return out, nil
 }
@@ -108,6 +131,9 @@ func (r *fakeMessageRepository) Create(_ context.Context, message *model.Message
 	if message.Status == "" {
 		message.Status = MessageStatusSent
 	}
+	if message.CreatedAt.IsZero() {
+		message.CreatedAt = time.Now()
+	}
 	copyMessage := *message
 	r.items[message.ConversationID] = append(r.items[message.ConversationID], copyMessage)
 	return nil
@@ -131,6 +157,22 @@ func (r *fakeMessageRepository) GetByClientMsgID(_ context.Context, conversation
 		}
 	}
 	return nil, repository.ErrNotFound
+}
+
+func (r *fakeMessageRepository) GetLatestByConversation(_ context.Context, conversationID uint64) (*model.Message, error) {
+	items := r.items[conversationID]
+	if len(items) == 0 {
+		return nil, repository.ErrNotFound
+	}
+
+	latest := items[0]
+	for i := 1; i < len(items); i++ {
+		if items[i].ID > latest.ID {
+			latest = items[i]
+		}
+	}
+	cp := latest
+	return &cp, nil
 }
 
 func (r *fakeMessageRepository) ListByConversation(_ context.Context, conversationID uint64, limit int, beforeID uint64) ([]model.Message, error) {
@@ -243,7 +285,7 @@ func testChatServiceWithConversations(seed map[uint64]*model.Conversation) (*Cha
 	conversationRepo := newFakeConversationRepository(seed)
 	messageRepo := newFakeMessageRepository()
 	publisher := &fakePublisher{}
-	svc := New(conversationRepo, messageRepo, zap.NewNop(), publisher)
+	svc := New(conversationRepo, messageRepo, zap.NewNop(), publisher, 0)
 	return svc, conversationRepo, messageRepo, publisher
 }
 
@@ -690,5 +732,77 @@ func TestCloseConversationIdempotentWhenAlreadyClosed(t *testing.T) {
 	}
 	if repo.items[1].Status != "closed" {
 		t.Fatalf("stored status should remain closed")
+	}
+}
+
+func TestAutoCloseInactiveConversationsClosesExpiredAgentLastMessage(t *testing.T) {
+	owner := uint64(7)
+	svc, repo, messageRepo, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open", AssignedAgentID: &owner},
+	})
+
+	err := messageRepo.Create(context.Background(), &model.Message{
+		ConversationID: 1,
+		SenderType:     "agent",
+		SenderID:       "7",
+		Content:        "请问还有其他问题吗？",
+		ClientMsgID:    "agent_1",
+		CreatedAt:      time.Now().Add(-6 * time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("seed message failed: %v", err)
+	}
+
+	closedCount, err := svc.AutoCloseInactiveConversations(context.Background(), 5*time.Minute)
+	if err != nil {
+		t.Fatalf("AutoCloseInactiveConversations failed: %v", err)
+	}
+	if closedCount != 1 {
+		t.Fatalf("expected closed_count=1, got %d", closedCount)
+	}
+
+	stored := repo.items[1]
+	if stored.Status != "closed" {
+		t.Fatalf("expected conversation closed, got %s", stored.Status)
+	}
+	if stored.ClosedAt == nil {
+		t.Fatalf("closed_at should be set")
+	}
+	if stored.ClosedByAgentID == nil || *stored.ClosedByAgentID != owner {
+		t.Fatalf("unexpected closed_by_agent_id: %+v", stored.ClosedByAgentID)
+	}
+}
+
+func TestAutoCloseInactiveConversationsSkipsWhenVisitorAlreadyReplied(t *testing.T) {
+	owner := uint64(7)
+	svc, repo, messageRepo, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open", AssignedAgentID: &owner},
+	})
+
+	_ = messageRepo.Create(context.Background(), &model.Message{
+		ConversationID: 1,
+		SenderType:     "agent",
+		SenderID:       "7",
+		Content:        "请问还有其他问题吗？",
+		ClientMsgID:    "agent_1",
+		CreatedAt:      time.Now().Add(-10 * time.Minute),
+	})
+	_ = messageRepo.Create(context.Background(), &model.Message{
+		ConversationID: 1,
+		SenderType:     "visitor",
+		Content:        "没有了，谢谢",
+		ClientMsgID:    "visitor_1",
+		CreatedAt:      time.Now().Add(-9 * time.Minute),
+	})
+
+	closedCount, err := svc.AutoCloseInactiveConversations(context.Background(), 5*time.Minute)
+	if err != nil {
+		t.Fatalf("AutoCloseInactiveConversations failed: %v", err)
+	}
+	if closedCount != 0 {
+		t.Fatalf("expected closed_count=0, got %d", closedCount)
+	}
+	if repo.items[1].Status != "open" {
+		t.Fatalf("conversation should stay open, got %s", repo.items[1].Status)
 	}
 }

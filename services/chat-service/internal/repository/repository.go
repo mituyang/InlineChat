@@ -23,6 +23,7 @@ type MessageRepository interface {
 	Create(ctx context.Context, message *model.Message) error
 	GetByID(ctx context.Context, conversationID uint64, messageID uint64) (*model.Message, error)
 	GetByClientMsgID(ctx context.Context, conversationID uint64, clientMsgID string) (*model.Message, error)
+	GetLatestByConversation(ctx context.Context, conversationID uint64) (*model.Message, error)
 	ListByConversation(ctx context.Context, conversationID uint64, limit int, beforeID uint64) ([]model.Message, error)
 	MarkDelivered(ctx context.Context, conversationID uint64, messageID uint64) (bool, error)
 	MarkReadByConversationAndSender(ctx context.Context, conversationID uint64, senderType string, lastReadMessageID uint64) (int64, error)
@@ -161,6 +162,20 @@ func (r *GormMessageRepository) GetByClientMsgID(ctx context.Context, conversati
 	var message model.Message
 	if err := r.db.WithContext(ctx).
 		Where("conversation_id = ? AND client_msg_id = ?", conversationID, clientMsgID).
+		First(&message).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &message, nil
+}
+
+func (r *GormMessageRepository) GetLatestByConversation(ctx context.Context, conversationID uint64) (*model.Message, error) {
+	var message model.Message
+	if err := r.db.WithContext(ctx).
+		Where("conversation_id = ?", conversationID).
+		Order("id DESC").
 		First(&message).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
