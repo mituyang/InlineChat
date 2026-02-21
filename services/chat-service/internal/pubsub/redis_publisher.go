@@ -123,12 +123,19 @@ func (p *RedisMessagePublisher) publishByConversationID(conversationID uint64, p
 	if err != nil {
 		return fmt.Errorf("marshal event payload failed: %w", err)
 	}
+	return p.PublishConversationEvent(context.Background(), conversationID, raw)
+}
+
+func (p *RedisMessagePublisher) PublishConversationEvent(_ context.Context, conversationID uint64, payload []byte) error {
+	if conversationID == 0 || len(payload) == 0 {
+		return nil
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
 
 	channel := channelPrefix + strconv.FormatUint(conversationID, 10)
-	if err := p.client.Publish(ctx, channel, raw).Err(); err != nil {
+	if err := p.client.Publish(ctx, channel, payload).Err(); err != nil {
 		return fmt.Errorf("publish event failed: %w", err)
 	}
 	return nil

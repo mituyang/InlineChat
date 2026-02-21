@@ -2,6 +2,12 @@ package model
 
 import "time"
 
+const (
+	OutboxStatusPending    = "pending"
+	OutboxStatusProcessing = "processing"
+	OutboxStatusPublished  = "published"
+)
+
 type Conversation struct {
 	ID                         uint64     `gorm:"primaryKey" json:"id"`
 	SiteID                     string     `gorm:"size:64;not null;index" json:"site_id"`
@@ -27,4 +33,19 @@ type Message struct {
 	Status         string    `gorm:"size:16;not null;default:sent;index" json:"status"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+type EventOutbox struct {
+	ID             uint64     `gorm:"primaryKey" json:"id"`
+	ConversationID uint64     `gorm:"not null;index" json:"conversation_id"`
+	EventType      string     `gorm:"size:64;not null;index" json:"event_type"`
+	Payload        string     `gorm:"type:json;not null" json:"payload"`
+	Status         string     `gorm:"size:32;not null;index" json:"status"`
+	Attempts       int        `gorm:"not null;default:0" json:"attempts"`
+	LastError      string     `gorm:"type:text" json:"last_error,omitempty"`
+	ProcessingAt   *time.Time `gorm:"index" json:"processing_at,omitempty"`
+	NextRetryAt    *time.Time `gorm:"index" json:"next_retry_at,omitempty"`
+	PublishedAt    *time.Time `gorm:"index" json:"published_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }

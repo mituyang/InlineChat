@@ -86,13 +86,33 @@ func main() {
 
 	conversationRepo := repository.NewConversationRepository(db)
 	messageRepo := repository.NewMessageRepository(db)
+	txManager := repository.NewTransactionManager(db)
+	outboxRepo := repository.NewEventOutboxRepository(db)
 	messagePublisher := pubsub.NewRedisMessagePublisher(redisClient, 2*time.Second)
+	outboxWakeupBus := pubsub.NewRedisOutboxWakeupBus(redisClient, 2*time.Second)
 	autoCloseAfter := time.Duration(cfg.AutoCloseAfterSec) * time.Second
 	chatSvc := service.New(conversationRepo, messageRepo, appLogger, messagePublisher, autoCloseAfter)
+	if cfg.EventOutboxEnabled {
+		chatSvc.EnableEventOutbox(txManager, outboxRepo)
+		chatSvc.SetOutboxNotifier(outboxWakeupBus)
+	}
 	if err := chatSvc.StartAutoCloseScheduler(context.Background()); err != nil {
 		appLogger.Fatal("failed to bootstrap auto-close scheduler", zap.Error(err))
 	}
 	defer chatSvc.StopAutoCloseScheduler()
+
+	var outboxDispatcher *service.OutboxDispatcher
+	if cfg.EventOutboxEnabled {
+		outboxDispatcher = service.NewOutboxDispatcher(outboxRepo, messagePublisher, outboxWakeupBus, appLogger, service.OutboxDispatcherConfig{
+			PollInterval:      time.Duration(cfg.EventOutboxPollIntervalMS) * time.Millisecond,
+			BatchSize:         cfg.EventOutboxBatchSize,
+			RetryBaseInterval: time.Duration(cfg.EventOutboxRetryBaseMS) * time.Millisecond,
+			RetryMaxInterval:  time.Duration(cfg.EventOutboxRetryMaxMS) * time.Millisecond,
+			ProcessingTimeout: time.Duration(cfg.EventOutboxProcessingTimeoutSec) * time.Second,
+		})
+		outboxDispatcher.Start(context.Background())
+		defer outboxDispatcher.Stop()
+	}
 	h := handler.NewHTTPHandler(chatSvc)
 
 	r := gin.New()

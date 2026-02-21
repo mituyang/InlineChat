@@ -187,45 +187,57 @@ func (s *ChatService) autoCloseConversationByTimeout(ctx context.Context, conver
 
 	var closed bool
 	var rescheduleAt *time.Time
-	_, err := s.conversationRepo.Mutate(ctx, conversationID, func(conversation *model.Conversation) (bool, error) {
-		if conversation.Status != "open" {
-			return false, nil
-		}
-
-		latest, latestErr := s.messageRepo.GetLatestByConversationExcludingSystem(ctx, conversation.ID)
-		if latestErr != nil {
-			if errors.Is(latestErr, repository.ErrNotFound) {
+	err := s.withEventTransaction(ctx, func(txCtx context.Context) error {
+		_, mutateErr := s.conversationRepo.Mutate(txCtx, conversationID, func(conversation *model.Conversation) (bool, error) {
+			if conversation.Status != "open" {
 				return false, nil
 			}
-			return false, latestErr
-		}
-		if latest.SenderType != "agent" {
-			return false, nil
+
+			latest, latestErr := s.messageRepo.GetLatestByConversationExcludingSystem(txCtx, conversation.ID)
+			if latestErr != nil {
+				if errors.Is(latestErr, repository.ErrNotFound) {
+					return false, nil
+				}
+				return false, latestErr
+			}
+			if latest.SenderType != "agent" {
+				return false, nil
+			}
+
+			now := time.Now()
+			deadline := latest.CreatedAt.Add(s.autoCloseAfter)
+			if deadline.After(now) {
+				next := deadline
+				rescheduleAt = &next
+				return false, nil
+			}
+
+			conversation.Status = "closed"
+			conversation.ClosedAt = &now
+			if conversation.AssignedAgentID != nil {
+				closedBy := *conversation.AssignedAgentID
+				conversation.ClosedByAgentID = &closedBy
+			} else {
+				conversation.ClosedByAgentID = nil
+			}
+			closed = true
+			return true, nil
+		})
+		if mutateErr != nil {
+			if errors.Is(mutateErr, repository.ErrNotFound) {
+				return nil
+			}
+			return mutateErr
 		}
 
-		now := time.Now()
-		deadline := latest.CreatedAt.Add(s.autoCloseAfter)
-		if deadline.After(now) {
-			next := deadline
-			rescheduleAt = &next
-			return false, nil
+		if closed {
+			if emitErr := s.emitConversationClosed(txCtx, conversationID); emitErr != nil {
+				return emitErr
+			}
 		}
-
-		conversation.Status = "closed"
-		conversation.ClosedAt = &now
-		if conversation.AssignedAgentID != nil {
-			closedBy := *conversation.AssignedAgentID
-			conversation.ClosedByAgentID = &closedBy
-		} else {
-			conversation.ClosedByAgentID = nil
-		}
-		closed = true
-		return true, nil
+		return nil
 	})
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil
-		}
 		return err
 	}
 
@@ -240,7 +252,6 @@ func (s *ChatService) autoCloseConversationByTimeout(ctx context.Context, conver
 	if s.autoCloseScheduler != nil {
 		s.autoCloseScheduler.Cancel(conversationID)
 	}
-	s.publishConversationClosed(ctx, conversationID)
 	s.logger.Info("conversation auto closed due to visitor inactivity",
 		zap.Uint64("conversation_id", conversationID),
 		zap.Duration("inactivity", s.autoCloseAfter),

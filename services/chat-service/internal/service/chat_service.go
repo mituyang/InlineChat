@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -34,10 +35,23 @@ const (
 type ChatService struct {
 	conversationRepo   repository.ConversationRepository
 	messageRepo        repository.MessageRepository
+	txManager          repository.TransactionManager
+	outboxRepo         repository.EventOutboxRepository
+	outboxNotifier     OutboxEventNotifier
 	publisher          MessageEventPublisher
 	logger             *zap.Logger
 	autoCloseAfter     time.Duration
 	autoCloseScheduler *autoCloseScheduler
+}
+
+type OutboxEventNotifier interface {
+	NotifyOutbox(ctx context.Context) error
+}
+
+type outboxNotifyContextKey struct{}
+
+type outboxNotifyState struct {
+	shouldNotify bool
 }
 
 type MessageEventPublisher interface {
@@ -147,6 +161,42 @@ func New(conversationRepo repository.ConversationRepository, messageRepo reposit
 	return svc
 }
 
+func (s *ChatService) EnableEventOutbox(txManager repository.TransactionManager, outboxRepo repository.EventOutboxRepository) {
+	if txManager == nil || outboxRepo == nil {
+		return
+	}
+	s.txManager = txManager
+	s.outboxRepo = outboxRepo
+}
+
+func (s *ChatService) SetOutboxNotifier(notifier OutboxEventNotifier) {
+	s.outboxNotifier = notifier
+}
+
+func (s *ChatService) eventOutboxEnabled() bool {
+	return s.txManager != nil && s.outboxRepo != nil
+}
+
+func (s *ChatService) withEventTransaction(ctx context.Context, fn func(txCtx context.Context) error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if !s.eventOutboxEnabled() {
+		return fn(ctx)
+	}
+	notifyState := &outboxNotifyState{}
+	txCtx := context.WithValue(ctx, outboxNotifyContextKey{}, notifyState)
+	if err := s.txManager.WithTransaction(txCtx, fn); err != nil {
+		return err
+	}
+	if notifyState.shouldNotify && s.outboxNotifier != nil {
+		if err := s.outboxNotifier.NotifyOutbox(ctx); err != nil {
+			s.logger.Warn("notify outbox dispatcher failed", zap.Error(err))
+		}
+	}
+	return nil
+}
+
 func (s *ChatService) CreateConversation(ctx context.Context, input CreateConversationInput) (*model.Conversation, error) {
 	conversation := &model.Conversation{
 		SiteID:       input.SiteID,
@@ -200,87 +250,100 @@ func (s *ChatService) CreateMessage(ctx context.Context, input CreateMessageInpu
 	if input.SenderType != "visitor" && input.SenderType != "agent" && input.SenderType != "system" {
 		return nil, fmt.Errorf("invalid sender_type")
 	}
-	conversation, err := s.conversationRepo.GetByID(ctx, input.ConversationID)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, ErrConversationNotFound
-		}
-		return nil, err
-	}
-
-	if conversation.Status == "closed" {
-		return nil, ErrConversationClosed
-	}
-
-	if input.SenderType == "visitor" {
-		input.VisitorToken = strings.TrimSpace(input.VisitorToken)
-		if input.VisitorToken == "" {
-			return nil, fmt.Errorf("visitor_token is required")
-		}
-		if conversation.VisitorToken != input.VisitorToken {
-			return nil, fmt.Errorf("visitor token does not match conversation")
-		}
-	}
-
-	if input.SenderType == "agent" {
-		input.SenderID = strings.TrimSpace(input.SenderID)
-		if input.SenderID == "" {
-			return nil, fmt.Errorf("sender_id is required for agent sender_type")
-		}
-		senderAgentID, parseErr := strconv.ParseUint(input.SenderID, 10, 64)
-		if parseErr != nil || senderAgentID == 0 {
-			return nil, fmt.Errorf("invalid sender_id")
-		}
-		if conversation.AssignedAgentID == nil {
-			return nil, ErrConversationUnassigned
-		}
-		if *conversation.AssignedAgentID != senderAgentID {
-			return nil, ErrForbidden
-		}
-	}
-
-	existing, err := s.messageRepo.GetByClientMsgID(ctx, input.ConversationID, input.ClientMsgID)
-	if err == nil {
-		return existing, nil
-	}
-	if !errors.Is(err, repository.ErrNotFound) {
-		return nil, err
-	}
-
-	message := &model.Message{
-		ConversationID: input.ConversationID,
-		SenderType:     input.SenderType,
-		SenderID:       input.SenderID,
-		Content:        input.Content,
-		ClientMsgID:    input.ClientMsgID,
-		Status:         MessageStatusSent,
-	}
-
-	if err := s.messageRepo.Create(ctx, message); err != nil {
-		if isDuplicateMessageErr(err) {
-			existing, findErr := s.messageRepo.GetByClientMsgID(ctx, input.ConversationID, input.ClientMsgID)
-			if findErr == nil {
-				return existing, nil
-			}
-			if !errors.Is(findErr, repository.ErrNotFound) {
-				return nil, findErr
-			}
-		}
-		return nil, err
-	}
-
-	s.logger.Info("message created",
-		zap.Uint64("conversation_id", input.ConversationID),
-		zap.Uint64("message_id", message.ID),
+	var (
+		message *model.Message
+		created bool
 	)
-	if err := s.publisher.PublishMessageCreated(ctx, message); err != nil {
-		s.logger.Warn("publish message.new event failed",
-			zap.Error(err),
+
+	err := s.withEventTransaction(ctx, func(txCtx context.Context) error {
+		conversation, err := s.conversationRepo.GetByID(txCtx, input.ConversationID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrConversationNotFound
+			}
+			return err
+		}
+
+		if conversation.Status == "closed" {
+			return ErrConversationClosed
+		}
+
+		if input.SenderType == "visitor" {
+			input.VisitorToken = strings.TrimSpace(input.VisitorToken)
+			if input.VisitorToken == "" {
+				return fmt.Errorf("visitor_token is required")
+			}
+			if conversation.VisitorToken != input.VisitorToken {
+				return fmt.Errorf("visitor token does not match conversation")
+			}
+		}
+
+		if input.SenderType == "agent" {
+			input.SenderID = strings.TrimSpace(input.SenderID)
+			if input.SenderID == "" {
+				return fmt.Errorf("sender_id is required for agent sender_type")
+			}
+			senderAgentID, parseErr := strconv.ParseUint(input.SenderID, 10, 64)
+			if parseErr != nil || senderAgentID == 0 {
+				return fmt.Errorf("invalid sender_id")
+			}
+			if conversation.AssignedAgentID == nil {
+				return ErrConversationUnassigned
+			}
+			if *conversation.AssignedAgentID != senderAgentID {
+				return ErrForbidden
+			}
+		}
+
+		existing, err := s.messageRepo.GetByClientMsgID(txCtx, input.ConversationID, input.ClientMsgID)
+		if err == nil {
+			message = existing
+			return nil
+		}
+		if !errors.Is(err, repository.ErrNotFound) {
+			return err
+		}
+
+		message = &model.Message{
+			ConversationID: input.ConversationID,
+			SenderType:     input.SenderType,
+			SenderID:       input.SenderID,
+			Content:        input.Content,
+			ClientMsgID:    input.ClientMsgID,
+			Status:         MessageStatusSent,
+		}
+
+		if err := s.messageRepo.Create(txCtx, message); err != nil {
+			if isDuplicateMessageErr(err) {
+				existing, findErr := s.messageRepo.GetByClientMsgID(txCtx, input.ConversationID, input.ClientMsgID)
+				if findErr == nil {
+					message = existing
+					return nil
+				}
+				if !errors.Is(findErr, repository.ErrNotFound) {
+					return findErr
+				}
+			}
+			return err
+		}
+
+		if err := s.emitMessageCreated(txCtx, message); err != nil {
+			return err
+		}
+		created = true
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if created {
+		s.logger.Info("message created",
 			zap.Uint64("conversation_id", input.ConversationID),
 			zap.Uint64("message_id", message.ID),
 		)
+		s.onMessageCreatedForAutoClose(message)
 	}
-	s.onMessageCreatedForAutoClose(message)
 
 	return message, nil
 }
@@ -293,42 +356,48 @@ func (s *ChatService) MarkMessageDelivered(ctx context.Context, conversationID u
 		return MarkMessageDeliveredResult{}, fmt.Errorf("message_id is required")
 	}
 
-	message, err := s.messageRepo.GetByID(ctx, conversationID, messageID)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return MarkMessageDeliveredResult{}, ErrMessageNotFound
+	var result MarkMessageDeliveredResult
+	err := s.withEventTransaction(ctx, func(txCtx context.Context) error {
+		message, err := s.messageRepo.GetByID(txCtx, conversationID, messageID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrMessageNotFound
+			}
+			return err
 		}
+
+		switch message.Status {
+		case MessageStatusRead, MessageStatusDelivered:
+			result = MarkMessageDeliveredResult{Updated: false, Status: message.Status}
+			return nil
+		}
+
+		updated, err := s.messageRepo.MarkDelivered(txCtx, conversationID, messageID)
+		if err != nil {
+			return err
+		}
+		if updated {
+			if err := s.emitMessageStatus(txCtx, conversationID, messageID, MessageStatusDelivered); err != nil {
+				return err
+			}
+			result = MarkMessageDeliveredResult{Updated: true, Status: MessageStatusDelivered}
+			return nil
+		}
+
+		latest, err := s.messageRepo.GetByID(txCtx, conversationID, messageID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrMessageNotFound
+			}
+			return err
+		}
+		result = MarkMessageDeliveredResult{Updated: false, Status: latest.Status}
+		return nil
+	})
+	if err != nil {
 		return MarkMessageDeliveredResult{}, err
 	}
-
-	switch message.Status {
-	case MessageStatusRead, MessageStatusDelivered:
-		return MarkMessageDeliveredResult{Updated: false, Status: message.Status}, nil
-	}
-
-	updated, err := s.messageRepo.MarkDelivered(ctx, conversationID, messageID)
-	if err != nil {
-		return MarkMessageDeliveredResult{}, err
-	}
-	if updated {
-		if err := s.publisher.PublishMessageStatus(ctx, conversationID, messageID, MessageStatusDelivered); err != nil {
-			s.logger.Warn("publish message.status delivered event failed",
-				zap.Error(err),
-				zap.Uint64("conversation_id", conversationID),
-				zap.Uint64("message_id", messageID),
-			)
-		}
-		return MarkMessageDeliveredResult{Updated: true, Status: MessageStatusDelivered}, nil
-	}
-
-	latest, err := s.messageRepo.GetByID(ctx, conversationID, messageID)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return MarkMessageDeliveredResult{}, ErrMessageNotFound
-		}
-		return MarkMessageDeliveredResult{}, err
-	}
-	return MarkMessageDeliveredResult{Updated: false, Status: latest.Status}, nil
+	return result, nil
 }
 
 func (s *ChatService) MarkMessagesRead(ctx context.Context, input MarkMessagesReadInput) (uint64, error) {
@@ -344,48 +413,50 @@ func (s *ChatService) MarkMessagesRead(ctx context.Context, input MarkMessagesRe
 		return 0, err
 	}
 
-	conversation, err := s.conversationRepo.GetByID(ctx, input.ConversationID)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return 0, ErrConversationNotFound
+	var updatedRows int64
+	err = s.withEventTransaction(ctx, func(txCtx context.Context) error {
+		conversation, err := s.conversationRepo.GetByID(txCtx, input.ConversationID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrConversationNotFound
+			}
+			return err
 		}
+
+		targetSenderType := "visitor"
+		if actorType == "visitor" {
+			if strings.TrimSpace(input.VisitorToken) == "" {
+				return fmt.Errorf("visitor_token is required")
+			}
+			if conversation.VisitorToken != input.VisitorToken {
+				return fmt.Errorf("visitor token does not match conversation")
+			}
+			targetSenderType = "agent"
+		} else {
+			if input.ActorAgentID == 0 {
+				return fmt.Errorf("actor_agent_id is required")
+			}
+		}
+
+		rows, err := s.messageRepo.MarkReadByConversationAndSender(txCtx, input.ConversationID, targetSenderType, input.LastReadMessageID)
+		if err != nil {
+			return err
+		}
+		if rows < 0 {
+			rows = 0
+		}
+		if rows > 0 {
+			if err := s.emitMessageStatusRange(txCtx, input.ConversationID, targetSenderType, input.LastReadMessageID, MessageStatusRead); err != nil {
+				return err
+			}
+		}
+		updatedRows = rows
+		return nil
+	})
+	if err != nil {
 		return 0, err
 	}
-
-	targetSenderType := "visitor"
-	if actorType == "visitor" {
-		if strings.TrimSpace(input.VisitorToken) == "" {
-			return 0, fmt.Errorf("visitor_token is required")
-		}
-		if conversation.VisitorToken != input.VisitorToken {
-			return 0, fmt.Errorf("visitor token does not match conversation")
-		}
-		targetSenderType = "agent"
-	} else {
-		if input.ActorAgentID == 0 {
-			return 0, fmt.Errorf("actor_agent_id is required")
-		}
-	}
-
-	rows, err := s.messageRepo.MarkReadByConversationAndSender(ctx, input.ConversationID, targetSenderType, input.LastReadMessageID)
-	if err != nil {
-		return 0, err
-	}
-	if rows < 0 {
-		rows = 0
-	}
-	if rows > 0 {
-		if err := s.publisher.PublishMessageStatusRange(ctx, input.ConversationID, targetSenderType, input.LastReadMessageID, MessageStatusRead); err != nil {
-			s.logger.Warn("publish message.status read-range event failed",
-				zap.Error(err),
-				zap.Uint64("conversation_id", input.ConversationID),
-				zap.String("sender_type", targetSenderType),
-				zap.Uint64("up_to_message_id", input.LastReadMessageID),
-				zap.Int64("updated_count", rows),
-			)
-		}
-	}
-	return uint64(rows), nil
+	return uint64(updatedRows), nil
 }
 
 func isDuplicateMessageErr(err error) bool {
@@ -447,43 +518,54 @@ func (s *ChatService) AutoCloseInactiveConversations(ctx context.Context, inacti
 		}
 
 		changed := false
-		_, err = s.conversationRepo.Mutate(ctx, conversationID, func(conversation *model.Conversation) (bool, error) {
-			if conversation.Status != "open" {
-				return false, nil
-			}
-
-			latest, latestErr := s.messageRepo.GetLatestByConversationExcludingSystem(ctx, conversation.ID)
-			if latestErr != nil {
-				if errors.Is(latestErr, repository.ErrNotFound) {
+		err = s.withEventTransaction(ctx, func(txCtx context.Context) error {
+			_, mutateErr := s.conversationRepo.Mutate(txCtx, conversationID, func(conversation *model.Conversation) (bool, error) {
+				if conversation.Status != "open" {
 					return false, nil
 				}
-				return false, latestErr
-			}
-			if latest.SenderType != "agent" || latest.CreatedAt.After(cutoff) {
-				return false, nil
+
+				latest, latestErr := s.messageRepo.GetLatestByConversationExcludingSystem(txCtx, conversation.ID)
+				if latestErr != nil {
+					if errors.Is(latestErr, repository.ErrNotFound) {
+						return false, nil
+					}
+					return false, latestErr
+				}
+				if latest.SenderType != "agent" || latest.CreatedAt.After(cutoff) {
+					return false, nil
+				}
+
+				now := time.Now()
+				conversation.Status = "closed"
+				conversation.ClosedAt = &now
+				if conversation.AssignedAgentID != nil {
+					closedBy := *conversation.AssignedAgentID
+					conversation.ClosedByAgentID = &closedBy
+				} else {
+					conversation.ClosedByAgentID = nil
+				}
+				changed = true
+				return true, nil
+			})
+			if mutateErr != nil {
+				if errors.Is(mutateErr, repository.ErrNotFound) {
+					return nil
+				}
+				return mutateErr
 			}
 
-			now := time.Now()
-			conversation.Status = "closed"
-			conversation.ClosedAt = &now
-			if conversation.AssignedAgentID != nil {
-				closedBy := *conversation.AssignedAgentID
-				conversation.ClosedByAgentID = &closedBy
-			} else {
-				conversation.ClosedByAgentID = nil
+			if changed {
+				if emitErr := s.emitConversationClosed(txCtx, conversationID); emitErr != nil {
+					return emitErr
+				}
 			}
-			changed = true
-			return true, nil
+			return nil
 		})
 		if err != nil {
-			if errors.Is(err, repository.ErrNotFound) {
-				continue
-			}
 			return closedCount, err
 		}
 		if changed {
 			closedCount++
-			s.publishConversationClosed(ctx, conversationID)
 			s.logger.Info("conversation auto closed due to visitor inactivity",
 				zap.Uint64("conversation_id", conversationID),
 				zap.Duration("inactivity", inactivity),
@@ -546,50 +628,62 @@ func (s *ChatService) TransferConversation(ctx context.Context, input TransferCo
 	}
 
 	changed := false
-	var targetAgentID uint64
-	conversation, err := s.conversationRepo.Mutate(ctx, input.ConversationID, func(conversation *model.Conversation) (bool, error) {
-		if conversation.Status != "open" {
-			return false, ErrConversationClosed
-		}
-		if conversation.AssignedAgentID == nil {
-			return false, ErrConversationUnassigned
-		}
+	var (
+		targetAgentID uint64
+		conversation  *model.Conversation
+	)
+	err = s.withEventTransaction(ctx, func(txCtx context.Context) error {
+		var mutateErr error
+		conversation, mutateErr = s.conversationRepo.Mutate(txCtx, input.ConversationID, func(conversation *model.Conversation) (bool, error) {
+			if conversation.Status != "open" {
+				return false, ErrConversationClosed
+			}
+			if conversation.AssignedAgentID == nil {
+				return false, ErrConversationUnassigned
+			}
 
-		isAdmin := actorRole == "admin" || actorRole == "super_admin"
-		if !isAdmin && *conversation.AssignedAgentID != input.ActorAgentID {
-			return false, ErrForbidden
-		}
-		if *conversation.AssignedAgentID == input.ToAgentID {
-			return false, nil
-		}
-		if conversation.PendingTransferToAgentID != nil {
-			if *conversation.PendingTransferToAgentID == input.ToAgentID {
+			isAdmin := actorRole == "admin" || actorRole == "super_admin"
+			if !isAdmin && *conversation.AssignedAgentID != input.ActorAgentID {
+				return false, ErrForbidden
+			}
+			if *conversation.AssignedAgentID == input.ToAgentID {
 				return false, nil
 			}
-			return false, ErrConversationTransferPending
+			if conversation.PendingTransferToAgentID != nil {
+				if *conversation.PendingTransferToAgentID == input.ToAgentID {
+					return false, nil
+				}
+				return false, ErrConversationTransferPending
+			}
+
+			pendingTo := input.ToAgentID
+			owner := *conversation.AssignedAgentID
+			now := time.Now()
+
+			conversation.PendingTransferToAgentID = &pendingTo
+			conversation.PendingTransferFromAgentID = &owner
+			conversation.PendingTransferRequestedAt = &now
+
+			targetAgentID = pendingTo
+			changed = true
+			return true, nil
+		})
+		if mutateErr != nil {
+			if errors.Is(mutateErr, repository.ErrNotFound) {
+				return ErrConversationNotFound
+			}
+			return mutateErr
 		}
 
-		pendingTo := input.ToAgentID
-		owner := *conversation.AssignedAgentID
-		now := time.Now()
-
-		conversation.PendingTransferToAgentID = &pendingTo
-		conversation.PendingTransferFromAgentID = &owner
-		conversation.PendingTransferRequestedAt = &now
-
-		targetAgentID = pendingTo
-		changed = true
-		return true, nil
+		if changed {
+			if err := s.publishTransferSystemMessage(txCtx, conversation.ID, "正在转接客服%s，等待对方确认", targetAgentID); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, ErrConversationNotFound
-		}
 		return nil, err
-	}
-
-	if changed {
-		s.publishTransferSystemMessage(ctx, conversation.ID, "正在转接客服%s，等待对方确认", targetAgentID)
 	}
 
 	return conversation, nil
@@ -609,39 +703,51 @@ func (s *ChatService) ConfirmTransferConversation(ctx context.Context, input Con
 	}
 
 	changed := false
-	var targetAgentID uint64
-	conversation, err := s.conversationRepo.Mutate(ctx, input.ConversationID, func(conversation *model.Conversation) (bool, error) {
-		if conversation.Status != "open" {
-			return false, ErrConversationClosed
-		}
-		if conversation.PendingTransferToAgentID == nil {
-			return false, ErrConversationTransferNotPending
+	var (
+		targetAgentID uint64
+		conversation  *model.Conversation
+	)
+	err = s.withEventTransaction(ctx, func(txCtx context.Context) error {
+		var mutateErr error
+		conversation, mutateErr = s.conversationRepo.Mutate(txCtx, input.ConversationID, func(conversation *model.Conversation) (bool, error) {
+			if conversation.Status != "open" {
+				return false, ErrConversationClosed
+			}
+			if conversation.PendingTransferToAgentID == nil {
+				return false, ErrConversationTransferNotPending
+			}
+
+			isAdmin := actorRole == "admin" || actorRole == "super_admin"
+			if !isAdmin && *conversation.PendingTransferToAgentID != input.ActorAgentID {
+				return false, ErrForbidden
+			}
+
+			acceptedBy := *conversation.PendingTransferToAgentID
+			conversation.AssignedAgentID = &acceptedBy
+			conversation.PendingTransferToAgentID = nil
+			conversation.PendingTransferFromAgentID = nil
+			conversation.PendingTransferRequestedAt = nil
+
+			targetAgentID = acceptedBy
+			changed = true
+			return true, nil
+		})
+		if mutateErr != nil {
+			if errors.Is(mutateErr, repository.ErrNotFound) {
+				return ErrConversationNotFound
+			}
+			return mutateErr
 		}
 
-		isAdmin := actorRole == "admin" || actorRole == "super_admin"
-		if !isAdmin && *conversation.PendingTransferToAgentID != input.ActorAgentID {
-			return false, ErrForbidden
+		if changed {
+			if err := s.publishTransferSystemMessage(txCtx, conversation.ID, "成功转接客服%s", targetAgentID); err != nil {
+				return err
+			}
 		}
-
-		acceptedBy := *conversation.PendingTransferToAgentID
-		conversation.AssignedAgentID = &acceptedBy
-		conversation.PendingTransferToAgentID = nil
-		conversation.PendingTransferFromAgentID = nil
-		conversation.PendingTransferRequestedAt = nil
-
-		targetAgentID = acceptedBy
-		changed = true
-		return true, nil
+		return nil
 	})
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, ErrConversationNotFound
-		}
 		return nil, err
-	}
-
-	if changed {
-		s.publishTransferSystemMessage(ctx, conversation.ID, "成功转接客服%s", targetAgentID)
 	}
 
 	return conversation, nil
@@ -661,59 +767,201 @@ func (s *ChatService) CloseConversation(ctx context.Context, input CloseConversa
 	}
 
 	changed := false
-	conversation, err := s.conversationRepo.Mutate(ctx, input.ConversationID, func(conversation *model.Conversation) (bool, error) {
-		if conversation.Status == "closed" {
-			return false, nil
-		}
+	var conversation *model.Conversation
+	err = s.withEventTransaction(ctx, func(txCtx context.Context) error {
+		var mutateErr error
+		conversation, mutateErr = s.conversationRepo.Mutate(txCtx, input.ConversationID, func(conversation *model.Conversation) (bool, error) {
+			if conversation.Status == "closed" {
+				return false, nil
+			}
 
-		isAdmin := actorRole == "admin" || actorRole == "super_admin"
-		if !isAdmin {
-			if conversation.AssignedAgentID == nil || *conversation.AssignedAgentID != input.ActorAgentID {
-				return false, ErrForbidden
+			isAdmin := actorRole == "admin" || actorRole == "super_admin"
+			if !isAdmin {
+				if conversation.AssignedAgentID == nil || *conversation.AssignedAgentID != input.ActorAgentID {
+					return false, ErrForbidden
+				}
+			}
+
+			now := time.Now()
+			closedBy := input.ActorAgentID
+			conversation.Status = "closed"
+			conversation.ClosedAt = &now
+			conversation.ClosedByAgentID = &closedBy
+			conversation.PendingTransferToAgentID = nil
+			conversation.PendingTransferFromAgentID = nil
+			conversation.PendingTransferRequestedAt = nil
+			changed = true
+			return true, nil
+		})
+		if mutateErr != nil {
+			if errors.Is(mutateErr, repository.ErrNotFound) {
+				return ErrConversationNotFound
+			}
+			return mutateErr
+		}
+		if changed {
+			if err := s.emitConversationClosed(txCtx, conversation.ID); err != nil {
+				return err
 			}
 		}
-
-		now := time.Now()
-		closedBy := input.ActorAgentID
-		conversation.Status = "closed"
-		conversation.ClosedAt = &now
-		conversation.ClosedByAgentID = &closedBy
-		conversation.PendingTransferToAgentID = nil
-		conversation.PendingTransferFromAgentID = nil
-		conversation.PendingTransferRequestedAt = nil
-		changed = true
-		return true, nil
+		return nil
 	})
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			return nil, ErrConversationNotFound
-		}
 		return nil, err
 	}
+
 	if conversation.Status == "closed" && s.autoCloseScheduler != nil {
 		s.autoCloseScheduler.Cancel(conversation.ID)
-	}
-	if changed {
-		s.publishConversationClosed(ctx, conversation.ID)
 	}
 	return conversation, nil
 }
 
-func (s *ChatService) publishConversationClosed(ctx context.Context, conversationID uint64) {
-	if conversationID == 0 {
-		return
+func (s *ChatService) emitMessageCreated(ctx context.Context, message *model.Message) error {
+	if message == nil {
+		return nil
 	}
-	if err := s.publisher.PublishConversationClosed(ctx, conversationID); err != nil {
-		s.logger.Warn("publish conversation.closed event failed",
-			zap.Error(err),
-			zap.Uint64("conversation_id", conversationID),
-		)
+	if !s.eventOutboxEnabled() {
+		if err := s.publisher.PublishMessageCreated(ctx, message); err != nil {
+			s.logger.Warn("publish message.new event failed",
+				zap.Error(err),
+				zap.Uint64("conversation_id", message.ConversationID),
+				zap.Uint64("message_id", message.ID),
+			)
+		}
+		return nil
 	}
+
+	payload := map[string]any{
+		"type": "message.new",
+		"payload": map[string]any{
+			"conversation_id": message.ConversationID,
+			"message": map[string]any{
+				"id":              message.ID,
+				"conversation_id": message.ConversationID,
+				"sender_type":     message.SenderType,
+				"sender_id":       message.SenderID,
+				"content":         message.Content,
+				"client_msg_id":   message.ClientMsgID,
+				"status":          message.Status,
+				"created_at":      message.CreatedAt.Format(time.RFC3339Nano),
+				"updated_at":      message.UpdatedAt.Format(time.RFC3339Nano),
+			},
+		},
+	}
+	return s.enqueueOutboxEvent(ctx, message.ConversationID, "message.new", payload)
 }
 
-func (s *ChatService) publishTransferSystemMessage(ctx context.Context, conversationID uint64, template string, agentID uint64) {
+func (s *ChatService) emitMessageStatus(ctx context.Context, conversationID uint64, messageID uint64, status string) error {
+	if conversationID == 0 || messageID == 0 {
+		return nil
+	}
+	if !s.eventOutboxEnabled() {
+		if err := s.publisher.PublishMessageStatus(ctx, conversationID, messageID, status); err != nil {
+			s.logger.Warn("publish message.status event failed",
+				zap.Error(err),
+				zap.Uint64("conversation_id", conversationID),
+				zap.Uint64("message_id", messageID),
+				zap.String("status", status),
+			)
+		}
+		return nil
+	}
+
+	payload := map[string]any{
+		"type": "message.status",
+		"payload": map[string]any{
+			"conversation_id": conversationID,
+			"message_id":      messageID,
+			"status":          status,
+		},
+	}
+	return s.enqueueOutboxEvent(ctx, conversationID, "message.status", payload)
+}
+
+func (s *ChatService) emitMessageStatusRange(ctx context.Context, conversationID uint64, senderType string, upToMessageID uint64, status string) error {
+	if conversationID == 0 || upToMessageID == 0 {
+		return nil
+	}
+	if !s.eventOutboxEnabled() {
+		if err := s.publisher.PublishMessageStatusRange(ctx, conversationID, senderType, upToMessageID, status); err != nil {
+			s.logger.Warn("publish message.status range event failed",
+				zap.Error(err),
+				zap.Uint64("conversation_id", conversationID),
+				zap.String("sender_type", senderType),
+				zap.Uint64("up_to_message_id", upToMessageID),
+				zap.String("status", status),
+			)
+		}
+		return nil
+	}
+
+	payload := map[string]any{
+		"type": "message.status",
+		"payload": map[string]any{
+			"conversation_id":  conversationID,
+			"sender_type":      senderType,
+			"up_to_message_id": upToMessageID,
+			"status":           status,
+		},
+	}
+	return s.enqueueOutboxEvent(ctx, conversationID, "message.status", payload)
+}
+
+func (s *ChatService) emitConversationClosed(ctx context.Context, conversationID uint64) error {
 	if conversationID == 0 {
-		return
+		return nil
+	}
+	if !s.eventOutboxEnabled() {
+		if err := s.publisher.PublishConversationClosed(ctx, conversationID); err != nil {
+			s.logger.Warn("publish conversation.closed event failed",
+				zap.Error(err),
+				zap.Uint64("conversation_id", conversationID),
+			)
+		}
+		return nil
+	}
+
+	payload := map[string]any{
+		"type": "conversation.closed",
+		"payload": map[string]any{
+			"conversation_id": conversationID,
+			"status":          "closed",
+		},
+	}
+	return s.enqueueOutboxEvent(ctx, conversationID, "conversation.closed", payload)
+}
+
+func (s *ChatService) enqueueOutboxEvent(ctx context.Context, conversationID uint64, eventType string, payload map[string]any) error {
+	if !s.eventOutboxEnabled() {
+		return nil
+	}
+	if conversationID == 0 || strings.TrimSpace(eventType) == "" {
+		return nil
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal outbox payload failed: %w", err)
+	}
+	event := &model.EventOutbox{
+		ConversationID: conversationID,
+		EventType:      strings.TrimSpace(eventType),
+		Payload:        string(raw),
+		Status:         model.OutboxStatusPending,
+	}
+	if err := s.outboxRepo.Create(ctx, event); err != nil {
+		return fmt.Errorf("create outbox event failed: %w", err)
+	}
+	if ctx != nil {
+		if notifyState, ok := ctx.Value(outboxNotifyContextKey{}).(*outboxNotifyState); ok && notifyState != nil {
+			notifyState.shouldNotify = true
+		}
+	}
+	return nil
+}
+
+func (s *ChatService) publishTransferSystemMessage(ctx context.Context, conversationID uint64, template string, agentID uint64) error {
+	if conversationID == 0 {
+		return nil
 	}
 
 	content := fmt.Sprintf(template, formatAgentID4(agentID))
@@ -725,20 +973,12 @@ func (s *ChatService) publishTransferSystemMessage(ctx context.Context, conversa
 		Status:         MessageStatusSent,
 	}
 	if err := s.messageRepo.Create(ctx, msg); err != nil {
-		s.logger.Warn("create transfer system message failed",
-			zap.Error(err),
-			zap.Uint64("conversation_id", conversationID),
-			zap.String("content", content),
-		)
-		return
+		return fmt.Errorf("create transfer system message failed: %w", err)
 	}
-	if err := s.publisher.PublishMessageCreated(ctx, msg); err != nil {
-		s.logger.Warn("publish transfer system message event failed",
-			zap.Error(err),
-			zap.Uint64("conversation_id", conversationID),
-			zap.Uint64("message_id", msg.ID),
-		)
+	if err := s.emitMessageCreated(ctx, msg); err != nil {
+		return fmt.Errorf("emit transfer system message failed: %w", err)
 	}
+	return nil
 }
 
 func systemClientMsgID(conversationID uint64) string {

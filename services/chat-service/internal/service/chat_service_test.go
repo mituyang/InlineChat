@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"sort"
 	"testing"
@@ -289,6 +290,71 @@ func (p *fakePublisher) PublishConversationClosed(_ context.Context, conversatio
 	p.closeCalls++
 	p.lastClosedID = conversationID
 	return p.err
+}
+
+type fakeTransactionManager struct {
+	calls int
+	err   error
+}
+
+func (m *fakeTransactionManager) WithTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
+	m.calls++
+	if m.err != nil {
+		return m.err
+	}
+	return fn(ctx)
+}
+
+type fakeOutboxRepository struct {
+	events    []model.EventOutbox
+	nextID    uint64
+	createErr error
+}
+
+func newFakeOutboxRepository() *fakeOutboxRepository {
+	return &fakeOutboxRepository{
+		events: make([]model.EventOutbox, 0),
+		nextID: 1,
+	}
+}
+
+func (r *fakeOutboxRepository) Create(_ context.Context, event *model.EventOutbox) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
+	cp := *event
+	if cp.ID == 0 {
+		cp.ID = r.nextID
+		r.nextID++
+	}
+	r.events = append(r.events, cp)
+	return nil
+}
+
+func (r *fakeOutboxRepository) FetchPendingForUpdate(context.Context, int, time.Time) ([]model.EventOutbox, error) {
+	return nil, nil
+}
+
+func (r *fakeOutboxRepository) MarkPublished(context.Context, uint64, time.Time) error {
+	return nil
+}
+
+func (r *fakeOutboxRepository) MarkForRetry(context.Context, uint64, time.Time, string) error {
+	return nil
+}
+
+func (r *fakeOutboxRepository) RequeueStaleProcessing(context.Context, time.Time) (int64, error) {
+	return 0, nil
+}
+
+type fakeOutboxNotifier struct {
+	calls int
+	err   error
+}
+
+func (n *fakeOutboxNotifier) NotifyOutbox(context.Context) error {
+	n.calls++
+	return n.err
 }
 
 func cloneConversation(c *model.Conversation) *model.Conversation {
@@ -1008,5 +1074,116 @@ func TestAutoCloseInactiveConversationsSkipsWhenVisitorAlreadyReplied(t *testing
 	}
 	if publisher.closeCalls != 0 {
 		t.Fatalf("should not publish conversation.closed when not closed, got %+v", publisher)
+	}
+}
+
+func TestCreateMessageWithEventOutboxEnqueuesEvent(t *testing.T) {
+	owner := uint64(7)
+	svc, _, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open", AssignedAgentID: &owner},
+	})
+	txManager := &fakeTransactionManager{}
+	outboxRepo := newFakeOutboxRepository()
+	svc.EnableEventOutbox(txManager, outboxRepo)
+
+	_, err := svc.CreateMessage(context.Background(), CreateMessageInput{
+		ConversationID: 1,
+		SenderType:     "agent",
+		SenderID:       "7",
+		Content:        "您好，我来协助您。",
+		ClientMsgID:    "outbox_c1",
+	})
+	if err != nil {
+		t.Fatalf("CreateMessage failed: %v", err)
+	}
+	if txManager.calls == 0 {
+		t.Fatalf("expected transaction manager called")
+	}
+	if len(messageRepo.items[1]) != 1 {
+		t.Fatalf("message should persist, got %d", len(messageRepo.items[1]))
+	}
+	if publisher.calls != 0 {
+		t.Fatalf("event outbox mode should not direct publish, got calls=%d", publisher.calls)
+	}
+	if len(outboxRepo.events) != 1 {
+		t.Fatalf("expected one outbox event, got %d", len(outboxRepo.events))
+	}
+	event := outboxRepo.events[0]
+	if event.EventType != "message.new" {
+		t.Fatalf("unexpected event type: %s", event.EventType)
+	}
+	if event.Status != model.OutboxStatusPending {
+		t.Fatalf("unexpected event status: %s", event.Status)
+	}
+
+	var payload struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal([]byte(event.Payload), &payload); err != nil {
+		t.Fatalf("invalid outbox payload json: %v", err)
+	}
+	if payload.Type != "message.new" {
+		t.Fatalf("unexpected payload type: %s", payload.Type)
+	}
+}
+
+func TestCloseConversationWithEventOutboxEnqueuesEvent(t *testing.T) {
+	owner := uint64(7)
+	svc, _, _, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open", AssignedAgentID: &owner},
+	})
+	txManager := &fakeTransactionManager{}
+	outboxRepo := newFakeOutboxRepository()
+	svc.EnableEventOutbox(txManager, outboxRepo)
+
+	_, err := svc.CloseConversation(context.Background(), CloseConversationInput{
+		ConversationID: 1,
+		ActorAgentID:   7,
+		ActorRole:      "agent",
+	})
+	if err != nil {
+		t.Fatalf("CloseConversation failed: %v", err)
+	}
+	if txManager.calls == 0 {
+		t.Fatalf("expected transaction manager called")
+	}
+	if publisher.closeCalls != 0 {
+		t.Fatalf("event outbox mode should not direct publish close event")
+	}
+	if len(outboxRepo.events) != 1 {
+		t.Fatalf("expected one outbox event, got %d", len(outboxRepo.events))
+	}
+	if outboxRepo.events[0].EventType != "conversation.closed" {
+		t.Fatalf("unexpected event type: %s", outboxRepo.events[0].EventType)
+	}
+}
+
+func TestCreateMessageWithEventOutboxNotifiesAfterCommit(t *testing.T) {
+	owner := uint64(7)
+	svc, _, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open", AssignedAgentID: &owner},
+	})
+	txManager := &fakeTransactionManager{}
+	outboxRepo := newFakeOutboxRepository()
+	notifier := &fakeOutboxNotifier{}
+	svc.EnableEventOutbox(txManager, outboxRepo)
+	svc.SetOutboxNotifier(notifier)
+
+	_, err := svc.CreateMessage(context.Background(), CreateMessageInput{
+		ConversationID: 1,
+		SenderType:     "agent",
+		SenderID:       "7",
+		Content:        "您好，我来协助您。",
+		ClientMsgID:    "outbox_notify_c1",
+	})
+	if err != nil {
+		t.Fatalf("CreateMessage failed: %v", err)
+	}
+
+	if notifier.calls != 1 {
+		t.Fatalf("expected notifier called once, got %d", notifier.calls)
+	}
+	if len(outboxRepo.events) != 1 {
+		t.Fatalf("expected one outbox event, got %d", len(outboxRepo.events))
 	}
 }

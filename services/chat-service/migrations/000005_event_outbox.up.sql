@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS event_outbox (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  conversation_id BIGINT UNSIGNED NOT NULL,
+  event_type VARCHAR(64) NOT NULL,
+  payload JSON NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  attempts INT NOT NULL DEFAULT 0,
+  last_error TEXT NULL,
+  processing_at DATETIME(3) NULL,
+  next_retry_at DATETIME(3) NULL,
+  published_at DATETIME(3) NULL,
+  created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  updated_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3) ON UPDATE CURRENT_TIMESTAMP(3),
+  PRIMARY KEY (id),
+  KEY idx_event_outbox_conversation_id (conversation_id),
+  KEY idx_event_outbox_event_type (event_type),
+  KEY idx_event_outbox_status (status),
+  KEY idx_event_outbox_processing_at (processing_at),
+  KEY idx_event_outbox_next_retry_at (next_retry_at),
+  KEY idx_event_outbox_published_at (published_at),
+  CONSTRAINT fk_event_outbox_conversation FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
