@@ -302,6 +302,12 @@ func (c *dynamicChatClient) ConfirmTransferConversation(ctx context.Context, in 
 	})
 }
 
+func (c *dynamicChatClient) RejectTransferConversation(ctx context.Context, in *chatv1.RejectTransferConversationRequest, opts ...grpc.CallOption) (*chatv1.Conversation, error) {
+	return invokeWithRetry(ctx, c.conn, chatv1.NewChatGatewayServiceClient, func(client chatv1.ChatGatewayServiceClient) (*chatv1.Conversation, error) {
+		return client.RejectTransferConversation(ctx, in, opts...)
+	})
+}
+
 func (c *dynamicChatClient) CloseConversation(ctx context.Context, in *chatv1.CloseConversationRequest, opts ...grpc.CallOption) (*chatv1.Conversation, error) {
 	return invokeWithRetry(ctx, c.conn, chatv1.NewChatGatewayServiceClient, func(client chatv1.ChatGatewayServiceClient) (*chatv1.Conversation, error) {
 		return client.CloseConversation(ctx, in, opts...)

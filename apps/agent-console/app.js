@@ -58,6 +58,7 @@ const state = {
     claim: false,
     transfer: false,
     confirmTransfer: false,
+    rejectTransfer: false,
     close: false,
     send: false,
   },
@@ -101,9 +102,8 @@ const els = {
   claimBtn: document.getElementById("claimBtn"),
   transferAgentIdInput: document.getElementById("transferAgentIdInput"),
   transferBtn: document.getElementById("transferBtn"),
-  transferConfirmPanel: document.getElementById("transferConfirmPanel"),
-  transferConfirmText: document.getElementById("transferConfirmText"),
   confirmTransferBtn: document.getElementById("confirmTransferBtn"),
+  rejectTransferBtn: document.getElementById("rejectTransferBtn"),
   closeBtn: document.getElementById("closeBtn"),
 
   detailConversationId: document.getElementById("detailConversationId"),
@@ -260,6 +260,10 @@ function bindEvents() {
 
   els.confirmTransferBtn?.addEventListener("click", async () => {
     await confirmTransferConversation();
+  });
+
+  els.rejectTransferBtn?.addEventListener("click", async () => {
+    await rejectTransferConversation();
   });
 
   els.closeBtn?.addEventListener("click", async () => {
@@ -435,6 +439,15 @@ function updateConversationActionState() {
     !isMine &&
     !selectPending &&
     !state.actionPending.confirmTransfer;
+  const canRejectTransfer =
+    hasConversation &&
+    isOpen &&
+    isPendingTransferTarget &&
+    !isMine &&
+    !selectPending &&
+    !state.actionPending.rejectTransfer;
+  const showConfirmTransfer = hasConversation && isOpen && isPendingTransferTarget && !isMine;
+  const showRejectTransfer = showConfirmTransfer;
   const canClose = hasConversation && isOpen && isMine && !selectPending && !state.actionPending.close;
   const canSend = hasConversation && isOpen && isMine && !selectPending && !state.actionPending.send;
 
@@ -449,6 +462,13 @@ function updateConversationActionState() {
   }
   if (els.confirmTransferBtn) {
     els.confirmTransferBtn.disabled = !canConfirmTransfer;
+    els.confirmTransferBtn.hidden = !showConfirmTransfer;
+    els.confirmTransferBtn.style.display = showConfirmTransfer ? "" : "none";
+  }
+  if (els.rejectTransferBtn) {
+    els.rejectTransferBtn.disabled = !canRejectTransfer;
+    els.rejectTransferBtn.hidden = !showRejectTransfer;
+    els.rejectTransferBtn.style.display = showRejectTransfer ? "" : "none";
   }
   if (els.closeBtn) {
     els.closeBtn.disabled = !canClose;
@@ -459,7 +479,6 @@ function updateConversationActionState() {
   if (els.agentContentInput) {
     els.agentContentInput.disabled = !canSend;
   }
-  syncTransferConfirmPanel(state.activeConversation);
 }
 
 function abortMessageRequest() {
@@ -489,6 +508,7 @@ function applyAuthUI(loggedIn) {
       claim: false,
       transfer: false,
       confirmTransfer: false,
+      rejectTransfer: false,
       close: false,
       send: false,
     };
@@ -950,7 +970,8 @@ function syncTransferReminders(items) {
 function renderTransferReminders(items) {
   const list = Array.isArray(items) ? items : [];
   if (els.transferReminderCount) {
-    els.transferReminderCount.textContent = String(list.length);
+    els.transferReminderCount.hidden = list.length <= 0;
+    els.transferReminderCount.textContent = list.length > 0 ? String(list.length) : "";
   }
   if (!els.transferReminderList) {
     return;
@@ -1216,7 +1237,6 @@ function updateActiveConversationHeader(conversation) {
     pendingTransferTo > 0 ? `${assigned}（待确认转接 -> ${formatAgentID(pendingTransferTo)}）` : assigned;
   els.detailUpdatedAt.textContent = formatTime(conversation.updated_at || conversation.created_at);
   els.detailWaitingDuration.textContent = formatDurationSince(conversation.updated_at || conversation.created_at);
-  syncTransferConfirmPanel(conversation);
   renderTransferReminders(collectPendingTransferConversations(state.statsConversations));
   updateConversationActionState();
 }
@@ -1230,40 +1250,8 @@ function resetConversationDetail() {
   els.detailUpdatedAt.textContent = "-";
   els.detailWaitingDuration.textContent = "-";
   els.detailWsState.textContent = "未连接";
-  syncTransferConfirmPanel(null);
   renderTransferReminders(collectPendingTransferConversations(state.statsConversations));
   updateConversationActionState();
-}
-
-function syncTransferConfirmPanel(conversation) {
-  if (!els.transferConfirmPanel || !els.transferConfirmText) {
-    return;
-  }
-
-  if (!conversation) {
-    els.transferConfirmPanel.hidden = true;
-    els.transferConfirmText.textContent = "当前会话有待你确认的转接请求。";
-    return;
-  }
-
-  const meID = Number(state.me?.agent_id || 0);
-  const status = String(conversation?.status || "")
-    .trim()
-    .toLowerCase();
-  const pendingToAgentID = Number(conversation?.pending_transfer_to_agent_id || 0);
-  const showPanel = meID > 0 && status === "open" && pendingToAgentID > 0 && pendingToAgentID === meID;
-  els.transferConfirmPanel.hidden = !showPanel;
-
-  if (!showPanel) {
-    return;
-  }
-
-  const fromAgentID = Number(conversation?.assigned_agent_id || 0);
-  if (fromAgentID > 0) {
-    els.transferConfirmText.textContent = `坐席 ${formatAgentID(fromAgentID)} 正在把会话 #${conversation.id} 转接给你，确认后由你接待。`;
-    return;
-  }
-  els.transferConfirmText.textContent = `会话 #${conversation.id} 有待你确认的转接请求，确认后由你接待。`;
 }
 
 async function refreshMessages(options = {}) {
@@ -2169,6 +2157,55 @@ async function confirmTransferConversation() {
     setStatus(error.message || "确认转接失败", true);
   } finally {
     setActionPending("confirmTransfer", false);
+  }
+}
+
+async function rejectTransferConversation() {
+  if (state.actionPending.rejectTransfer) {
+    return;
+  }
+  if (!state.activeConversationId) {
+    setStatus("请先选择会话", true);
+    return;
+  }
+
+  const capability = getActiveConversationCapability();
+  if (!capability.hasConversation) {
+    setStatus("会话状态未就绪，请稍后重试。", true);
+    return;
+  }
+  if (!capability.isOpen) {
+    setStatus("会话已关闭，无法拒绝转接。", true);
+    return;
+  }
+  if (!capability.isPendingTransferTarget || capability.isMine) {
+    setStatus("当前会话没有待你处理的转接。", true);
+    return;
+  }
+
+  setActionPending("rejectTransfer", true);
+  try {
+    const conversationID = String(state.activeConversationId || "").trim();
+    await apiRequest(`/api/chat/v1/conversations/${conversationID}/transfer/reject`, {
+      method: "POST",
+      auth: true,
+    });
+    await refreshConversations();
+    if (conversationID && conversationID === String(state.activeConversationId || "")) {
+      try {
+        await refreshMessages({
+          conversationID,
+          force: true,
+        });
+      } catch {
+        // 拒绝成功后，消息刷新失败不阻断主流程。
+      }
+    }
+    setStatus("已拒绝转接，当前会话维持原坐席接待");
+  } catch (error) {
+    setStatus(error.message || "拒绝转接失败", true);
+  } finally {
+    setActionPending("rejectTransfer", false);
   }
 }
 

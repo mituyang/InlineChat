@@ -103,7 +103,7 @@
           <section class="transfer-reminder-box" id="transferReminderBox">
             <div class="transfer-reminder-head">
               <h3>待确认转接</h3>
-              <span id="transferReminderCount" class="transfer-reminder-count">0</span>
+              <span id="transferReminderCount" class="transfer-reminder-count" hidden></span>
             </div>
             <div id="transferReminderList" class="transfer-reminder-list">
               <div class="empty">暂无待确认转接</div>
@@ -120,6 +120,8 @@
               <p id="activeConversationMeta">请先在左侧选择会话</p>
             </div>
             <div class="chat-actions">
+              <button id="confirmTransferBtn" type="button" class="warn" hidden>确认转接</button>
+              <button id="rejectTransferBtn" type="button" class="ghost" hidden>拒绝转接</button>
               <button id="claimBtn" type="button">认领</button>
               <div class="transfer-box">
                 <input
@@ -135,14 +137,6 @@
               <button id="closeBtn" type="button" class="danger">关闭</button>
             </div>
           </div>
-
-          <section id="transferConfirmPanel" class="transfer-confirm-panel" hidden>
-            <div class="transfer-confirm-main">
-              <strong>转接确认请求</strong>
-              <p id="transferConfirmText">当前会话有待你确认的转接请求。</p>
-            </div>
-            <button id="confirmTransferBtn" type="button" class="ghost">确认转接</button>
-          </section>
 
           <div id="agentMessages" class="messages"></div>
 

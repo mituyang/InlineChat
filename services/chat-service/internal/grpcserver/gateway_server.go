@@ -242,6 +242,28 @@ func (s *ChatGatewayServer) ConfirmTransferConversation(ctx context.Context, req
 	return toConversationPB(conversation), nil
 }
 
+func (s *ChatGatewayServer) RejectTransferConversation(ctx context.Context, req *chatv1.RejectTransferConversationRequest) (*chatv1.Conversation, error) {
+	if req.GetConversationId() == 0 {
+		return nil, status.Error(codes.InvalidArgument, "conversation_id is required")
+	}
+	if req.GetActorAgentId() == 0 {
+		return nil, status.Error(codes.InvalidArgument, "actor_agent_id is required")
+	}
+	if strings.TrimSpace(req.GetActorRole()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "actor_role is required")
+	}
+
+	conversation, err := s.chatService.RejectTransferConversation(ctx, service.RejectTransferConversationInput{
+		ConversationID: req.GetConversationId(),
+		ActorAgentID:   req.GetActorAgentId(),
+		ActorRole:      req.GetActorRole(),
+	})
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return toConversationPB(conversation), nil
+}
+
 func (s *ChatGatewayServer) CloseConversation(ctx context.Context, req *chatv1.CloseConversationRequest) (*chatv1.Conversation, error) {
 	if req.GetConversationId() == 0 {
 		return nil, status.Error(codes.InvalidArgument, "conversation_id is required")

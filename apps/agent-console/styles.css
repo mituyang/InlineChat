@@ -14,6 +14,8 @@
   --ghost: #334155;
   --danger: #b4232f;
   --danger-hover: #961d28;
+  --warn-btn: #d97706;
+  --warn-btn-hover: #b45309;
   --mine: #e2f7fc;
   --other: #f1f5f9;
   --badge: #dc2626;
@@ -43,6 +45,8 @@
   --ghost: #adc0d7;
   --danger: #c43c4b;
   --danger-hover: #ab3340;
+  --warn-btn: #e39a3d;
+  --warn-btn-hover: #cf8526;
   --mine: #17455e;
   --other: #1a2b41;
   --badge: #f05050;
@@ -528,7 +532,7 @@ body.auth-guard .shell {
 }
 
 .chat-panel {
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .chat-toolbar {
@@ -542,37 +546,6 @@ body.auth-guard .shell {
   margin: 4px 0 0;
   color: var(--text-sub);
   font-size: 11px;
-}
-
-.transfer-confirm-panel {
-  border: 1px solid #f5d9a8;
-  border-radius: 12px;
-  background: #fff8ea;
-  padding: 9px 10px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-:root[data-theme="dark"] .transfer-confirm-panel {
-  border-color: #7a5d2d;
-  background: #3a2c12;
-}
-
-.transfer-confirm-main {
-  min-width: 0;
-}
-
-.transfer-confirm-main strong {
-  display: block;
-  font-size: 13px;
-}
-
-.transfer-confirm-main p {
-  margin: 3px 0 0;
-  color: var(--text-sub);
-  font-size: 12px;
 }
 
 .chat-actions {
@@ -889,6 +862,14 @@ button.danger:hover {
   background: var(--danger-hover);
 }
 
+button.warn {
+  background: var(--warn-btn);
+}
+
+button.warn:hover {
+  background: var(--warn-btn-hover);
+}
+
 button:disabled {
   cursor: not-allowed;
   opacity: 0.65;
@@ -980,11 +961,6 @@ button:focus-visible {
   .queue-tabs,
   .filter-grid {
     grid-template-columns: 1fr;
-  }
-
-  .transfer-confirm-panel {
-    flex-direction: column;
-    align-items: flex-start;
   }
 
   .chat-toolbar {

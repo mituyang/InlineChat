@@ -49,6 +49,7 @@ func (h *HTTPHandler) RegisterRoutes(r *gin.Engine) {
 	chatV1.POST("/conversations/:id/claim", h.claimConversation)
 	chatV1.POST("/conversations/:id/transfer", h.transferConversation)
 	chatV1.POST("/conversations/:id/transfer/confirm", h.confirmTransferConversation)
+	chatV1.POST("/conversations/:id/transfer/reject", h.rejectTransferConversation)
 	chatV1.POST("/conversations/:id/close", h.closeConversation)
 
 	authV1 := r.Group("/api/auth/v1/auth")
@@ -570,6 +571,35 @@ func (h *HTTPHandler) confirmTransferConversation(c *gin.Context) {
 	}
 
 	h.tryMarkConversationReadAfterClaim(c, conversationID, actor.GetAgentId())
+
+	c.JSON(http.StatusOK, conversationToJSON(resp))
+}
+
+func (h *HTTPHandler) rejectTransferConversation(c *gin.Context) {
+	actor, err := h.requireAgentActor(c)
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+
+	conversationID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || conversationID == 0 {
+		abortBadRequest(c, "invalid conversation id")
+		return
+	}
+
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	resp, err := h.clients.Chat.RejectTransferConversation(ctx, &chatv1.RejectTransferConversationRequest{
+		ConversationId: conversationID,
+		ActorAgentId:   actor.GetAgentId(),
+		ActorRole:      actor.GetRole(),
+	})
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
 
 	c.JSON(http.StatusOK, conversationToJSON(resp))
 }

@@ -122,6 +122,12 @@ type ConfirmTransferConversationInput struct {
 	ActorRole      string
 }
 
+type RejectTransferConversationInput struct {
+	ConversationID uint64
+	ActorAgentID   uint64
+	ActorRole      string
+}
+
 type CloseConversationInput struct {
 	ConversationID uint64
 	ActorAgentID   uint64
@@ -761,6 +767,80 @@ func (s *ChatService) ConfirmTransferConversation(ctx context.Context, input Con
 	return conversation, nil
 }
 
+func (s *ChatService) RejectTransferConversation(ctx context.Context, input RejectTransferConversationInput) (*model.Conversation, error) {
+	if input.ConversationID == 0 {
+		return nil, fmt.Errorf("conversation_id is required")
+	}
+	if input.ActorAgentID == 0 {
+		return nil, fmt.Errorf("actor_agent_id is required")
+	}
+
+	actorRole, err := normalizeActorRole(input.ActorRole)
+	if err != nil {
+		return nil, err
+	}
+
+	changed := false
+	var (
+		ownerAgentID  uint64
+		targetAgentID uint64
+		conversation  *model.Conversation
+	)
+	err = s.withEventTransaction(ctx, func(txCtx context.Context) error {
+		var mutateErr error
+		conversation, mutateErr = s.conversationRepo.Mutate(txCtx, input.ConversationID, func(conversation *model.Conversation) (bool, error) {
+			if conversation.Status != "open" {
+				return false, ErrConversationClosed
+			}
+			if conversation.PendingTransferToAgentID == nil {
+				return false, ErrConversationTransferNotPending
+			}
+
+			isAdmin := actorRole == "admin" || actorRole == "super_admin"
+			if !isAdmin && *conversation.PendingTransferToAgentID != input.ActorAgentID {
+				return false, ErrForbidden
+			}
+
+			targetAgentID = *conversation.PendingTransferToAgentID
+			if conversation.PendingTransferFromAgentID != nil {
+				ownerAgentID = *conversation.PendingTransferFromAgentID
+			} else if conversation.AssignedAgentID != nil {
+				ownerAgentID = *conversation.AssignedAgentID
+			}
+
+			conversation.PendingTransferToAgentID = nil
+			conversation.PendingTransferFromAgentID = nil
+			conversation.PendingTransferRequestedAt = nil
+			changed = true
+			return true, nil
+		})
+		if mutateErr != nil {
+			if errors.Is(mutateErr, repository.ErrNotFound) {
+				return ErrConversationNotFound
+			}
+			return mutateErr
+		}
+
+		if changed {
+			var content string
+			if ownerAgentID > 0 {
+				content = fmt.Sprintf("客服%s拒绝转接，当前会话继续由客服%s接待", formatAgentID4(targetAgentID), formatAgentID4(ownerAgentID))
+			} else {
+				content = fmt.Sprintf("客服%s拒绝转接", formatAgentID4(targetAgentID))
+			}
+			if err := s.publishSystemMessage(txCtx, conversation.ID, content); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return conversation, nil
+}
+
 func (s *ChatService) CloseConversation(ctx context.Context, input CloseConversationInput) (*model.Conversation, error) {
 	if input.ConversationID == 0 {
 		return nil, fmt.Errorf("conversation_id is required")
@@ -968,11 +1048,14 @@ func (s *ChatService) enqueueOutboxEvent(ctx context.Context, conversationID uin
 }
 
 func (s *ChatService) publishTransferSystemMessage(ctx context.Context, conversationID uint64, template string, agentID uint64) error {
+	return s.publishSystemMessage(ctx, conversationID, fmt.Sprintf(template, formatAgentID4(agentID)))
+}
+
+func (s *ChatService) publishSystemMessage(ctx context.Context, conversationID uint64, content string) error {
 	if conversationID == 0 {
 		return nil
 	}
 
-	content := fmt.Sprintf(template, formatAgentID4(agentID))
 	msg := &model.Message{
 		ConversationID: conversationID,
 		SenderType:     "system",

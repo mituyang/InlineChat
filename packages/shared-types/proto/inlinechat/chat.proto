@@ -19,6 +19,7 @@ service ChatGatewayService {
   rpc ClaimConversation(ClaimConversationRequest) returns (Conversation);
   rpc TransferConversation(TransferConversationRequest) returns (Conversation);
   rpc ConfirmTransferConversation(ConfirmTransferConversationRequest) returns (Conversation);
+  rpc RejectTransferConversation(RejectTransferConversationRequest) returns (Conversation);
   rpc CloseConversation(CloseConversationRequest) returns (Conversation);
 }
 
@@ -84,6 +85,12 @@ message TransferConversationRequest {
 }
 
 message ConfirmTransferConversationRequest {
+  uint64 conversation_id = 1;
+  uint64 actor_agent_id = 2;
+  string actor_role = 3;
+}
+
+message RejectTransferConversationRequest {
   uint64 conversation_id = 1;
   uint64 actor_agent_id = 2;
   string actor_role = 3;
