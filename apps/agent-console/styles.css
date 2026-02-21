@@ -512,6 +512,13 @@ body.auth-guard .shell {
   align-items: flex-start;
 }
 
+.message-row.system {
+  width: 100%;
+  max-width: 100%;
+  margin: 2px 0;
+  align-items: center;
+}
+
 .message {
   border-radius: 12px;
   padding: 9px 11px;
@@ -528,6 +535,14 @@ body.auth-guard .shell {
 
 .message-row.other .message {
   background: var(--other);
+}
+
+.system-message {
+  color: var(--text-sub);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  width: 100%;
 }
 
 .message-row .meta {

@@ -336,6 +336,13 @@ body {
   align-items: flex-start;
 }
 
+.message-row.system {
+  width: 100%;
+  max-width: 100%;
+  margin: 2px 0;
+  align-items: center;
+}
+
 .message {
   border-radius: 10px;
   padding: 9px 11px;
@@ -352,6 +359,14 @@ body {
 
 .message-row.other .message {
   background: var(--other);
+}
+
+.system-message {
+  color: var(--sub);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  width: 100%;
 }
 
 .meta {

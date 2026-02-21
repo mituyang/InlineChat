@@ -1460,6 +1460,20 @@ function renderMessages(items) {
   els.messages.innerHTML = "";
 
   for (const item of items) {
+    const isSystem = item.sender_type === "system";
+    if (isSystem) {
+      const row = document.createElement("article");
+      row.className = "message-row system";
+
+      const notice = document.createElement("div");
+      notice.className = "system-message";
+      notice.textContent = item.content || "";
+
+      row.appendChild(notice);
+      els.messages.appendChild(row);
+      continue;
+    }
+
     const isSelf = item.sender_type === "visitor";
     const row = document.createElement("article");
     row.className = `message-row ${isSelf ? "self" : "other"}`;

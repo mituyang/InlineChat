@@ -1016,6 +1016,19 @@ function renderMessages(items) {
 
   els.messages.innerHTML = "";
   for (const item of items) {
+    const isSystem = item.sender_type === "system";
+    if (isSystem) {
+      const box = document.createElement("article");
+      box.className = "message system";
+
+      const content = document.createElement("div");
+      content.textContent = item.content || "";
+
+      box.appendChild(content);
+      els.messages.appendChild(box);
+      continue;
+    }
+
     const box = document.createElement("article");
     box.className = `message ${item.sender_type === "visitor" ? "self" : "other"}`;
 

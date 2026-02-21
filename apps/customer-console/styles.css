@@ -224,6 +224,16 @@ button:disabled {
   background: var(--bubble-other);
 }
 
+.message.system {
+  margin: 0 auto;
+  max-width: 100%;
+  padding: 2px 0;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 12px;
+  text-align: center;
+}
+
 .message .meta {
   font-size: 12px;
   color: #6b7280;

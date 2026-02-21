@@ -429,7 +429,7 @@ func TestTransferConversationAllowedForSuperAdminStartsPending(t *testing.T) {
 	if publisher.lastMessage.SenderType != "system" {
 		t.Fatalf("expected system sender type, got %s", publisher.lastMessage.SenderType)
 	}
-	if publisher.lastMessage.Content != "正在转接客服0008，等待对方确认。" {
+	if publisher.lastMessage.Content != "正在转接客服0008，等待对方确认" {
 		t.Fatalf("unexpected transfer message content: %s", publisher.lastMessage.Content)
 	}
 }
@@ -509,7 +509,7 @@ func TestConfirmTransferConversationByTargetAgentSuccess(t *testing.T) {
 	if publisher.calls != 1 || publisher.lastMessage == nil {
 		t.Fatalf("confirm transfer system message should be published, got %+v", publisher)
 	}
-	if publisher.lastMessage.Content != "成功转接客服0008。" {
+	if publisher.lastMessage.Content != "成功转接客服0008" {
 		t.Fatalf("unexpected confirm transfer message content: %s", publisher.lastMessage.Content)
 	}
 }

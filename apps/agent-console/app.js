@@ -1516,6 +1516,20 @@ function renderMessages(items, options = {}) {
 
   els.agentMessages.innerHTML = "";
   for (const item of items) {
+    const isSystem = item.sender_type === "system";
+    if (isSystem) {
+      const row = document.createElement("article");
+      row.className = "message-row system";
+
+      const notice = document.createElement("div");
+      notice.className = "system-message";
+      notice.textContent = item.content || "";
+
+      row.appendChild(notice);
+      els.agentMessages.appendChild(row);
+      continue;
+    }
+
     const mine = isMineMessage(item);
 
     const row = document.createElement("article");

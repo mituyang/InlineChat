@@ -589,7 +589,7 @@ func (s *ChatService) TransferConversation(ctx context.Context, input TransferCo
 	}
 
 	if changed {
-		s.publishTransferSystemMessage(ctx, conversation.ID, "正在转接客服%s，等待对方确认。", targetAgentID)
+		s.publishTransferSystemMessage(ctx, conversation.ID, "正在转接客服%s，等待对方确认", targetAgentID)
 	}
 
 	return conversation, nil
@@ -641,7 +641,7 @@ func (s *ChatService) ConfirmTransferConversation(ctx context.Context, input Con
 	}
 
 	if changed {
-		s.publishTransferSystemMessage(ctx, conversation.ID, "成功转接客服%s。", targetAgentID)
+		s.publishTransferSystemMessage(ctx, conversation.ID, "成功转接客服%s", targetAgentID)
 	}
 
 	return conversation, nil
