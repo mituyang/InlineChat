@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"inlinechat/services/admin-service/internal/model"
@@ -30,6 +31,7 @@ type CreateSiteInput struct {
 }
 
 type CreateAgentInput struct {
+	AgentID     string
 	Email       string
 	Password    string
 	DisplayName string
@@ -109,6 +111,11 @@ func (s *AdminService) GetSiteByDomain(ctx context.Context, domain string) (*mod
 }
 
 func (s *AdminService) CreateAgent(ctx context.Context, in CreateAgentInput) (*model.Agent, error) {
+	agentID, err := normalizeAgentID(in.AgentID)
+	if err != nil {
+		return nil, err
+	}
+
 	email := strings.TrimSpace(strings.ToLower(in.Email))
 	displayName := strings.TrimSpace(in.DisplayName)
 	password := in.Password
@@ -132,6 +139,7 @@ func (s *AdminService) CreateAgent(ctx context.Context, in CreateAgentInput) (*m
 	}
 
 	agent := &model.Agent{
+		ID:           agentID,
 		Email:        email,
 		PasswordHash: hash,
 		DisplayName:  displayName,
@@ -176,6 +184,28 @@ func normalizeSiteID(raw string) (string, error) {
 		return "", fmt.Errorf("site_id format is invalid")
 	}
 	return siteID, nil
+}
+
+func normalizeAgentID(raw string) (uint64, error) {
+	agentID := strings.TrimSpace(raw)
+	if agentID == "" {
+		return 0, fmt.Errorf("agent_id is required")
+	}
+	matched, err := regexp.MatchString(`^\d{4}$`, agentID)
+	if err != nil {
+		return 0, err
+	}
+	if !matched {
+		return 0, fmt.Errorf("agent_id must be exactly 4 digits")
+	}
+	value, err := strconv.ParseUint(agentID, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid agent_id")
+	}
+	if value == 0 {
+		return 0, fmt.Errorf("agent_id 0000 is not allowed")
+	}
+	return value, nil
 }
 
 func isDuplicateError(err error) bool {

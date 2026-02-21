@@ -119,6 +119,7 @@ func (s *AdminGatewayServer) CreateAgent(ctx context.Context, req *adminv1.Creat
 	}
 
 	agent, svcErr := s.adminService.CreateAgent(ctx, service.CreateAgentInput{
+		AgentID:     req.GetAgentId(),
 		Email:       req.GetEmail(),
 		Password:    req.GetPassword(),
 		DisplayName: req.GetDisplayName(),

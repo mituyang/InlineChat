@@ -111,7 +111,14 @@
             <div class="chat-actions">
               <button id="claimBtn" type="button">认领</button>
               <div class="transfer-box">
-                <input id="transferAgentIdInput" type="number" min="1" placeholder="目标坐席ID" />
+                <input
+                  id="transferAgentIdInput"
+                  type="text"
+                  inputmode="numeric"
+                  maxlength="4"
+                  pattern="[0-9]{4}"
+                  placeholder="目标坐席ID(4位)"
+                />
                 <button id="transferBtn" type="button" class="ghost">转接</button>
               </div>
               <button id="closeBtn" type="button" class="danger">关闭</button>

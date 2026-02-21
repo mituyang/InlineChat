@@ -81,6 +81,7 @@ func TestCreateAgentDefaultRoleAndHashPassword(t *testing.T) {
 	svc := New(siteRepo, agentRepo, 10)
 
 	agent, err := svc.CreateAgent(context.Background(), CreateAgentInput{
+		AgentID:     "0012",
 		Email:       "Agent@Example.com",
 		Password:    "Agent#Strong2026!",
 		DisplayName: "客服A",
@@ -94,6 +95,9 @@ func TestCreateAgentDefaultRoleAndHashPassword(t *testing.T) {
 	}
 	if agent.Email != "agent@example.com" {
 		t.Fatalf("unexpected normalized email: %s", agent.Email)
+	}
+	if agent.ID != 12 {
+		t.Fatalf("unexpected agent id: %d", agent.ID)
 	}
 	if agent.Role != "agent" {
 		t.Fatalf("unexpected role: %s", agent.Role)
@@ -113,6 +117,7 @@ func TestCreateAgentRejectInvalidRole(t *testing.T) {
 	svc := New(&fakeSiteRepository{}, &fakeAgentRepository{}, 10)
 
 	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
+		AgentID:     "1001",
 		Email:       "agent@example.com",
 		Password:    "Agent#Strong2026!",
 		DisplayName: "客服A",
@@ -133,6 +138,7 @@ func TestCreateAgentMapDuplicateToConflict(t *testing.T) {
 	svc := New(&fakeSiteRepository{}, agentRepo, 10)
 
 	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
+		AgentID:     "1001",
 		Email:       "agent@example.com",
 		Password:    "Agent#Strong2026!",
 		DisplayName: "客服A",
@@ -147,6 +153,7 @@ func TestCreateAgentRejectWeakPassword(t *testing.T) {
 	svc := New(&fakeSiteRepository{}, &fakeAgentRepository{}, 10)
 
 	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
+		AgentID:     "1001",
 		Email:       "agent@example.com",
 		Password:    "password12345!",
 		DisplayName: "客服A",
@@ -157,6 +164,24 @@ func TestCreateAgentRejectWeakPassword(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "password") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCreateAgentRejectInvalidAgentID(t *testing.T) {
+	svc := New(&fakeSiteRepository{}, &fakeAgentRepository{}, 10)
+
+	cases := []string{"", "12", "abc1", "10000", "0000"}
+	for _, agentID := range cases {
+		_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
+			AgentID:     agentID,
+			Email:       "agent@example.com",
+			Password:    "Agent#Strong2026!",
+			DisplayName: "客服A",
+			Role:        "agent",
+		})
+		if err == nil {
+			t.Fatalf("expected error for agent_id=%q, got nil", agentID)
+		}
 	}
 }
 

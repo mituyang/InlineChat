@@ -25,6 +25,7 @@ type createSiteRequest struct {
 }
 
 type createAgentRequest struct {
+	AgentID     string `json:"agent_id" binding:"required,len=4,numeric"`
 	Email       string `json:"email" binding:"required,email"`
 	Password    string `json:"password" binding:"required,min=12,max=72"`
 	DisplayName string `json:"display_name" binding:"required,min=1,max=128"`
@@ -89,6 +90,7 @@ func (h *HTTPHandler) createAgent(c *gin.Context) {
 	}
 
 	agent, err := h.adminService.CreateAgent(c.Request.Context(), service.CreateAgentInput{
+		AgentID:     req.AgentID,
 		Email:       req.Email,
 		Password:    req.Password,
 		DisplayName: req.DisplayName,

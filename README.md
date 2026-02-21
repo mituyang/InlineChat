@@ -150,7 +150,7 @@
 - Admin:
   - `POST /api/admin/v1/admin/sites`（需要 Bearer Token，且角色为 `admin/super_admin`；请求体需包含 `site_id`、`name`、`domain`）
   - `GET /api/admin/v1/admin/sites`（需要 Bearer Token，且角色为 `admin/super_admin`）
-  - `POST /api/admin/v1/admin/agents`（需要 Bearer Token，且角色必须为 `super_admin`）
+  - `POST /api/admin/v1/admin/agents`（需要 Bearer Token，且角色必须为 `super_admin`；请求体需包含 `agent_id`（4位数字，不能为`0000`）、`email`、`password`、`display_name`；`email` 与 `display_name` 全局唯一）
   - `GET /api/admin/v1/admin/agents`（需要 Bearer Token，且角色为 `admin/super_admin`）
 - Realtime:
  - `GET /ws/:conversation_id`

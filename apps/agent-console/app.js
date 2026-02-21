@@ -898,7 +898,7 @@ function renderConversations(items) {
 
     const meta1 = document.createElement("div");
     meta1.className = "meta";
-    const assigned = item.assigned_agent_id ? `坐席 ${item.assigned_agent_id}` : "未分配";
+    const assigned = item.assigned_agent_id ? `坐席 ${formatAgentID(item.assigned_agent_id)}` : "未分配";
     meta1.textContent = `${assigned} · site=${item.site_id}`;
 
     const meta2 = document.createElement("div");
@@ -986,7 +986,7 @@ async function selectConversation(conversation) {
 function updateActiveConversationHeader(conversation) {
   state.activeConversation = conversation || null;
 
-  const assigned = conversation.assigned_agent_id ? `坐席 ${conversation.assigned_agent_id}` : "未分配";
+  const assigned = conversation.assigned_agent_id ? `坐席 ${formatAgentID(conversation.assigned_agent_id)}` : "未分配";
   els.activeConversationTitle.textContent = `会话 #${conversation.id}`;
   els.activeConversationMeta.textContent = `状态 ${conversation.status} · ${assigned} · site=${conversation.site_id}`;
 
@@ -1693,11 +1693,12 @@ async function transferConversation() {
     return;
   }
 
-  const toAgentID = Number(els.transferAgentIdInput.value);
-  if (!Number.isInteger(toAgentID) || toAgentID <= 0) {
-    setStatus("请输入有效的目标坐席 ID", true);
+  const toAgentIDRaw = normalizeAgentID(els.transferAgentIdInput.value);
+  if (!isValidAgentID(toAgentIDRaw)) {
+    setStatus("请输入 4 位目标坐席 ID（不能为 0000）", true);
     return;
   }
+  const toAgentID = Number.parseInt(toAgentIDRaw, 10);
 
   setActionPending("transfer", true);
   try {
@@ -1709,7 +1710,7 @@ async function transferConversation() {
       },
     });
     await refreshConversations();
-    setStatus(`已转接到坐席 ${toAgentID}`);
+    setStatus(`已转接到坐席 ${formatAgentID(toAgentID)}`);
   } catch (error) {
     setStatus(error.message || "转接失败", true);
   } finally {
@@ -2177,6 +2178,28 @@ function formatMessageStatus(status) {
     return "已读";
   }
   return "";
+}
+
+function normalizeAgentID(value) {
+  return String(value || "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+function isValidAgentID(value) {
+  return /^(?!0000)\d{4}$/.test(normalizeAgentID(value));
+}
+
+function formatAgentID(value) {
+  const num = Number(value);
+  if (Number.isInteger(num) && num > 0 && num <= 9999) {
+    return String(num).padStart(4, "0");
+  }
+  const raw = normalizeAgentID(value);
+  if (/^\d+$/.test(raw) && Number.parseInt(raw, 10) > 0 && Number.parseInt(raw, 10) <= 9999) {
+    return String(Number.parseInt(raw, 10)).padStart(4, "0");
+  }
+  return raw || "-";
 }
 
 window.addEventListener("beforeunload", () => {

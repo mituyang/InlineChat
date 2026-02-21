@@ -40,6 +40,7 @@ message CreateAgentRequest {
   string password = 3;
   string display_name = 4;
   string role = 5;
+  string agent_id = 6;
 }
 
 message ListAgentsRequest {

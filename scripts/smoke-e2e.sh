@@ -42,6 +42,7 @@ RUN_ID="$(date +%s)"
 SITE_NAME="Smoke Site ${RUN_ID}"
 SITE_DOMAIN="smoke-${RUN_ID}.local"
 SITE_ID="site_smoke_${RUN_ID}"
+AGENT_ID="$(printf "%04d" $(( ((RUN_ID + $$ + RANDOM) % 9000) + 1000 )))"
 AGENT_EMAIL="smoke_agent_${RUN_ID}@example.com"
 AGENT_PASSWORD="${SMOKE_AGENT_PASSWORD:-Agent#Smoke2026!}"
 VISITOR_TOKEN="smoke_visitor_${RUN_ID}"
@@ -138,14 +139,14 @@ fi
 echo "  site_id=${site_id}"
 
 echo "[4/9] 创建坐席账号"
-agent_payload="$(printf '{"email":"%s","password":"%s","display_name":"%s","role":"agent"}' "$AGENT_EMAIL" "$AGENT_PASSWORD" "Smoke Agent")"
+agent_payload="$(printf '{"agent_id":"%s","email":"%s","password":"%s","display_name":"%s","role":"agent"}' "$AGENT_ID" "$AGENT_EMAIL" "$AGENT_PASSWORD" "Smoke Agent")"
 agent_resp="$(http_json POST "${GATEWAY_URL}/api/admin/v1/admin/agents" "$agent_payload" "$super_admin_token")"
 agent_id="$(extract_json_number "$agent_resp" "id")"
 if [ -z "$agent_id" ] || [ "$agent_id" = "0" ]; then
   echo "  创建坐席失败: ${agent_resp}"
   exit 1
 fi
-echo "  agent_id=${agent_id}, email=${AGENT_EMAIL}"
+echo "  agent_id=${agent_id} (${AGENT_ID}), email=${AGENT_EMAIL}"
 
 echo "[5/9] 坐席登录"
 login_payload="$(printf '{"email":"%s","password":"%s"}' "$AGENT_EMAIL" "$AGENT_PASSWORD")"

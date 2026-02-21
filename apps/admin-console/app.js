@@ -57,6 +57,7 @@ const els = {
   agentSearchInput: document.getElementById("agentSearchInput"),
   agentStatusFilter: document.getElementById("agentStatusFilter"),
   createAgentForm: document.getElementById("createAgentForm"),
+  agentIdInput: document.getElementById("agentIdInput"),
   agentEmailInput: document.getElementById("agentEmailInput"),
   agentPasswordInput: document.getElementById("agentPasswordInput"),
   agentDisplayNameInput: document.getElementById("agentDisplayNameInput"),
@@ -358,12 +359,17 @@ async function createSite() {
 }
 
 async function createAgent() {
+  const agentID = normalizeAgentID(els.agentIdInput.value);
   const email = els.agentEmailInput.value.trim();
   const password = els.agentPasswordInput.value;
   const displayName = els.agentDisplayNameInput.value.trim();
 
-  if (!email || !password || !displayName) {
-    setStatus("请完整填写坐席信息", true);
+  if (!agentID || !email || !password || !displayName) {
+    setStatus("请完整填写坐席信息（含 4 位客服ID）", true);
+    return;
+  }
+  if (!isValidAgentID(agentID)) {
+    setStatus("客服ID 必须为 4 位数字，且不能为 0000", true);
     return;
   }
   const passwordError = validateAgentPassword(password);
@@ -377,16 +383,18 @@ async function createAgent() {
       method: "POST",
       auth: true,
       body: {
+        agent_id: agentID,
         email,
         password,
         display_name: displayName,
         role: "agent",
       },
     });
+    els.agentIdInput.value = "";
     els.agentPasswordInput.value = "";
     els.agentDisplayNameInput.value = "";
     await refreshAgents();
-    appendFeed(`创建坐席：${email}`);
+    appendFeed(`创建坐席：${formatAgentID(agentID)} / ${email}`);
     setStatus("坐席创建成功");
   } catch (error) {
     setStatus(error.message || "创建坐席失败", true);
@@ -449,9 +457,15 @@ function filteredAgents(items) {
   }
   return list.filter((agent) => {
     const id = String(agent.id || "").toLowerCase();
+    const formattedID = formatAgentID(agent.id).toLowerCase();
     const email = String(agent.email || "").toLowerCase();
     const displayName = String(agent.display_name || "").toLowerCase();
-    return id.includes(state.agentSearch) || email.includes(state.agentSearch) || displayName.includes(state.agentSearch);
+    return (
+      id.includes(state.agentSearch) ||
+      formattedID.includes(state.agentSearch) ||
+      email.includes(state.agentSearch) ||
+      displayName.includes(state.agentSearch)
+    );
   });
 }
 
@@ -493,11 +507,12 @@ function renderAgents(items) {
 
   els.agentList.innerHTML = "";
   for (const agent of list) {
+    const formattedID = formatAgentID(agent.id);
     const node = document.createElement("article");
     node.className = "item";
     node.innerHTML = `
       <strong>${escapeHTML(agent.display_name || "-")}</strong>
-      <div class="meta">id=${escapeHTML(String(agent.id || "-"))} · role=${escapeHTML(agent.role || "-")}</div>
+      <div class="meta">id=${escapeHTML(formattedID)} · role=${escapeHTML(agent.role || "-")}</div>
       <div class="meta">email=${escapeHTML(agent.email || "-")} · status=${escapeHTML(agent.status || "-")}</div>
     `;
     els.agentList.appendChild(node);
@@ -614,6 +629,25 @@ function normalizeSiteID(raw) {
 
 function isValidSiteID(siteID) {
   return /^[a-z0-9][a-z0-9_-]{3,63}$/.test(siteID);
+}
+
+function normalizeAgentID(raw) {
+  return String(raw || "")
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+function isValidAgentID(agentID) {
+  return /^(?!0000)\d{4}$/.test(String(agentID || ""));
+}
+
+function formatAgentID(value) {
+  const num = Number(value);
+  if (Number.isInteger(num) && num > 0 && num <= 9999) {
+    return String(num).padStart(4, "0");
+  }
+  const text = normalizeAgentID(value);
+  return text || "-";
 }
 
 function buildSiteIDCandidate() {
