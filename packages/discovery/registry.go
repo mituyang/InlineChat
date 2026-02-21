@@ -128,7 +128,7 @@ func (r *Registrar) Close(ctx context.Context) error {
 	}
 
 	var closeErr error
-	if _, err := r.client.Delete(ctx, r.key); err != nil && closeErr == nil {
+	if _, err := r.client.Delete(ctx, r.key); err != nil {
 		closeErr = err
 	}
 	if _, err := r.client.Revoke(ctx, r.leaseID); err != nil && closeErr == nil {

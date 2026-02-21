@@ -219,7 +219,7 @@ func (s *ChatService) CreateMessage(ctx context.Context, input CreateMessageInpu
 	if err == nil {
 		return existing, nil
 	}
-	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+	if !errors.Is(err, repository.ErrNotFound) {
 		return nil, err
 	}
 
