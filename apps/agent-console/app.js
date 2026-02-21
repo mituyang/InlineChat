@@ -59,6 +59,7 @@ const state = {
 };
 
 const els = {
+  agentBrief: document.getElementById("agentBrief"),
   userBox: document.getElementById("userBox"),
   wsStateBadge: document.getElementById("wsStateBadge"),
   themeToggleBtn: document.getElementById("themeToggleBtn"),
@@ -416,7 +417,7 @@ function abortMessageRequest() {
 
 function applyAuthUI(loggedIn) {
   if (!loggedIn) {
-    els.userBox.textContent = "未登录";
+    renderAgentIdentity(null);
     state.conversations = [];
     state.statsConversations = [];
     state.activeConversationId = "";
@@ -447,7 +448,7 @@ function applyAuthUI(loggedIn) {
   }
 
   if (state.me) {
-    els.userBox.textContent = `${state.me.email} (${state.me.role})`;
+    renderAgentIdentity(state.me);
   }
   document.body.classList.remove("auth-guard");
   renderStats();
@@ -459,7 +460,30 @@ async function fetchMe() {
     auth: true,
   });
   state.me = data;
-  els.userBox.textContent = `${data.email} (${data.role})`;
+  renderAgentIdentity(data);
+}
+
+function renderAgentIdentity(me) {
+  if (!me || typeof me !== "object") {
+    if (els.agentBrief) {
+      els.agentBrief.textContent = "客服ID - · 角色 -";
+    }
+    if (els.userBox) {
+      els.userBox.textContent = "未登录";
+    }
+    return;
+  }
+
+  const agentID = formatAgentID(me.agent_id);
+  const role = String(me.role || "-").trim() || "-";
+  const email = String(me.email || "-").trim() || "-";
+
+  if (els.agentBrief) {
+    els.agentBrief.textContent = `客服ID ${agentID} · 角色 ${role}`;
+  }
+  if (els.userBox) {
+    els.userBox.textContent = email;
+  }
 }
 
 function restoreAgentPreferences() {

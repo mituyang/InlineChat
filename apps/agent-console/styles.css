@@ -166,6 +166,21 @@ body.auth-guard .shell {
   box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.18);
 }
 
+.agent-brief {
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--brand-soft);
+  color: #0e7490;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+:root[data-theme="dark"] .agent-brief {
+  background: #123749;
+  color: #7fd9ef;
+}
+
 .user-box {
   padding: 7px 10px;
   border-radius: 10px;
