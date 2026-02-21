@@ -236,6 +236,8 @@ type fakePublisher struct {
 	lastRangeSenderType  string
 	lastRangeUpToMessage uint64
 	lastRangeStatus      string
+	closeCalls           int
+	lastClosedID         uint64
 	err                  error
 }
 
@@ -258,6 +260,12 @@ func (p *fakePublisher) PublishMessageStatusRange(_ context.Context, _ uint64, s
 	p.lastRangeSenderType = senderType
 	p.lastRangeUpToMessage = upToMessageID
 	p.lastRangeStatus = status
+	return p.err
+}
+
+func (p *fakePublisher) PublishConversationClosed(_ context.Context, conversationID uint64) error {
+	p.closeCalls++
+	p.lastClosedID = conversationID
 	return p.err
 }
 
@@ -384,7 +392,7 @@ func TestCloseConversationForbiddenForNonOwnerAgent(t *testing.T) {
 
 func TestCloseConversationByOwnerSuccess(t *testing.T) {
 	owner := uint64(7)
-	svc, repo, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+	svc, repo, _, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
 		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open", AssignedAgentID: &owner},
 	})
 
@@ -409,6 +417,9 @@ func TestCloseConversationByOwnerSuccess(t *testing.T) {
 	stored := repo.items[1]
 	if stored.Status != "closed" || stored.ClosedAt == nil {
 		t.Fatalf("close mutation not persisted")
+	}
+	if publisher.closeCalls != 1 || publisher.lastClosedID != 1 {
+		t.Fatalf("expected publish conversation.closed once, got %+v", publisher)
 	}
 }
 
@@ -707,7 +718,7 @@ func TestMarkMessagesReadIdempotentWhenNoRows(t *testing.T) {
 func TestCloseConversationIdempotentWhenAlreadyClosed(t *testing.T) {
 	owner := uint64(7)
 	now := time.Now()
-	svc, repo, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+	svc, repo, _, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
 		1: {
 			ID:              1,
 			SiteID:          "site_demo",
@@ -733,11 +744,14 @@ func TestCloseConversationIdempotentWhenAlreadyClosed(t *testing.T) {
 	if repo.items[1].Status != "closed" {
 		t.Fatalf("stored status should remain closed")
 	}
+	if publisher.closeCalls != 0 {
+		t.Fatalf("already closed should not republish conversation.closed, got %+v", publisher)
+	}
 }
 
 func TestAutoCloseInactiveConversationsClosesExpiredAgentLastMessage(t *testing.T) {
 	owner := uint64(7)
-	svc, repo, messageRepo, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+	svc, repo, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
 		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open", AssignedAgentID: &owner},
 	})
 
@@ -771,11 +785,14 @@ func TestAutoCloseInactiveConversationsClosesExpiredAgentLastMessage(t *testing.
 	if stored.ClosedByAgentID == nil || *stored.ClosedByAgentID != owner {
 		t.Fatalf("unexpected closed_by_agent_id: %+v", stored.ClosedByAgentID)
 	}
+	if publisher.closeCalls != 1 || publisher.lastClosedID != 1 {
+		t.Fatalf("expected publish conversation.closed once, got %+v", publisher)
+	}
 }
 
 func TestAutoCloseInactiveConversationsSkipsWhenVisitorAlreadyReplied(t *testing.T) {
 	owner := uint64(7)
-	svc, repo, messageRepo, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+	svc, repo, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
 		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open", AssignedAgentID: &owner},
 	})
 
@@ -804,5 +821,8 @@ func TestAutoCloseInactiveConversationsSkipsWhenVisitorAlreadyReplied(t *testing
 	}
 	if repo.items[1].Status != "open" {
 		t.Fatalf("conversation should stay open, got %s", repo.items[1].Status)
+	}
+	if publisher.closeCalls != 0 {
+		t.Fatalf("should not publish conversation.closed when not closed, got %+v", publisher)
 	}
 }

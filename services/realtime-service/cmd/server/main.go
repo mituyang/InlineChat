@@ -125,7 +125,7 @@ func main() {
 				if !ok {
 					return
 				}
-				if eventType == "message.status" {
+				if eventType == "message.status" || eventType == "conversation.closed" || eventType == "conversation.status" {
 					_ = hub.Broadcast(conversationID, payload, "")
 					return
 				}

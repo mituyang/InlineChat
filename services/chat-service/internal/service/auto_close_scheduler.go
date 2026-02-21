@@ -240,6 +240,7 @@ func (s *ChatService) autoCloseConversationByTimeout(ctx context.Context, conver
 	if s.autoCloseScheduler != nil {
 		s.autoCloseScheduler.Cancel(conversationID)
 	}
+	s.publishConversationClosed(ctx, conversationID)
 	s.logger.Info("conversation auto closed due to visitor inactivity",
 		zap.Uint64("conversation_id", conversationID),
 		zap.Duration("inactivity", s.autoCloseAfter),

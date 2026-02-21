@@ -99,6 +99,25 @@ func (p *RedisMessagePublisher) PublishMessageStatusRange(_ context.Context, con
 	return nil
 }
 
+func (p *RedisMessagePublisher) PublishConversationClosed(_ context.Context, conversationID uint64) error {
+	if conversationID == 0 {
+		return nil
+	}
+
+	payload := map[string]any{
+		"type": "conversation.closed",
+		"payload": map[string]any{
+			"conversation_id": conversationID,
+			"status":          "closed",
+		},
+	}
+
+	if err := p.publishByConversationID(conversationID, payload); err != nil {
+		return fmt.Errorf("publish conversation.closed failed: %w", err)
+	}
+	return nil
+}
+
 func (p *RedisMessagePublisher) publishByConversationID(conversationID uint64, payload map[string]any) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {

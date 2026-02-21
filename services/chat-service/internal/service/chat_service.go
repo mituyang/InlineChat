@@ -42,6 +42,7 @@ type MessageEventPublisher interface {
 	PublishMessageCreated(ctx context.Context, message *model.Message) error
 	PublishMessageStatus(ctx context.Context, conversationID uint64, messageID uint64, status string) error
 	PublishMessageStatusRange(ctx context.Context, conversationID uint64, senderType string, upToMessageID uint64, status string) error
+	PublishConversationClosed(ctx context.Context, conversationID uint64) error
 }
 
 type noopMessageEventPublisher struct{}
@@ -55,6 +56,10 @@ func (noopMessageEventPublisher) PublishMessageStatus(context.Context, uint64, u
 }
 
 func (noopMessageEventPublisher) PublishMessageStatusRange(context.Context, uint64, string, uint64, string) error {
+	return nil
+}
+
+func (noopMessageEventPublisher) PublishConversationClosed(context.Context, uint64) error {
 	return nil
 }
 
@@ -470,6 +475,7 @@ func (s *ChatService) AutoCloseInactiveConversations(ctx context.Context, inacti
 		}
 		if changed {
 			closedCount++
+			s.publishConversationClosed(ctx, conversationID)
 			s.logger.Info("conversation auto closed due to visitor inactivity",
 				zap.Uint64("conversation_id", conversationID),
 				zap.Duration("inactivity", inactivity),
@@ -570,6 +576,7 @@ func (s *ChatService) CloseConversation(ctx context.Context, input CloseConversa
 		return nil, err
 	}
 
+	changed := false
 	conversation, err := s.conversationRepo.Mutate(ctx, input.ConversationID, func(conversation *model.Conversation) (bool, error) {
 		if conversation.Status == "closed" {
 			return false, nil
@@ -587,6 +594,7 @@ func (s *ChatService) CloseConversation(ctx context.Context, input CloseConversa
 		conversation.Status = "closed"
 		conversation.ClosedAt = &now
 		conversation.ClosedByAgentID = &closedBy
+		changed = true
 		return true, nil
 	})
 	if err != nil {
@@ -598,7 +606,22 @@ func (s *ChatService) CloseConversation(ctx context.Context, input CloseConversa
 	if conversation.Status == "closed" && s.autoCloseScheduler != nil {
 		s.autoCloseScheduler.Cancel(conversation.ID)
 	}
+	if changed {
+		s.publishConversationClosed(ctx, conversation.ID)
+	}
 	return conversation, nil
+}
+
+func (s *ChatService) publishConversationClosed(ctx context.Context, conversationID uint64) {
+	if conversationID == 0 {
+		return
+	}
+	if err := s.publisher.PublishConversationClosed(ctx, conversationID); err != nil {
+		s.logger.Warn("publish conversation.closed event failed",
+			zap.Error(err),
+			zap.Uint64("conversation_id", conversationID),
+		)
+	}
 }
 
 func normalizeActorRole(role string) (string, error) {
