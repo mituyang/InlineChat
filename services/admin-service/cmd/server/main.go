@@ -83,7 +83,7 @@ func main() {
 	auditRepo := repository.NewAuditLogRepository(db)
 	adminSvc := service.New(siteRepo, agentRepo, auditRepo, cfg.BCryptCost)
 	h := handler.NewHTTPHandler(adminSvc)
-	authz := middleware.NewAuthz(cfg.JWTSecret, cfg.JWTPreviousSecret, cfg.JWTIssuer)
+	authz := middleware.NewAuthz(cfg.JWTSecret, cfg.JWTPreviousSecret, cfg.JWTIssuer, agentRepo)
 	metrics := httpmiddleware.NewHTTPMetrics("admin-service", nil)
 
 	r := gin.New()

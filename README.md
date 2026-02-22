@@ -35,6 +35,9 @@
    - 若浏览器出现“密码泄露/检查已保存密码”提示，通常是浏览器密码管理器检测到旧弱口令，不是后端报错；更新为强口令并更新浏览器已保存密码即可。
    - 如需平滑轮换 JWT 密钥，设置 `JWT_PREVIOUS_SECRET` 为上一把密钥（留空表示不启用轮换）。
    - 网关限流参数：`LOGIN_RATE_LIMIT_PER_MIN`、`LOGIN_RATE_LIMIT_BURST`、`VISITOR_RATE_LIMIT_PER_MIN`、`VISITOR_RATE_LIMIT_BURST`、`RATE_LIMIT_KEY_TTL_MINS`。
+   - 网关分布式限流（可选）参数：`RATE_LIMIT_REDIS_ADDR`、`RATE_LIMIT_REDIS_PASSWORD`、`RATE_LIMIT_REDIS_DB`、`RATE_LIMIT_REDIS_PREFIX`、`RATE_LIMIT_REDIS_TIMEOUT_MS`（Redis 不可用时自动降级为本地限流）。
+   - WebSocket Origin 白名单：`WS_ALLOWED_ORIGINS` 必须显式配置（逗号分隔），不再建议使用 `*`。
+   - outbox 死信参数：`EVENT_OUTBOX_MAX_ATTEMPTS`、`EVENT_OUTBOX_REPLAY_DEAD_ON_START`、`EVENT_OUTBOX_REPLAY_DEAD_BATCH`。
 3. `docker compose -f infra/docker/docker-compose.yml --env-file .env up --build`
 4. 网关健康检查：`GET http://localhost:8200/healthz`（进程存活）
 5. 网关就绪检查：`GET http://localhost:8200/readyz`（上游依赖可用）
@@ -59,6 +62,7 @@
   - 客服能力（会话列表、认领、转接、关闭、客服发言）仅 `agent` 可用；`super_admin` 不具备客服能力。
   - 客服工作台与管理后台均支持亮色/暗色主题切换，并使用同一主题偏好存储键进行跨页面保持。
   - 客服端支持会话列表、会话认领/转接/关闭、消息收发、未读统计、快捷语、会话统计面板；客服与访客都可通过 WebSocket 发消息，断连自动重连并降级轮询。
+  - WebSocket 支持断线补拉：连接时带 `last_message_id` 可回补该消息之后的历史消息。
   - 消息状态支持 `sent -> delivered -> read`：写入后为 `sent`，对端在线并成功入队后推进到 `delivered`，客户端显式上报已读后推进到 `read`。
   - 超级管理员账号只从 `.env` 读取并由 `auth-service` 启动时确保存在，管理台由超级管理员登录后创建客服账号。
 
@@ -134,7 +138,8 @@
   - `Referrer-Policy`
   - `Permissions-Policy`
 - 所有 HTTP 服务暴露 `GET /metrics`（Prometheus 格式），包含请求总量、延迟分布、在途请求数。
-- `gateway-service` 启用匿名侧与登录侧限流（基于客户端 + 业务维度 key），超限返回 `429 rate_limited`。
+- `gateway-service` 启用匿名侧与登录侧限流（支持 Redis 分布式限流，Redis 异常自动降级本地限流），超限返回 `429 rate_limited`。
+- `chat-service` outbox 支持最大重试、死信（`dead`）和启动回放（可选）。
 - `auth-service`、`admin-service`、`realtime-service` 支持 JWT 双密钥验签（`JWT_SECRET` + `JWT_PREVIOUS_SECRET`），用于无损密钥轮换。
 - `docker compose` 已对业务服务启用 `readyz` 健康检查，并将关键依赖切换为 `service_healthy`，避免“已启动但不可用”的级联故障。
 
@@ -176,7 +181,7 @@
   - `POST /api/admin/v1/admin/agents`（需要 Bearer Token，且角色必须为 `super_admin`；请求体需包含 `agent_id`（4位数字，不能为`0000`）、`email`、`password`、`display_name`；`email` 与 `display_name` 全局唯一）
   - `GET /api/admin/v1/admin/agents`（需要 Bearer Token，且角色为 `admin/super_admin`）
 - Realtime:
- - `GET /ws/:conversation_id`
+ - `GET /ws/:conversation_id`（访客需 `visitor_token`，客服需 `access_token`，可选 `last_message_id` 用于断线补拉）
 
 ## WebSocket 示例
 发送：
@@ -190,6 +195,9 @@
 ```
 
 `message.new` 中的 `message` 结构会包含 `status` 字段（`sent`/`delivered`/`read`）。
+
+断线补拉示例（从 `message_id=120` 之后继续）：
+- `GET /ws/:conversation_id?visitor_token=vt_xxx&last_message_id=120`
 
 ## 网关错误响应
 ```json

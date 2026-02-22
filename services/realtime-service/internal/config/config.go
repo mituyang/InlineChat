@@ -41,7 +41,7 @@ func Load() (Config, error) {
 		ChatGRPCDialTimeout:          getIntEnv("CHAT_GRPC_DIAL_TIMEOUT_SEC", 8),
 		ChatGRPCCallTimeout:          getIntEnv("CHAT_GRPC_CALL_TIMEOUT_SEC", 8),
 		LogLevel:                     getEnv("LOG_LEVEL", "info"),
-		AllowedOrigins:               splitAndTrim(getEnv("WS_ALLOWED_ORIGINS", "*")),
+		AllowedOrigins:               splitAndTrim(os.Getenv("WS_ALLOWED_ORIGINS")),
 		ETCDEndpoints:                splitAndTrim(os.Getenv("ETCD_ENDPOINTS")),
 		ETCDDialTimeoutSec:           getIntEnv("ETCD_DIAL_TIMEOUT_SEC", 5),
 		ETCDRegisterTTLSec:           getIntEnv("ETCD_REGISTER_TTL_SEC", 15),
@@ -60,6 +60,9 @@ func Load() (Config, error) {
 	}
 	if cfg.JWTIssuer == "" {
 		return Config{}, fmt.Errorf("JWT_ISSUER is required")
+	}
+	if len(cfg.AllowedOrigins) == 0 {
+		return Config{}, fmt.Errorf("WS_ALLOWED_ORIGINS is required")
 	}
 	if len(cfg.ETCDEndpoints) == 0 {
 		return Config{}, fmt.Errorf("ETCD_ENDPOINTS is required")
@@ -117,9 +120,6 @@ func splitAndTrim(raw string) []string {
 		if item != "" {
 			out = append(out, item)
 		}
-	}
-	if len(out) == 0 {
-		return []string{"*"}
 	}
 	return out
 }

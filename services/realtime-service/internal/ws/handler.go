@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +22,11 @@ import (
 	"inlinechat/services/realtime-service/internal/security"
 )
 
-const maxMessageContentChars = 2000
+const (
+	maxMessageContentChars = 2000
+	replayPageSize         = 100
+	maxReplayMessages      = 500
+)
 
 type Handler struct {
 	hub             *Hub
@@ -54,6 +60,7 @@ type connectionContext struct {
 type messageClient interface {
 	CreateMessage(ctx context.Context, conversationID uint64, reqBody chatclient.CreateMessageRequest) (*chatclient.Message, error)
 	GetConversation(ctx context.Context, conversationID uint64) (*chatclient.Conversation, error)
+	ListMessages(ctx context.Context, conversationID uint64, in chatclient.ListMessagesInput) ([]*chatclient.Message, error)
 }
 
 func NewHandler(
@@ -68,7 +75,9 @@ func NewHandler(
 ) *Handler {
 	originMap := make(map[string]struct{}, len(allowedOrigins))
 	for _, origin := range allowedOrigins {
-		originMap[origin] = struct{}{}
+		if normalized := normalizeOrigin(origin); normalized != "" {
+			originMap[normalized] = struct{}{}
+		}
 	}
 	if chatCallTimeout <= 0 {
 		chatCallTimeout = 8 * time.Second
@@ -95,6 +104,16 @@ func (h *Handler) Serve(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation_id"})
 		return
 	}
+	lastMessageIDRaw := strings.TrimSpace(c.Query("last_message_id"))
+	var lastMessageID uint64
+	if lastMessageIDRaw != "" {
+		parsed, parseErr := strconv.ParseUint(lastMessageIDRaw, 10, 64)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid last_message_id"})
+			return
+		}
+		lastMessageID = parsed
+	}
 
 	connCtx, code, err := h.resolveConnectionContext(c, conversationIDUint)
 	if err != nil {
@@ -104,12 +123,7 @@ func (h *Handler) Serve(c *gin.Context) {
 
 	upgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
-			if _, ok := h.allowedOrigins["*"]; ok {
-				return true
-			}
-			origin := r.Header.Get("Origin")
-			_, ok := h.allowedOrigins[origin]
-			return ok
+			return h.isOriginAllowed(r.Header.Get("Origin"))
 		},
 	}
 
@@ -123,6 +137,18 @@ func (h *Handler) Serve(c *gin.Context) {
 	h.hub.Register(conversationID, client, ClientMeta{Role: connCtx.Role})
 
 	go client.WriteLoop()
+	if err := h.replayMessages(c.Request.Context(), conversationIDUint, lastMessageID, client); err != nil {
+		h.logger.Warn("replay websocket messages failed",
+			zap.Error(err),
+			zap.Uint64("conversation_id", conversationIDUint),
+			zap.Uint64("last_message_id", lastMessageID),
+		)
+		h.hub.Unregister(conversationID, client)
+		client.Close()
+		_ = conn.Close()
+		return
+	}
+
 	client.ReadLoop(func(message []byte) error {
 		return h.handleMessage(c.Request.Context(), conversationID, message, client, connCtx)
 	}, func() {
@@ -183,6 +209,33 @@ func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64
 	}, 0, nil
 }
 
+func normalizeOrigin(raw string) string {
+	trimmed := strings.TrimSpace(strings.ToLower(raw))
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return ""
+	}
+	if parsed.Scheme == "" || parsed.Host == "" {
+		return ""
+	}
+	return parsed.Scheme + "://" + strings.ToLower(parsed.Host)
+}
+
+func (h *Handler) isOriginAllowed(origin string) bool {
+	if len(h.allowedOrigins) == 0 {
+		return false
+	}
+	normalized := normalizeOrigin(origin)
+	if normalized == "" {
+		return false
+	}
+	_, ok := h.allowedOrigins[normalized]
+	return ok
+}
+
 func buildJWTSecrets(primary string, previous string) [][]byte {
 	out := make([][]byte, 0, 2)
 	primaryText := strings.TrimSpace(primary)
@@ -194,6 +247,101 @@ func buildJWTSecrets(primary string, previous string) [][]byte {
 		out = append(out, []byte(previousText))
 	}
 	return out
+}
+
+func (h *Handler) replayMessages(ctx context.Context, conversationID uint64, lastMessageID uint64, client *Client) error {
+	if h == nil || h.chatClient == nil || client == nil || lastMessageID == 0 {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	beforeID := uint64(0)
+	missed := make([]*chatclient.Message, 0, replayPageSize)
+	for len(missed) < maxReplayMessages {
+		callCtx, cancel := context.WithTimeout(ctx, h.chatCallTimeout)
+		items, err := h.chatClient.ListMessages(callCtx, conversationID, chatclient.ListMessagesInput{
+			Limit:    replayPageSize,
+			BeforeID: beforeID,
+		})
+		cancel()
+		if err != nil {
+			return err
+		}
+		if len(items) == 0 {
+			break
+		}
+
+		stop := false
+		for i := range items {
+			item := items[i]
+			if item == nil {
+				continue
+			}
+			if item.ID <= lastMessageID {
+				stop = true
+				break
+			}
+			missed = append(missed, item)
+			if len(missed) >= maxReplayMessages {
+				stop = true
+				break
+			}
+		}
+		if stop {
+			break
+		}
+
+		last := items[len(items)-1]
+		if last == nil || last.ID == 0 {
+			break
+		}
+		beforeID = last.ID
+	}
+
+	sort.Slice(missed, func(i, j int) bool {
+		return missed[i].ID < missed[j].ID
+	})
+
+	for i := range missed {
+		payload, err := marshalMessageNewEvent(conversationID, missed[i])
+		if err != nil {
+			return err
+		}
+		if !client.TrySend(payload) {
+			return fmt.Errorf("client replay queue is full")
+		}
+	}
+	return nil
+}
+
+func marshalMessageNewEvent(conversationID uint64, msg *chatclient.Message) ([]byte, error) {
+	if msg == nil {
+		return nil, fmt.Errorf("message is nil")
+	}
+	eventConversationID := msg.ConversationID
+	if eventConversationID == 0 {
+		eventConversationID = conversationID
+	}
+	env := map[string]any{
+		"type": "message.new",
+		"payload": map[string]any{
+			"conversation_id": eventConversationID,
+			"message": map[string]any{
+				"id":              msg.ID,
+				"conversation_id": eventConversationID,
+				"sender_type":     msg.SenderType,
+				"sender_id":       msg.SenderID,
+				"content":         msg.Content,
+				"client_msg_id":   msg.ClientMsgID,
+				"status":          msg.Status,
+				"created_at":      msg.CreatedAt,
+				"updated_at":      msg.UpdatedAt,
+			},
+		},
+	}
+	return json.Marshal(env)
 }
 
 func (h *Handler) handleMessage(ctx context.Context, conversationID string, raw []byte, client *Client, connCtx connectionContext) error {

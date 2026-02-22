@@ -6,16 +6,22 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"inlinechat/services/admin-service/internal/repository"
 	"inlinechat/services/admin-service/internal/security"
 )
 
 type Authz struct {
-	secrets [][]byte
-	issuer  string
+	secrets   [][]byte
+	issuer    string
+	agentRepo repository.AgentRepository
 }
 
-func NewAuthz(secret string, previousSecret string, issuer string) *Authz {
-	return &Authz{secrets: buildJWTSecrets(secret, previousSecret), issuer: issuer}
+func NewAuthz(secret string, previousSecret string, issuer string, agentRepo repository.AgentRepository) *Authz {
+	return &Authz{
+		secrets:   buildJWTSecrets(secret, previousSecret),
+		issuer:    issuer,
+		agentRepo: agentRepo,
+	}
 }
 
 func (a *Authz) RequireAdmin() gin.HandlerFunc {
@@ -34,6 +40,15 @@ func (a *Authz) RequireAdmin() gin.HandlerFunc {
 		if claims.Role != "admin" && claims.Role != "super_admin" {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin role required"})
 			return
+		}
+		if a.agentRepo != nil {
+			agent, findErr := a.agentRepo.GetByID(c.Request.Context(), claims.AgentID)
+			if findErr != nil ||
+				strings.ToLower(strings.TrimSpace(agent.Status)) != "active" ||
+				normalizeTokenVersion(agent.TokenVersion) != normalizeTokenVersion(claims.TokenVersion) {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+				return
+			}
 		}
 
 		c.Set("claims", claims)
@@ -63,4 +78,11 @@ func buildJWTSecrets(primary string, previous string) [][]byte {
 		out = append(out, []byte(previousText))
 	}
 	return out
+}
+
+func normalizeTokenVersion(v uint64) uint64 {
+	if v == 0 {
+		return 1
+	}
+	return v
 }

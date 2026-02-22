@@ -2,6 +2,7 @@ package grpcserver
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -30,7 +31,7 @@ func New(adminService *service.AdminService, jwtSecret string, jwtPreviousSecret
 }
 
 func (s *AdminGatewayServer) CreateSite(ctx context.Context, req *adminv1.CreateSiteRequest) (*adminv1.Site, error) {
-	claims, err := s.requireAdmin(req.GetAuthorization())
+	claims, err := s.requireAdmin(ctx, req.GetAuthorization())
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +52,7 @@ func (s *AdminGatewayServer) CreateSite(ctx context.Context, req *adminv1.Create
 }
 
 func (s *AdminGatewayServer) UpdateSiteStatus(ctx context.Context, req *adminv1.UpdateSiteStatusRequest) (*adminv1.Site, error) {
-	claims, err := s.requireAdmin(req.GetAuthorization())
+	claims, err := s.requireAdmin(ctx, req.GetAuthorization())
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +71,7 @@ func (s *AdminGatewayServer) UpdateSiteStatus(ctx context.Context, req *adminv1.
 }
 
 func (s *AdminGatewayServer) RotateSiteWidgetKey(ctx context.Context, req *adminv1.RotateSiteWidgetKeyRequest) (*adminv1.Site, error) {
-	claims, err := s.requireAdmin(req.GetAuthorization())
+	claims, err := s.requireAdmin(ctx, req.GetAuthorization())
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +90,7 @@ func (s *AdminGatewayServer) RotateSiteWidgetKey(ctx context.Context, req *admin
 }
 
 func (s *AdminGatewayServer) ListSites(ctx context.Context, req *adminv1.ListSitesRequest) (*adminv1.ListSitesResponse, error) {
-	if _, err := s.requireAdmin(req.GetAuthorization()); err != nil {
+	if _, err := s.requireAdmin(ctx, req.GetAuthorization()); err != nil {
 		return nil, err
 	}
 
@@ -149,7 +150,7 @@ func (s *AdminGatewayServer) GetSiteByDomain(ctx context.Context, req *adminv1.G
 }
 
 func (s *AdminGatewayServer) CreateAgent(ctx context.Context, req *adminv1.CreateAgentRequest) (*adminv1.Agent, error) {
-	claims, err := s.requireAdmin(req.GetAuthorization())
+	claims, err := s.requireAdmin(ctx, req.GetAuthorization())
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +173,7 @@ func (s *AdminGatewayServer) CreateAgent(ctx context.Context, req *adminv1.Creat
 }
 
 func (s *AdminGatewayServer) ListAgents(ctx context.Context, req *adminv1.ListAgentsRequest) (*adminv1.ListAgentsResponse, error) {
-	if _, err := s.requireAdmin(req.GetAuthorization()); err != nil {
+	if _, err := s.requireAdmin(ctx, req.GetAuthorization()); err != nil {
 		return nil, err
 	}
 
@@ -204,7 +205,7 @@ func (s *AdminGatewayServer) ListAgents(ctx context.Context, req *adminv1.ListAg
 }
 
 func (s *AdminGatewayServer) UpdateAgentStatus(ctx context.Context, req *adminv1.UpdateAgentStatusRequest) (*adminv1.Agent, error) {
-	claims, err := s.requireAdmin(req.GetAuthorization())
+	claims, err := s.requireAdmin(ctx, req.GetAuthorization())
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +224,7 @@ func (s *AdminGatewayServer) UpdateAgentStatus(ctx context.Context, req *adminv1
 }
 
 func (s *AdminGatewayServer) ResetAgentPassword(ctx context.Context, req *adminv1.ResetAgentPasswordRequest) (*adminv1.Agent, error) {
-	claims, err := s.requireAdmin(req.GetAuthorization())
+	claims, err := s.requireAdmin(ctx, req.GetAuthorization())
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +243,7 @@ func (s *AdminGatewayServer) ResetAgentPassword(ctx context.Context, req *adminv
 }
 
 func (s *AdminGatewayServer) ForceAgentLogout(ctx context.Context, req *adminv1.ForceAgentLogoutRequest) (*adminv1.Agent, error) {
-	claims, err := s.requireAdmin(req.GetAuthorization())
+	claims, err := s.requireAdmin(ctx, req.GetAuthorization())
 	if err != nil {
 		return nil, err
 	}
@@ -260,7 +261,7 @@ func (s *AdminGatewayServer) ForceAgentLogout(ctx context.Context, req *adminv1.
 }
 
 func (s *AdminGatewayServer) ListAuditLogs(ctx context.Context, req *adminv1.ListAuditLogsRequest) (*adminv1.ListAuditLogsResponse, error) {
-	if _, err := s.requireAdmin(req.GetAuthorization()); err != nil {
+	if _, err := s.requireAdmin(ctx, req.GetAuthorization()); err != nil {
 		return nil, err
 	}
 
@@ -285,7 +286,7 @@ func (s *AdminGatewayServer) ListAuditLogs(ctx context.Context, req *adminv1.Lis
 	return resp, nil
 }
 
-func (s *AdminGatewayServer) requireAdmin(authorization string) (*security.Claims, error) {
+func (s *AdminGatewayServer) requireAdmin(ctx context.Context, authorization string) (*security.Claims, error) {
 	token := parseBearerToken(authorization)
 	if token == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing bearer token")
@@ -297,6 +298,14 @@ func (s *AdminGatewayServer) requireAdmin(authorization string) (*security.Claim
 	}
 	if claims.Role != "admin" && claims.Role != "super_admin" {
 		return nil, status.Error(codes.PermissionDenied, "admin role required")
+	}
+	if s.adminService != nil {
+		if err := s.adminService.ValidateAgentSession(ctx, claims.AgentID, claims.TokenVersion); err != nil {
+			if errors.Is(err, service.ErrInvalidSession) {
+				return nil, status.Error(codes.Unauthenticated, "invalid token")
+			}
+			return nil, status.Error(codes.Internal, "internal error")
+		}
 	}
 	return claims, nil
 }

@@ -17,6 +17,7 @@ import (
 
 var ErrConflict = errors.New("conflict")
 var ErrNotFound = errors.New("not found")
+var ErrInvalidSession = errors.New("invalid session")
 
 type AdminService struct {
 	siteRepo   repository.SiteRepository
@@ -376,6 +377,26 @@ func (s *AdminService) ListAuditLogs(ctx context.Context, in ListAuditLogsInput)
 	return s.auditRepo.List(ctx, filter, limit, in.Offset)
 }
 
+func (s *AdminService) ValidateAgentSession(ctx context.Context, agentID uint64, tokenVersion uint64) error {
+	if agentID == 0 || normalizeTokenVersion(tokenVersion) == 0 {
+		return ErrInvalidSession
+	}
+	agent, err := s.agentRepo.GetByID(ctx, agentID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrInvalidSession
+		}
+		return err
+	}
+	if strings.ToLower(strings.TrimSpace(agent.Status)) != "active" {
+		return ErrInvalidSession
+	}
+	if normalizeTokenVersion(agent.TokenVersion) != normalizeTokenVersion(tokenVersion) {
+		return ErrInvalidSession
+	}
+	return nil
+}
+
 func randomHex(prefix string, bytesLen int) (string, error) {
 	buf := make([]byte, bytesLen)
 	if _, err := rand.Read(buf); err != nil {
@@ -446,6 +467,13 @@ func nextTokenVersion(current uint64) uint64 {
 		return 2
 	}
 	return current + 1
+}
+
+func normalizeTokenVersion(v uint64) uint64 {
+	if v == 0 {
+		return 1
+	}
+	return v
 }
 
 func formatAgentID(id uint64) string {

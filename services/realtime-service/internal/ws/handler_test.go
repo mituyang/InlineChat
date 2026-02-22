@@ -3,7 +3,8 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"net/http/httptest"
+	"net"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
@@ -18,6 +19,8 @@ import (
 	"inlinechat/services/realtime-service/internal/chatclient"
 )
 
+const testAllowedOrigin = "http://example.com"
+
 type chatCall struct {
 	conversationID uint64
 	req            chatclient.CreateMessageRequest
@@ -30,6 +33,8 @@ type fakeChatClient struct {
 	err             error
 	conversation    *chatclient.Conversation
 	conversationErr error
+	listMessages    []*chatclient.Message
+	listMessagesErr error
 }
 
 func (f *fakeChatClient) CreateMessage(_ context.Context, conversationID uint64, req chatclient.CreateMessageRequest) (*chatclient.Message, error) {
@@ -61,6 +66,31 @@ func (f *fakeChatClient) GetConversation(_ context.Context, conversationID uint6
 	}, nil
 }
 
+func (f *fakeChatClient) ListMessages(_ context.Context, conversationID uint64, in chatclient.ListMessagesInput) ([]*chatclient.Message, error) {
+	if f.listMessagesErr != nil {
+		return nil, f.listMessagesErr
+	}
+	out := make([]*chatclient.Message, 0, len(f.listMessages))
+	for i := range f.listMessages {
+		item := f.listMessages[i]
+		if item == nil {
+			continue
+		}
+		cp := *item
+		if cp.ConversationID == 0 {
+			cp.ConversationID = conversationID
+		}
+		if in.BeforeID > 0 && cp.ID >= in.BeforeID {
+			continue
+		}
+		out = append(out, &cp)
+		if in.Limit > 0 && len(out) >= in.Limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeChatClient) lastCall() (chatCall, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -74,15 +104,12 @@ func TestHandlerMessageSendDefaultVisitor(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{resp: &chatclient.Message{ID: 11, ConversationID: 1, Status: "sent"}}
-	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
-	r := gin.New()
-	r.GET("/ws/:conversation_id", handler.Serve)
-	ts := httptest.NewServer(r)
-	defer ts.Close()
+	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/1?visitor_token=vt_1"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
 	}
@@ -129,15 +156,12 @@ func TestHandlerMessageSendAgentWithToken(t *testing.T) {
 	token := mustIssueAgentToken(t, secret, issuer, 7, "agent")
 
 	fakeClient := &fakeChatClient{resp: &chatclient.Message{ID: 22, ConversationID: 2, Status: "sent"}}
-	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, secret, "", issuer, zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, []string{testAllowedOrigin}, time.Second, secret, "", issuer, zap.NewNop())
 
-	r := gin.New()
-	r.GET("/ws/:conversation_id", handler.Serve)
-	ts := httptest.NewServer(r)
-	defer ts.Close()
+	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/2?access_token=" + url.QueryEscape(token)
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
 	}
@@ -175,15 +199,12 @@ func TestHandlerMessageSendAgentWithoutToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{}
-	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
-	r := gin.New()
-	r.GET("/ws/:conversation_id", handler.Serve)
-	ts := httptest.NewServer(r)
-	defer ts.Close()
+	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/3?visitor_token=vt_1"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
 	}
@@ -225,15 +246,12 @@ func TestHandlerMessageSendCreateMessageFailedReturnsNack(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{err: context.DeadlineExceeded}
-	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
-	r := gin.New()
-	r.GET("/ws/:conversation_id", handler.Serve)
-	ts := httptest.NewServer(r)
-	defer ts.Close()
+	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/5?visitor_token=vt_1"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
 	}
@@ -268,15 +286,12 @@ func TestHandlerMessageSendTooLongReturnsNack(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{}
-	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
-	r := gin.New()
-	r.GET("/ws/:conversation_id", handler.Serve)
-	ts := httptest.NewServer(r)
-	defer ts.Close()
+	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/8?visitor_token=vt_1"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
 	}
@@ -314,14 +329,11 @@ func TestHandlerMessageSendTooLongReturnsNack(t *testing.T) {
 func TestHandlerRejectInvalidAccessToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	handler := NewHandler(NewHub(), &fakeChatClient{}, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
-	r := gin.New()
-	r.GET("/ws/:conversation_id", handler.Serve)
-	ts := httptest.NewServer(r)
-	defer ts.Close()
+	handler := NewHandler(NewHub(), &fakeChatClient{}, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/4?access_token=bad"
-	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
 	if err == nil {
 		t.Fatal("expected websocket handshake error")
 	}
@@ -333,20 +345,111 @@ func TestHandlerRejectInvalidAccessToken(t *testing.T) {
 func TestHandlerRejectMissingVisitorToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	handler := NewHandler(NewHub(), &fakeChatClient{}, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
-	r := gin.New()
-	r.GET("/ws/:conversation_id", handler.Serve)
-	ts := httptest.NewServer(r)
-	defer ts.Close()
+	handler := NewHandler(NewHub(), &fakeChatClient{}, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6"
-	_, resp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
 	if err == nil {
 		t.Fatal("expected websocket handshake error")
 	}
 	if resp == nil || resp.StatusCode != 401 {
 		t.Fatalf("expected 401 handshake response, got %+v err=%v", resp, err)
 	}
+}
+
+func TestHandlerRejectDisallowedOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewHandler(NewHub(), &fakeChatClient{}, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	ts := newWSTestServer(t, handler)
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6?visitor_token=vt_1"
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeaderWithOrigin("http://evil.example.com"))
+	if err == nil {
+		t.Fatal("expected websocket handshake error")
+	}
+	if resp == nil || resp.StatusCode != 403 {
+		t.Fatalf("expected 403 handshake response, got %+v err=%v", resp, err)
+	}
+}
+
+func TestHandlerReplayMessagesAfterLastMessageID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	fakeClient := &fakeChatClient{
+		listMessages: []*chatclient.Message{
+			{ID: 15, ConversationID: 1, SenderType: "agent", Content: "m15", ClientMsgID: "c15", Status: "sent"},
+			{ID: 14, ConversationID: 1, SenderType: "visitor", Content: "m14", ClientMsgID: "c14", Status: "sent"},
+			{ID: 13, ConversationID: 1, SenderType: "agent", Content: "m13", ClientMsgID: "c13", Status: "sent"},
+		},
+	}
+	handler := NewHandler(NewHub(), fakeClient, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+
+	ts := newWSTestServer(t, handler)
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/1?visitor_token=vt_1&last_message_id=13"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
+	if err != nil {
+		t.Fatalf("dial websocket failed: %v", err)
+	}
+	defer conn.Close()
+
+	_, firstRaw, err := readWSMessage(t, conn)
+	if err != nil {
+		t.Fatalf("read first replay message failed: %v", err)
+	}
+	_, secondRaw, err := readWSMessage(t, conn)
+	if err != nil {
+		t.Fatalf("read second replay message failed: %v", err)
+	}
+
+	firstID := mustReadMessageIDFromEvent(t, firstRaw)
+	secondID := mustReadMessageIDFromEvent(t, secondRaw)
+	if firstID != 14 || secondID != 15 {
+		t.Fatalf("expected replay order 14 -> 15, got %d -> %d", firstID, secondID)
+	}
+}
+
+type wsTestServer struct {
+	URL      string
+	server   *http.Server
+	listener net.Listener
+}
+
+func newWSTestServer(t *testing.T, handler *Handler) *wsTestServer {
+	t.Helper()
+	r := gin.New()
+	r.GET("/ws/:conversation_id", handler.Serve)
+
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen test server failed: %v", err)
+	}
+	srv := &http.Server{
+		Handler: r,
+	}
+	go func() {
+		_ = srv.Serve(listener)
+	}()
+
+	ts := &wsTestServer{
+		URL:      "http://" + listener.Addr().String(),
+		server:   srv,
+		listener: listener,
+	}
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+func (s *wsTestServer) Close() {
+	if s == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = s.server.Shutdown(ctx)
+	_ = s.listener.Close()
 }
 
 func mustIssueAgentToken(t *testing.T, secret string, issuer string, agentID uint64, role string) string {
@@ -375,4 +478,35 @@ func readWSMessage(t *testing.T, conn *websocket.Conn) (int, []byte, error) {
 		return 0, nil, err
 	}
 	return conn.ReadMessage()
+}
+
+func wsDialHeader() http.Header {
+	return http.Header{
+		"Origin": []string{testAllowedOrigin},
+	}
+}
+
+func wsDialHeaderWithOrigin(origin string) http.Header {
+	return http.Header{
+		"Origin": []string{origin},
+	}
+}
+
+func mustReadMessageIDFromEvent(t *testing.T, raw []byte) uint64 {
+	t.Helper()
+	var env struct {
+		Type    string `json:"type"`
+		Payload struct {
+			Message struct {
+				ID uint64 `json:"id"`
+			} `json:"message"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("unmarshal replay event failed: %v", err)
+	}
+	if env.Type != "message.new" {
+		t.Fatalf("expected message.new event, got %s", env.Type)
+	}
+	return env.Payload.Message.ID
 }

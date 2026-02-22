@@ -152,6 +152,30 @@ func (d *DynamicClient) GetConversation(ctx context.Context, conversationID uint
 	return client.GetConversation(ctx, conversationID)
 }
 
+func (d *DynamicClient) ListMessages(ctx context.Context, conversationID uint64, in ListMessagesInput) ([]*Message, error) {
+	client, err := d.clientForCall(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := client.ListMessages(ctx, conversationID, in)
+	if err == nil {
+		return resp, nil
+	}
+	if !isRetryableRPCError(err) {
+		return nil, err
+	}
+	if reconnectErr := d.refresh(ctx, true); reconnectErr != nil {
+		return nil, err
+	}
+
+	client = d.currentClient()
+	if client == nil {
+		return nil, err
+	}
+	return client.ListMessages(ctx, conversationID, in)
+}
+
 func (d *DynamicClient) clientForCall(ctx context.Context) (*Client, error) {
 	if ctx == nil {
 		ctx = context.Background()

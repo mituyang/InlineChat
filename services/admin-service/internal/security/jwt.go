@@ -7,9 +7,10 @@ import (
 )
 
 type Claims struct {
-	AgentID uint64 `json:"agent_id"`
-	Email   string `json:"email"`
-	Role    string `json:"role"`
+	AgentID      uint64 `json:"agent_id"`
+	Email        string `json:"email"`
+	Role         string `json:"role"`
+	TokenVersion uint64 `json:"token_version,omitempty"`
 	jwt.RegisteredClaims
 }
 

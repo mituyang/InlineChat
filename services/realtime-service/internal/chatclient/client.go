@@ -24,6 +24,11 @@ type CreateMessageRequest struct {
 	VisitorToken string
 }
 
+type ListMessagesInput struct {
+	Limit    int
+	BeforeID uint64
+}
+
 type Message struct {
 	ID             uint64 `json:"id"`
 	ConversationID uint64 `json:"conversation_id"`
@@ -128,4 +133,33 @@ func (c *Client) GetConversation(ctx context.Context, conversationID uint64) (*C
 		AssignedAgentID: resp.GetAssignedAgentId(),
 		Status:          resp.GetStatus(),
 	}, nil
+}
+
+func (c *Client) ListMessages(ctx context.Context, conversationID uint64, in ListMessagesInput) ([]*Message, error) {
+	resp, err := c.gateway.ListMessages(ctx, &chatv1.ListMessagesRequest{
+		ConversationId: conversationID,
+		Limit:          int32(in.Limit),
+		BeforeId:       in.BeforeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	items := resp.GetItems()
+	out := make([]*Message, 0, len(items))
+	for i := range items {
+		item := items[i]
+		out = append(out, &Message{
+			ID:             item.GetId(),
+			ConversationID: item.GetConversationId(),
+			SenderType:     item.GetSenderType(),
+			SenderID:       item.GetSenderId(),
+			Content:        item.GetContent(),
+			ClientMsgID:    item.GetClientMsgId(),
+			CreatedAt:      item.GetCreatedAt(),
+			UpdatedAt:      item.GetUpdatedAt(),
+			Status:         item.GetStatus(),
+		})
+	}
+	return out, nil
 }

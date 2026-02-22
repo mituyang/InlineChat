@@ -379,3 +379,30 @@ func TestUpdateSiteStatus(t *testing.T) {
 		t.Fatalf("expected saveCalls=1, got %d", siteRepo.saveCalls)
 	}
 }
+
+func TestValidateAgentSession(t *testing.T) {
+	agentRepo := &fakeAgentRepository{
+		items: []model.Agent{
+			{ID: 12, Email: "a@example.com", Role: "admin", Status: "active", TokenVersion: 2},
+		},
+	}
+	svc := newTestAdminService(&fakeSiteRepository{}, agentRepo)
+
+	if err := svc.ValidateAgentSession(context.Background(), 12, 2); err != nil {
+		t.Fatalf("ValidateAgentSession failed: %v", err)
+	}
+}
+
+func TestValidateAgentSessionRejectStaleTokenVersion(t *testing.T) {
+	agentRepo := &fakeAgentRepository{
+		items: []model.Agent{
+			{ID: 12, Email: "a@example.com", Role: "admin", Status: "active", TokenVersion: 3},
+		},
+	}
+	svc := newTestAdminService(&fakeSiteRepository{}, agentRepo)
+
+	err := svc.ValidateAgentSession(context.Background(), 12, 2)
+	if !errors.Is(err, ErrInvalidSession) {
+		t.Fatalf("expected ErrInvalidSession, got %v", err)
+	}
+}
