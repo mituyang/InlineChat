@@ -106,6 +106,7 @@
 - `make quality`: 执行完整质量门禁（`lint + test + test-race + test-cover`）
 - `make smoke`: 运行端到端冒烟（健康检查、登录、管理接口、会话与消息）
 - `make integration`: 运行系统集成检查（`smoke + etcd + mysql + websocket`）
+- `make full-regression`: 运行全功能回归（管理、认证、会话、已读、认领、转接确认/拒绝、关闭、自动关闭、审计）
 - `make mvp-release`: 执行 MVP 验收流水（`test + integration`）
 - `make fmt`: 统一 gofmt
 - `make proto`: 重新生成 gRPC 协议代码（chat/auth/admin/gateway/realtime）

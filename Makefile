@@ -15,7 +15,7 @@ COVERAGE_THRESHOLD_ALL ?= 12
 MIN_COVERED_PACKAGES ?= 10
 MIN_TOTAL_PACKAGES ?= 20
 
-.PHONY: help ensure-env config up up-fg down restart logs ps migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover quality proto build-local image-build smoke integration mvp-release
+.PHONY: help ensure-env config up up-fg down restart logs ps migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover quality proto build-local image-build smoke integration full-regression mvp-release
 
 help:
 	@echo "可用命令:"
@@ -34,6 +34,7 @@ help:
 	@echo "  make quality        执行完整质量门禁（lint + test + test-race + test-cover）"
 	@echo "  make smoke          运行端到端冒烟（登录/管理/会话/消息）"
 	@echo "  make integration    运行系统集成检查（smoke + etcd + mysql + websocket）"
+	@echo "  make full-regression 运行全功能回归（覆盖管理/认证/会话/转接/自动关闭/审计）"
 	@echo "  make mvp-release    执行 MVP 验收流水（test + integration）"
 	@echo "  make fmt            对后端 Go 代码执行 gofmt"
 	@echo "  make proto          基于 proto 定义生成 gRPC 代码"
@@ -161,6 +162,9 @@ smoke: ensure-env
 
 integration: ensure-env
 	ENV_FILE=$(ENV_FILE) ./scripts/integration-system.sh
+
+full-regression: ensure-env
+	ENV_FILE=$(ENV_FILE) ./scripts/full-regression.sh
 
 mvp-release: ensure-env test integration
 	@echo "MVP 验收通过（test + integration）"
