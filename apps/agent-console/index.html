@@ -60,12 +60,6 @@
             <button id="refreshConversationsBtn" type="button" class="ghost">刷新</button>
           </div>
 
-          <div class="queue-shortcuts" id="queueShortcuts">
-            <button type="button" class="queue-shortcut active" data-shortcut="all">全部视图</button>
-            <button type="button" class="queue-shortcut" data-shortcut="unassigned-open">待接入</button>
-            <button type="button" class="queue-shortcut" data-shortcut="mine-open">我接待中</button>
-          </div>
-
           <div class="queue-tabs" id="queueTabs">
             <button type="button" class="queue-tab active" data-mode="all" id="queueTabAll">全部</button>
             <button type="button" class="queue-tab" data-mode="open" id="queueTabOpen">进行中</button>
@@ -100,7 +94,7 @@
             </label>
           </form>
 
-          <section class="transfer-reminder-box" id="transferReminderBox">
+          <section class="transfer-reminder-box" id="transferReminderBox" hidden>
             <div class="transfer-reminder-head">
               <h3>待确认转接</h3>
               <span id="transferReminderCount" class="transfer-reminder-count" hidden></span>

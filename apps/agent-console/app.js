@@ -86,6 +86,7 @@ const els = {
   queueTabOpen: document.getElementById("queueTabOpen"),
   queueTabClosed: document.getElementById("queueTabClosed"),
   conversationSearchInput: document.getElementById("conversationSearchInput"),
+  transferReminderBox: document.getElementById("transferReminderBox"),
   transferReminderCount: document.getElementById("transferReminderCount"),
   transferReminderList: document.getElementById("transferReminderList"),
 
@@ -969,16 +970,21 @@ function syncTransferReminders(items) {
 
 function renderTransferReminders(items) {
   const list = Array.isArray(items) ? items : [];
+  const hasPending = list.length > 0;
+
+  if (els.transferReminderBox) {
+    els.transferReminderBox.hidden = !hasPending;
+  }
   if (els.transferReminderCount) {
-    els.transferReminderCount.hidden = list.length <= 0;
-    els.transferReminderCount.textContent = list.length > 0 ? String(list.length) : "";
+    els.transferReminderCount.hidden = !hasPending;
+    els.transferReminderCount.textContent = hasPending ? String(list.length) : "";
   }
   if (!els.transferReminderList) {
     return;
   }
 
-  if (list.length === 0) {
-    els.transferReminderList.innerHTML = '<div class="empty">暂无待确认转接</div>';
+  if (!hasPending) {
+    els.transferReminderList.innerHTML = "";
     return;
   }
 
