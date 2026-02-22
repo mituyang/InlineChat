@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -21,19 +22,27 @@ type AuditLogRepository interface {
 }
 
 type GormAuditLogRepository struct {
-	db *gorm.DB
+	db                  *gorm.DB
+	defaultQueryTimeout time.Duration
 }
 
-func NewAuditLogRepository(db *gorm.DB) *GormAuditLogRepository {
-	return &GormAuditLogRepository{db: db}
+func NewAuditLogRepository(db *gorm.DB, defaultQueryTimeout ...time.Duration) *GormAuditLogRepository {
+	return &GormAuditLogRepository{
+		db:                  db,
+		defaultQueryTimeout: resolveQueryTimeout(defaultQueryTimeout...),
+	}
 }
 
 func (r *GormAuditLogRepository) Create(ctx context.Context, auditLog *model.AuditLog) error {
-	return r.db.WithContext(ctx).Create(auditLog).Error
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	return db.Create(auditLog).Error
 }
 
 func (r *GormAuditLogRepository) List(ctx context.Context, filter AuditLogFilter, limit int, offset int) ([]model.AuditLog, error) {
-	query := r.db.WithContext(ctx).Model(&model.AuditLog{})
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	query := db.Model(&model.AuditLog{})
 	if filter.ActorAgentID > 0 {
 		query = query.Where("actor_agent_id = ?", filter.ActorAgentID)
 	}

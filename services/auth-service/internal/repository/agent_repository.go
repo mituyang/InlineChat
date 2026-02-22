@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -19,24 +20,32 @@ type AgentRepository interface {
 }
 
 type GormAgentRepository struct {
-	db *gorm.DB
+	db                  *gorm.DB
+	defaultQueryTimeout time.Duration
 }
 
-func NewAgentRepository(db *gorm.DB) *GormAgentRepository {
-	return &GormAgentRepository{db: db}
+func NewAgentRepository(db *gorm.DB, defaultQueryTimeout ...time.Duration) *GormAgentRepository {
+	timeout := resolveQueryTimeout(defaultQueryTimeout...)
+	return &GormAgentRepository{db: db, defaultQueryTimeout: timeout}
 }
 
 func (r *GormAgentRepository) Create(ctx context.Context, agent *model.Agent) error {
-	return r.db.WithContext(ctx).Create(agent).Error
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	return db.Create(agent).Error
 }
 
 func (r *GormAgentRepository) Save(ctx context.Context, agent *model.Agent) error {
-	return r.db.WithContext(ctx).Save(agent).Error
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	return db.Save(agent).Error
 }
 
 func (r *GormAgentRepository) GetByEmail(ctx context.Context, email string) (*model.Agent, error) {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
 	var agent model.Agent
-	if err := r.db.WithContext(ctx).Where("email = ?", email).First(&agent).Error; err != nil {
+	if err := db.Where("email = ?", email).First(&agent).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}
@@ -46,12 +55,34 @@ func (r *GormAgentRepository) GetByEmail(ctx context.Context, email string) (*mo
 }
 
 func (r *GormAgentRepository) GetByID(ctx context.Context, id uint64) (*model.Agent, error) {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
 	var agent model.Agent
-	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&agent).Error; err != nil {
+	if err := db.Where("id = ?", id).First(&agent).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}
 		return nil, err
 	}
 	return &agent, nil
+}
+
+func resolveQueryTimeout(overrides ...time.Duration) time.Duration {
+	if len(overrides) > 0 && overrides[0] > 0 {
+		return overrides[0]
+	}
+	return 1500 * time.Millisecond
+}
+
+func dbWithContext(db *gorm.DB, ctx context.Context, defaultQueryTimeout time.Duration) (*gorm.DB, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if defaultQueryTimeout > 0 {
+		if _, ok := ctx.Deadline(); !ok {
+			timeoutCtx, cancel := context.WithTimeout(ctx, defaultQueryTimeout)
+			return db.WithContext(timeoutCtx), cancel
+		}
+	}
+	return db.WithContext(ctx), func() {}
 }

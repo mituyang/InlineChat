@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -17,24 +18,34 @@ type AgentRepository interface {
 }
 
 type GormAgentRepository struct {
-	db *gorm.DB
+	db                  *gorm.DB
+	defaultQueryTimeout time.Duration
 }
 
-func NewAgentRepository(db *gorm.DB) *GormAgentRepository {
-	return &GormAgentRepository{db: db}
+func NewAgentRepository(db *gorm.DB, defaultQueryTimeout ...time.Duration) *GormAgentRepository {
+	return &GormAgentRepository{
+		db:                  db,
+		defaultQueryTimeout: resolveQueryTimeout(defaultQueryTimeout...),
+	}
 }
 
 func (r *GormAgentRepository) Create(ctx context.Context, agent *model.Agent) error {
-	return r.db.WithContext(ctx).Create(agent).Error
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	return db.Create(agent).Error
 }
 
 func (r *GormAgentRepository) Save(ctx context.Context, agent *model.Agent) error {
-	return r.db.WithContext(ctx).Save(agent).Error
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	return db.Save(agent).Error
 }
 
 func (r *GormAgentRepository) List(ctx context.Context, limit int, offset int) ([]model.Agent, error) {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
 	var out []model.Agent
-	err := r.db.WithContext(ctx).
+	err := db.
 		Select("id", "email", "display_name", "role", "status", "created_at", "updated_at").
 		Order("id DESC").
 		Limit(limit).
@@ -44,8 +55,10 @@ func (r *GormAgentRepository) List(ctx context.Context, limit int, offset int) (
 }
 
 func (r *GormAgentRepository) GetByID(ctx context.Context, id uint64) (*model.Agent, error) {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
 	var out model.Agent
-	if err := r.db.WithContext(ctx).
+	if err := db.
 		Where("id = ?", id).
 		First(&out).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

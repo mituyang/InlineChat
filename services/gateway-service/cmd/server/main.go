@@ -105,6 +105,8 @@ func main() {
 	limitTTL := time.Duration(cfg.RateLimitKeyTTLMins) * time.Minute
 	loginLimiter := ratelimit.New(cfg.LoginRateLimitPerMin, cfg.LoginRateLimitBurst, limitTTL, 100000)
 	visitorLimiter := ratelimit.New(cfg.VisitorRateLimitPerMin, cfg.VisitorRateLimitBurst, limitTTL, 200000)
+	agentLimiter := ratelimit.New(cfg.AgentRateLimitPerMin, cfg.AgentRateLimitBurst, limitTTL, 120000)
+	adminLimiter := ratelimit.New(cfg.AdminRateLimitPerMin, cfg.AdminRateLimitBurst, limitTTL, 80000)
 
 	var rateLimitRedis *redis.Client
 	if redisAddr := strings.TrimSpace(cfg.RateLimitRedisAddr); redisAddr != "" {
@@ -131,6 +133,8 @@ func main() {
 			circuitOpenWindow := time.Duration(cfg.RateLimitRedisCircuitOpenSec) * time.Second
 			loginLimiter.EnableDistributedCounterWithCircuit(counter, cfg.RateLimitRedisPrefix+":login", time.Minute, timeout, cfg.RateLimitRedisFailThreshold, circuitOpenWindow)
 			visitorLimiter.EnableDistributedCounterWithCircuit(counter, cfg.RateLimitRedisPrefix+":visitor", time.Minute, timeout, cfg.RateLimitRedisFailThreshold, circuitOpenWindow)
+			agentLimiter.EnableDistributedCounterWithCircuit(counter, cfg.RateLimitRedisPrefix+":agent", time.Minute, timeout, cfg.RateLimitRedisFailThreshold, circuitOpenWindow)
+			adminLimiter.EnableDistributedCounterWithCircuit(counter, cfg.RateLimitRedisPrefix+":admin", time.Minute, timeout, cfg.RateLimitRedisFailThreshold, circuitOpenWindow)
 			appLogger.Info("rate limit distributed mode enabled",
 				zap.String("redis_addr", redisAddr),
 				zap.String("prefix", cfg.RateLimitRedisPrefix),
@@ -149,6 +153,7 @@ func main() {
 
 	httpHandler := handler.NewHTTPHandler(clients, callTimeout)
 	httpHandler.SetRateLimiters(loginLimiter, visitorLimiter)
+	httpHandler.SetStaffRateLimiters(agentLimiter, adminLimiter)
 	metrics := httpmiddleware.NewHTTPMetrics("gateway-service", nil)
 
 	r := gin.New()

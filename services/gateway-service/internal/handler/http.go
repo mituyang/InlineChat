@@ -16,6 +16,8 @@ type HTTPHandler struct {
 	callTimeout    time.Duration
 	loginLimiter   *ratelimit.Limiter
 	visitorLimiter *ratelimit.Limiter
+	agentLimiter   *ratelimit.Limiter
+	adminLimiter   *ratelimit.Limiter
 }
 
 func NewHTTPHandler(clients *grpcclient.Clients, callTimeout time.Duration) *HTTPHandler {
@@ -31,6 +33,11 @@ func NewHTTPHandler(clients *grpcclient.Clients, callTimeout time.Duration) *HTT
 func (h *HTTPHandler) SetRateLimiters(loginLimiter *ratelimit.Limiter, visitorLimiter *ratelimit.Limiter) {
 	h.loginLimiter = loginLimiter
 	h.visitorLimiter = visitorLimiter
+}
+
+func (h *HTTPHandler) SetStaffRateLimiters(agentLimiter *ratelimit.Limiter, adminLimiter *ratelimit.Limiter) {
+	h.agentLimiter = agentLimiter
+	h.adminLimiter = adminLimiter
 }
 
 func (h *HTTPHandler) RegisterRoutes(r *gin.Engine) {

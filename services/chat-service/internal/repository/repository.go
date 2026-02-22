@@ -60,29 +60,55 @@ func txFromContext(ctx context.Context) *gorm.DB {
 	return tx
 }
 
-func dbWithContext(db *gorm.DB, ctx context.Context) *gorm.DB {
-	if tx := txFromContext(ctx); tx != nil {
-		return tx.WithContext(ctx)
+func resolveQueryTimeout(overrides ...time.Duration) time.Duration {
+	if len(overrides) > 0 && overrides[0] > 0 {
+		return overrides[0]
 	}
-	return db.WithContext(ctx)
+	return 1500 * time.Millisecond
+}
+
+func dbWithContext(db *gorm.DB, ctx context.Context, defaultQueryTimeout time.Duration) (*gorm.DB, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if defaultQueryTimeout > 0 {
+		if _, ok := ctx.Deadline(); !ok {
+			timeoutCtx, cancel := context.WithTimeout(ctx, defaultQueryTimeout)
+			if tx := txFromContext(timeoutCtx); tx != nil {
+				return tx.WithContext(timeoutCtx), cancel
+			}
+			return db.WithContext(timeoutCtx), cancel
+		}
+	}
+	if tx := txFromContext(ctx); tx != nil {
+		return tx.WithContext(ctx), func() {}
+	}
+	return db.WithContext(ctx), func() {}
 }
 
 type GormTransactionManager struct {
-	db *gorm.DB
+	db                  *gorm.DB
+	defaultQueryTimeout time.Duration
 }
 
-func NewTransactionManager(db *gorm.DB) *GormTransactionManager {
-	return &GormTransactionManager{db: db}
+func NewTransactionManager(db *gorm.DB, defaultQueryTimeout ...time.Duration) *GormTransactionManager {
+	return &GormTransactionManager{
+		db:                  db,
+		defaultQueryTimeout: resolveQueryTimeout(defaultQueryTimeout...),
+	}
 }
 
 func (m *GormTransactionManager) WithTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
-	return m.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	db, cancel := dbWithContext(m.db, ctx, m.defaultQueryTimeout)
+	defer cancel()
+	return db.Transaction(func(tx *gorm.DB) error {
 		return fn(withTx(ctx, tx))
 	})
 }
 
 type GormConversationRepository struct {
-	db *gorm.DB
+	db                  *gorm.DB
+	defaultQueryTimeout time.Duration
 }
 
 type ListConversationsFilter struct {
@@ -96,17 +122,24 @@ type ListConversationsFilter struct {
 
 type ConversationMutation func(conversation *model.Conversation) (bool, error)
 
-func NewConversationRepository(db *gorm.DB) *GormConversationRepository {
-	return &GormConversationRepository{db: db}
+func NewConversationRepository(db *gorm.DB, defaultQueryTimeout ...time.Duration) *GormConversationRepository {
+	return &GormConversationRepository{
+		db:                  db,
+		defaultQueryTimeout: resolveQueryTimeout(defaultQueryTimeout...),
+	}
 }
 
 func (r *GormConversationRepository) Create(ctx context.Context, conversation *model.Conversation) error {
-	return dbWithContext(r.db, ctx).Create(conversation).Error
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	return db.Create(conversation).Error
 }
 
 func (r *GormConversationRepository) GetByID(ctx context.Context, id uint64) (*model.Conversation, error) {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
 	var conversation model.Conversation
-	if err := dbWithContext(r.db, ctx).First(&conversation, id).Error; err != nil {
+	if err := db.First(&conversation, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}
@@ -116,8 +149,10 @@ func (r *GormConversationRepository) GetByID(ctx context.Context, id uint64) (*m
 }
 
 func (r *GormConversationRepository) GetLatestOpenBySiteVisitor(ctx context.Context, siteID string, visitorToken string) (*model.Conversation, error) {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
 	var conversation model.Conversation
-	if err := dbWithContext(r.db, ctx).
+	if err := db.
 		Where("site_id = ? AND visitor_token = ? AND status = ?", siteID, visitorToken, "open").
 		Order("id DESC").
 		First(&conversation).Error; err != nil {
@@ -130,7 +165,9 @@ func (r *GormConversationRepository) GetLatestOpenBySiteVisitor(ctx context.Cont
 }
 
 func (r *GormConversationRepository) List(ctx context.Context, filter ListConversationsFilter) ([]model.Conversation, error) {
-	query := dbWithContext(r.db, ctx).Model(&model.Conversation{})
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	query := db.Model(&model.Conversation{})
 
 	if filter.Status != "" {
 		query = query.Where("status = ?", filter.Status)
@@ -163,7 +200,9 @@ func (r *GormConversationRepository) Mutate(ctx context.Context, id uint64, muta
 		return r.mutateInDB(outerTx.WithContext(ctx), id, mutation)
 	}
 
-	tx := r.db.WithContext(ctx).Begin()
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	tx := db.Begin()
 	if tx.Error != nil {
 		return nil, tx.Error
 	}
@@ -212,20 +251,28 @@ func (r *GormConversationRepository) mutateInDB(db *gorm.DB, id uint64, mutation
 }
 
 type GormMessageRepository struct {
-	db *gorm.DB
+	db                  *gorm.DB
+	defaultQueryTimeout time.Duration
 }
 
-func NewMessageRepository(db *gorm.DB) *GormMessageRepository {
-	return &GormMessageRepository{db: db}
+func NewMessageRepository(db *gorm.DB, defaultQueryTimeout ...time.Duration) *GormMessageRepository {
+	return &GormMessageRepository{
+		db:                  db,
+		defaultQueryTimeout: resolveQueryTimeout(defaultQueryTimeout...),
+	}
 }
 
 func (r *GormMessageRepository) Create(ctx context.Context, message *model.Message) error {
-	return dbWithContext(r.db, ctx).Create(message).Error
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	return db.Create(message).Error
 }
 
 func (r *GormMessageRepository) GetByID(ctx context.Context, conversationID uint64, messageID uint64) (*model.Message, error) {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
 	var message model.Message
-	if err := dbWithContext(r.db, ctx).
+	if err := db.
 		Where("conversation_id = ? AND id = ?", conversationID, messageID).
 		First(&message).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -237,8 +284,10 @@ func (r *GormMessageRepository) GetByID(ctx context.Context, conversationID uint
 }
 
 func (r *GormMessageRepository) GetByClientMsgID(ctx context.Context, conversationID uint64, clientMsgID string) (*model.Message, error) {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
 	var message model.Message
-	if err := dbWithContext(r.db, ctx).
+	if err := db.
 		Where("conversation_id = ? AND client_msg_id = ?", conversationID, clientMsgID).
 		First(&message).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -250,8 +299,10 @@ func (r *GormMessageRepository) GetByClientMsgID(ctx context.Context, conversati
 }
 
 func (r *GormMessageRepository) GetLatestByConversation(ctx context.Context, conversationID uint64) (*model.Message, error) {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
 	var message model.Message
-	if err := dbWithContext(r.db, ctx).
+	if err := db.
 		Where("conversation_id = ?", conversationID).
 		Order("id DESC").
 		First(&message).Error; err != nil {
@@ -264,8 +315,10 @@ func (r *GormMessageRepository) GetLatestByConversation(ctx context.Context, con
 }
 
 func (r *GormMessageRepository) GetLatestByConversationExcludingSystem(ctx context.Context, conversationID uint64) (*model.Message, error) {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
 	var message model.Message
-	if err := dbWithContext(r.db, ctx).
+	if err := db.
 		Where("conversation_id = ? AND sender_type <> ?", conversationID, "system").
 		Order("id DESC").
 		First(&message).Error; err != nil {
@@ -278,7 +331,9 @@ func (r *GormMessageRepository) GetLatestByConversationExcludingSystem(ctx conte
 }
 
 func (r *GormMessageRepository) ListByConversation(ctx context.Context, conversationID uint64, limit int, beforeID uint64) ([]model.Message, error) {
-	query := dbWithContext(r.db, ctx).
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	query := db.
 		Where("conversation_id = ?", conversationID).
 		Order("id DESC").
 		Limit(limit)
@@ -295,7 +350,9 @@ func (r *GormMessageRepository) ListByConversation(ctx context.Context, conversa
 }
 
 func (r *GormMessageRepository) MarkDelivered(ctx context.Context, conversationID uint64, messageID uint64) (bool, error) {
-	tx := dbWithContext(r.db, ctx).
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	tx := db.
 		Model(&model.Message{}).
 		Where("conversation_id = ? AND id = ? AND status = ?", conversationID, messageID, "sent").
 		Update("status", "delivered")
@@ -306,7 +363,9 @@ func (r *GormMessageRepository) MarkDelivered(ctx context.Context, conversationI
 }
 
 func (r *GormMessageRepository) MarkReadByConversationAndSender(ctx context.Context, conversationID uint64, senderType string, lastReadMessageID uint64) (int64, error) {
-	tx := dbWithContext(r.db, ctx).
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	tx := db.
 		Model(&model.Message{}).
 		Where("conversation_id = ? AND sender_type = ? AND id <= ?", conversationID, senderType, lastReadMessageID).
 		Where("status IN ?", []string{"sent", "delivered"}).
@@ -318,15 +377,21 @@ func (r *GormMessageRepository) MarkReadByConversationAndSender(ctx context.Cont
 }
 
 type GormEventOutboxRepository struct {
-	db *gorm.DB
+	db                  *gorm.DB
+	defaultQueryTimeout time.Duration
 }
 
-func NewEventOutboxRepository(db *gorm.DB) *GormEventOutboxRepository {
-	return &GormEventOutboxRepository{db: db}
+func NewEventOutboxRepository(db *gorm.DB, defaultQueryTimeout ...time.Duration) *GormEventOutboxRepository {
+	return &GormEventOutboxRepository{
+		db:                  db,
+		defaultQueryTimeout: resolveQueryTimeout(defaultQueryTimeout...),
+	}
 }
 
 func (r *GormEventOutboxRepository) Create(ctx context.Context, event *model.EventOutbox) error {
-	return dbWithContext(r.db, ctx).Create(event).Error
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	return db.Create(event).Error
 }
 
 func (r *GormEventOutboxRepository) FetchPendingForUpdate(ctx context.Context, limit int, retryableBefore time.Time) ([]model.EventOutbox, error) {
@@ -335,7 +400,9 @@ func (r *GormEventOutboxRepository) FetchPendingForUpdate(ctx context.Context, l
 	}
 
 	items := make([]model.EventOutbox, 0, limit)
-	err := dbWithContext(r.db, ctx).Transaction(func(tx *gorm.DB) error {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	err := db.Transaction(func(tx *gorm.DB) error {
 		if err := tx.
 			Model(&model.EventOutbox{}).
 			Where("status = ?", model.OutboxStatusPending).
@@ -381,7 +448,9 @@ func (r *GormEventOutboxRepository) FetchPendingForUpdate(ctx context.Context, l
 }
 
 func (r *GormEventOutboxRepository) MarkPublished(ctx context.Context, id uint64, publishedAt time.Time) error {
-	return dbWithContext(r.db, ctx).
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	return db.
 		Model(&model.EventOutbox{}).
 		Where("id = ?", id).
 		Updates(map[string]any{
@@ -396,7 +465,9 @@ func (r *GormEventOutboxRepository) MarkPublished(ctx context.Context, id uint64
 
 func (r *GormEventOutboxRepository) MarkForRetry(ctx context.Context, id uint64, nextRetryAt time.Time, lastError string) error {
 	now := time.Now()
-	return dbWithContext(r.db, ctx).
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	return db.
 		Model(&model.EventOutbox{}).
 		Where("id = ?", id).
 		Updates(map[string]any{
@@ -410,7 +481,9 @@ func (r *GormEventOutboxRepository) MarkForRetry(ctx context.Context, id uint64,
 
 func (r *GormEventOutboxRepository) MarkDead(ctx context.Context, id uint64, lastError string) error {
 	now := time.Now()
-	return dbWithContext(r.db, ctx).
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	return db.
 		Model(&model.EventOutbox{}).
 		Where("id = ?", id).
 		Updates(map[string]any{
@@ -427,7 +500,9 @@ func (r *GormEventOutboxRepository) ReplayDead(ctx context.Context, limit int) (
 		limit = 100
 	}
 	now := time.Now()
-	tx := dbWithContext(r.db, ctx).
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	tx := db.
 		Model(&model.EventOutbox{}).
 		Where("status = ?", model.OutboxStatusDead).
 		Order("id ASC").
@@ -447,7 +522,9 @@ func (r *GormEventOutboxRepository) ReplayDead(ctx context.Context, limit int) (
 
 func (r *GormEventOutboxRepository) RequeueStaleProcessing(ctx context.Context, staleBefore time.Time) (int64, error) {
 	now := time.Now()
-	tx := dbWithContext(r.db, ctx).
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	tx := db.
 		Model(&model.EventOutbox{}).
 		Where("status = ? AND processing_at IS NOT NULL AND processing_at <= ?", model.OutboxStatusProcessing, staleBefore).
 		Updates(map[string]any{

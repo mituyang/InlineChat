@@ -12,6 +12,11 @@ type Config struct {
 	GRPCPort                     string
 	LogLevel                     string
 	MySQLDSN                     string
+	MySQLMaxOpenConns            int
+	MySQLMaxIdleConns            int
+	MySQLConnMaxLifetimeSec      int
+	MySQLConnMaxIdleTimeSec      int
+	MySQLQueryTimeoutMS          int
 	JWTSecret                    string
 	JWTPreviousSecret            string
 	JWTIssuer                    string
@@ -31,6 +36,11 @@ func Load() (Config, error) {
 		GRPCPort:                     getEnv("GRPC_PORT", "8214"),
 		LogLevel:                     getEnv("LOG_LEVEL", "info"),
 		MySQLDSN:                     os.Getenv("MYSQL_DSN"),
+		MySQLMaxOpenConns:            getIntEnv("MYSQL_MAX_OPEN_CONNS", 80),
+		MySQLMaxIdleConns:            getIntEnv("MYSQL_MAX_IDLE_CONNS", 20),
+		MySQLConnMaxLifetimeSec:      getIntEnv("MYSQL_CONN_MAX_LIFETIME_SEC", 900),
+		MySQLConnMaxIdleTimeSec:      getIntEnv("MYSQL_CONN_MAX_IDLE_TIME_SEC", 300),
+		MySQLQueryTimeoutMS:          getIntEnv("MYSQL_QUERY_TIMEOUT_MS", 1500),
 		JWTSecret:                    os.Getenv("JWT_SECRET"),
 		JWTPreviousSecret:            strings.TrimSpace(os.Getenv("JWT_PREVIOUS_SECRET")),
 		JWTIssuer:                    getEnv("JWT_ISSUER", "inlinechat-auth"),
@@ -46,6 +56,24 @@ func Load() (Config, error) {
 
 	if cfg.MySQLDSN == "" {
 		return Config{}, fmt.Errorf("MYSQL_DSN is required")
+	}
+	if cfg.MySQLMaxOpenConns <= 0 {
+		return Config{}, fmt.Errorf("MYSQL_MAX_OPEN_CONNS must be greater than 0")
+	}
+	if cfg.MySQLMaxIdleConns <= 0 {
+		return Config{}, fmt.Errorf("MYSQL_MAX_IDLE_CONNS must be greater than 0")
+	}
+	if cfg.MySQLMaxIdleConns > cfg.MySQLMaxOpenConns {
+		return Config{}, fmt.Errorf("MYSQL_MAX_IDLE_CONNS must be less than or equal to MYSQL_MAX_OPEN_CONNS")
+	}
+	if cfg.MySQLConnMaxLifetimeSec <= 0 {
+		return Config{}, fmt.Errorf("MYSQL_CONN_MAX_LIFETIME_SEC must be greater than 0")
+	}
+	if cfg.MySQLConnMaxIdleTimeSec <= 0 {
+		return Config{}, fmt.Errorf("MYSQL_CONN_MAX_IDLE_TIME_SEC must be greater than 0")
+	}
+	if cfg.MySQLQueryTimeoutMS <= 0 {
+		return Config{}, fmt.Errorf("MYSQL_QUERY_TIMEOUT_MS must be greater than 0")
 	}
 	if cfg.JWTSecret == "" {
 		return Config{}, fmt.Errorf("JWT_SECRET is required")

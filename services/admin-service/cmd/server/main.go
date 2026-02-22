@@ -77,10 +77,15 @@ func main() {
 	if err != nil {
 		appLogger.Fatal("failed to get mysql sql.DB", zap.Error(err))
 	}
+	sqlDB.SetMaxOpenConns(cfg.MySQLMaxOpenConns)
+	sqlDB.SetMaxIdleConns(cfg.MySQLMaxIdleConns)
+	sqlDB.SetConnMaxLifetime(time.Duration(cfg.MySQLConnMaxLifetimeSec) * time.Second)
+	sqlDB.SetConnMaxIdleTime(time.Duration(cfg.MySQLConnMaxIdleTimeSec) * time.Second)
+	queryTimeout := time.Duration(cfg.MySQLQueryTimeoutMS) * time.Millisecond
 
-	siteRepo := repository.NewSiteRepository(db)
-	agentRepo := repository.NewAgentRepository(db)
-	auditRepo := repository.NewAuditLogRepository(db)
+	siteRepo := repository.NewSiteRepository(db, queryTimeout)
+	agentRepo := repository.NewAgentRepository(db, queryTimeout)
+	auditRepo := repository.NewAuditLogRepository(db, queryTimeout)
 	adminSvc := service.New(siteRepo, agentRepo, auditRepo, cfg.BCryptCost)
 	h := handler.NewHTTPHandler(adminSvc)
 	authz := middleware.NewAuthz(cfg.JWTSecret, cfg.JWTPreviousSecret, cfg.JWTIssuer, agentRepo)

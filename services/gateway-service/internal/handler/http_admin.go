@@ -36,6 +36,14 @@ func (h *HTTPHandler) createSite(c *gin.Context) {
 		abortBadRequest(c, err.Error())
 		return
 	}
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if !h.applyAdminRateLimit(c, "create_site", actor.GetAgentId()) {
+		return
+	}
 
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
@@ -73,6 +81,14 @@ func (h *HTTPHandler) listSites(c *gin.Context) {
 		}
 		offset = v
 	}
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if !h.applyAdminRateLimit(c, "list_sites", actor.GetAgentId()) {
+		return
+	}
 
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
@@ -100,6 +116,14 @@ func (h *HTTPHandler) updateSiteStatus(c *gin.Context) {
 		abortBadRequest(c, err.Error())
 		return
 	}
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if !h.applyAdminRateLimit(c, "update_site_status", actor.GetAgentId()) {
+		return
+	}
 
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
@@ -118,6 +142,15 @@ func (h *HTTPHandler) updateSiteStatus(c *gin.Context) {
 }
 
 func (h *HTTPHandler) rotateSiteWidgetKey(c *gin.Context) {
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if !h.applyAdminRateLimit(c, "rotate_site_widget_key", actor.GetAgentId()) {
+		return
+	}
+
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
 
@@ -159,6 +192,14 @@ func (h *HTTPHandler) createAgent(c *gin.Context) {
 		abortBadRequest(c, err.Error())
 		return
 	}
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if !h.applyAdminRateLimit(c, "create_agent", actor.GetAgentId()) {
+		return
+	}
 
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
@@ -198,6 +239,14 @@ func (h *HTTPHandler) listAgents(c *gin.Context) {
 		}
 		offset = v
 	}
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if !h.applyAdminRateLimit(c, "list_agents", actor.GetAgentId()) {
+		return
+	}
 
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
@@ -231,6 +280,14 @@ func (h *HTTPHandler) updateAgentStatus(c *gin.Context) {
 		abortBadRequest(c, err.Error())
 		return
 	}
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if !h.applyAdminRateLimit(c, "update_agent_status", actor.GetAgentId()) {
+		return
+	}
 
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
@@ -260,6 +317,14 @@ func (h *HTTPHandler) resetAgentPassword(c *gin.Context) {
 		abortBadRequest(c, err.Error())
 		return
 	}
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if !h.applyAdminRateLimit(c, "reset_agent_password", actor.GetAgentId()) {
+		return
+	}
 
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
@@ -281,6 +346,14 @@ func (h *HTTPHandler) forceAgentLogout(c *gin.Context) {
 	agentID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || agentID == 0 {
 		abortBadRequest(c, "invalid agent_id")
+		return
+	}
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if !h.applyAdminRateLimit(c, "force_agent_logout", actor.GetAgentId()) {
 		return
 	}
 
@@ -327,6 +400,14 @@ func (h *HTTPHandler) listAuditLogs(c *gin.Context) {
 			return
 		}
 		actorAgentID = parsed
+	}
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if !h.applyAdminRateLimit(c, "list_audit_logs", actor.GetAgentId()) {
+		return
 	}
 
 	ctx, cancel := h.newCallContext(c)

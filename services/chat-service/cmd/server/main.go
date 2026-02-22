@@ -79,6 +79,11 @@ func main() {
 	if err != nil {
 		appLogger.Fatal("failed to get mysql sql.DB", zap.Error(err))
 	}
+	sqlDB.SetMaxOpenConns(cfg.MySQLMaxOpenConns)
+	sqlDB.SetMaxIdleConns(cfg.MySQLMaxIdleConns)
+	sqlDB.SetConnMaxLifetime(time.Duration(cfg.MySQLConnMaxLifetimeSec) * time.Second)
+	sqlDB.SetConnMaxIdleTime(time.Duration(cfg.MySQLConnMaxIdleTimeSec) * time.Second)
+	queryTimeout := time.Duration(cfg.MySQLQueryTimeoutMS) * time.Millisecond
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:     cfg.RedisAddr,
 		Password: cfg.RedisPassword,
@@ -93,10 +98,10 @@ func main() {
 		}
 	}()
 
-	conversationRepo := repository.NewConversationRepository(db)
-	messageRepo := repository.NewMessageRepository(db)
-	txManager := repository.NewTransactionManager(db)
-	outboxRepo := repository.NewEventOutboxRepository(db)
+	conversationRepo := repository.NewConversationRepository(db, queryTimeout)
+	messageRepo := repository.NewMessageRepository(db, queryTimeout)
+	txManager := repository.NewTransactionManager(db, queryTimeout)
+	outboxRepo := repository.NewEventOutboxRepository(db, queryTimeout)
 	messagePublisher := pubsub.NewRedisMessagePublisher(redisClient, 2*time.Second)
 	outboxWakeupBus := pubsub.NewRedisOutboxWakeupBus(redisClient, 2*time.Second)
 	autoCloseAfter := time.Duration(cfg.AutoCloseAfterSec) * time.Second

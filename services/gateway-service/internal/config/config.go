@@ -15,6 +15,10 @@ type Config struct {
 	LoginRateLimitBurst          int
 	VisitorRateLimitPerMin       int
 	VisitorRateLimitBurst        int
+	AgentRateLimitPerMin         int
+	AgentRateLimitBurst          int
+	AdminRateLimitPerMin         int
+	AdminRateLimitBurst          int
 	RateLimitKeyTTLMins          int
 	RateLimitRedisAddr           string
 	RateLimitRedisPassword       string
@@ -43,6 +47,10 @@ func Load() (Config, error) {
 		LoginRateLimitBurst:          getIntEnv("LOGIN_RATE_LIMIT_BURST", 20),
 		VisitorRateLimitPerMin:       getIntEnv("VISITOR_RATE_LIMIT_PER_MIN", 180),
 		VisitorRateLimitBurst:        getIntEnv("VISITOR_RATE_LIMIT_BURST", 60),
+		AgentRateLimitPerMin:         getIntEnv("AGENT_RATE_LIMIT_PER_MIN", 240),
+		AgentRateLimitBurst:          getIntEnv("AGENT_RATE_LIMIT_BURST", 80),
+		AdminRateLimitPerMin:         getIntEnv("ADMIN_RATE_LIMIT_PER_MIN", 120),
+		AdminRateLimitBurst:          getIntEnv("ADMIN_RATE_LIMIT_BURST", 40),
 		RateLimitKeyTTLMins:          getIntEnv("RATE_LIMIT_KEY_TTL_MINS", 30),
 		RateLimitRedisAddr:           strings.TrimSpace(getEnv("RATE_LIMIT_REDIS_ADDR", os.Getenv("REDIS_ADDR"))),
 		RateLimitRedisPassword:       getEnv("RATE_LIMIT_REDIS_PASSWORD", os.Getenv("REDIS_PASSWORD")),
@@ -76,6 +84,18 @@ func Load() (Config, error) {
 	}
 	if cfg.VisitorRateLimitBurst <= 0 {
 		return Config{}, fmt.Errorf("VISITOR_RATE_LIMIT_BURST must be greater than 0")
+	}
+	if cfg.AgentRateLimitPerMin <= 0 {
+		return Config{}, fmt.Errorf("AGENT_RATE_LIMIT_PER_MIN must be greater than 0")
+	}
+	if cfg.AgentRateLimitBurst <= 0 {
+		return Config{}, fmt.Errorf("AGENT_RATE_LIMIT_BURST must be greater than 0")
+	}
+	if cfg.AdminRateLimitPerMin <= 0 {
+		return Config{}, fmt.Errorf("ADMIN_RATE_LIMIT_PER_MIN must be greater than 0")
+	}
+	if cfg.AdminRateLimitBurst <= 0 {
+		return Config{}, fmt.Errorf("ADMIN_RATE_LIMIT_BURST must be greater than 0")
 	}
 	if cfg.RateLimitKeyTTLMins <= 0 {
 		return Config{}, fmt.Errorf("RATE_LIMIT_KEY_TTL_MINS must be greater than 0")

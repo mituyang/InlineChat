@@ -96,6 +96,9 @@ func (h *HTTPHandler) getConversation(c *gin.Context) {
 			handleGRPCError(c, actorErr)
 			return
 		}
+		if !h.applyAgentRateLimit(c, "get_conversation", actor.GetAgentId()) {
+			return
+		}
 		conversation, err = h.requireConversationForAgent(c, conversationID, actor.GetAgentId())
 		if err != nil {
 			return
@@ -122,6 +125,9 @@ func (h *HTTPHandler) listConversations(c *gin.Context) {
 	actor, err := h.requireAgentActor(c)
 	if err != nil {
 		handleGRPCError(c, err)
+		return
+	}
+	if !h.applyAgentRateLimit(c, "list_conversations", actor.GetAgentId()) {
 		return
 	}
 
@@ -246,6 +252,9 @@ func (h *HTTPHandler) createMessage(c *gin.Context) {
 			handleGRPCError(c, actorErr)
 			return
 		}
+		if !h.applyAgentRateLimit(c, "create_message", actor.GetAgentId()) {
+			return
+		}
 		req.SenderID = strconv.FormatUint(actor.GetAgentId(), 10)
 		conversation, convErr := h.requireConversationForAgent(c, conversationID, actor.GetAgentId())
 		if convErr != nil {
@@ -323,6 +332,9 @@ func (h *HTTPHandler) listMessages(c *gin.Context) {
 			handleGRPCError(c, actorErr)
 			return
 		}
+		if !h.applyAgentRateLimit(c, "list_messages", actor.GetAgentId()) {
+			return
+		}
 		if _, convErr := h.requireConversationForAgent(c, conversationID, actor.GetAgentId()); convErr != nil {
 			return
 		}
@@ -391,6 +403,9 @@ func (h *HTTPHandler) markMessagesRead(c *gin.Context) {
 			handleGRPCError(c, actorErr)
 			return
 		}
+		if !h.applyAgentRateLimit(c, "mark_read", actor.GetAgentId()) {
+			return
+		}
 		actorType = "agent"
 		actorAgentID = actor.GetAgentId()
 		conversation, convErr := h.requireConversationForAgent(c, conversationID, actor.GetAgentId())
@@ -430,6 +445,9 @@ func (h *HTTPHandler) claimConversation(c *gin.Context) {
 	actor, err := h.requireAgentActor(c)
 	if err != nil {
 		handleGRPCError(c, err)
+		return
+	}
+	if !h.applyAgentRateLimit(c, "claim_conversation", actor.GetAgentId()) {
 		return
 	}
 
@@ -494,6 +512,9 @@ func (h *HTTPHandler) transferConversation(c *gin.Context) {
 		handleGRPCError(c, err)
 		return
 	}
+	if !h.applyAgentRateLimit(c, "transfer_conversation", actor.GetAgentId()) {
+		return
+	}
 
 	conversationID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || conversationID == 0 {
@@ -530,6 +551,9 @@ func (h *HTTPHandler) confirmTransferConversation(c *gin.Context) {
 		handleGRPCError(c, err)
 		return
 	}
+	if !h.applyAgentRateLimit(c, "confirm_transfer_conversation", actor.GetAgentId()) {
+		return
+	}
 
 	conversationID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || conversationID == 0 {
@@ -561,6 +585,9 @@ func (h *HTTPHandler) rejectTransferConversation(c *gin.Context) {
 		handleGRPCError(c, err)
 		return
 	}
+	if !h.applyAgentRateLimit(c, "reject_transfer_conversation", actor.GetAgentId()) {
+		return
+	}
 
 	conversationID, err := strconv.ParseUint(c.Param("id"), 10, 64)
 	if err != nil || conversationID == 0 {
@@ -588,6 +615,9 @@ func (h *HTTPHandler) closeConversation(c *gin.Context) {
 	actor, err := h.requireAgentActor(c)
 	if err != nil {
 		handleGRPCError(c, err)
+		return
+	}
+	if !h.applyAgentRateLimit(c, "close_conversation", actor.GetAgentId()) {
 		return
 	}
 

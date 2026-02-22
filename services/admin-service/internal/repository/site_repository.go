@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -20,24 +21,34 @@ type SiteRepository interface {
 }
 
 type GormSiteRepository struct {
-	db *gorm.DB
+	db                  *gorm.DB
+	defaultQueryTimeout time.Duration
 }
 
-func NewSiteRepository(db *gorm.DB) *GormSiteRepository {
-	return &GormSiteRepository{db: db}
+func NewSiteRepository(db *gorm.DB, defaultQueryTimeout ...time.Duration) *GormSiteRepository {
+	return &GormSiteRepository{
+		db:                  db,
+		defaultQueryTimeout: resolveQueryTimeout(defaultQueryTimeout...),
+	}
 }
 
 func (r *GormSiteRepository) Create(ctx context.Context, site *model.Site) error {
-	return r.db.WithContext(ctx).Create(site).Error
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	return db.Create(site).Error
 }
 
 func (r *GormSiteRepository) Save(ctx context.Context, site *model.Site) error {
-	return r.db.WithContext(ctx).Save(site).Error
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
+	return db.Save(site).Error
 }
 
 func (r *GormSiteRepository) List(ctx context.Context, limit int, offset int) ([]model.Site, error) {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
 	var out []model.Site
-	err := r.db.WithContext(ctx).
+	err := db.
 		Order("id DESC").
 		Limit(limit).
 		Offset(offset).
@@ -46,8 +57,10 @@ func (r *GormSiteRepository) List(ctx context.Context, limit int, offset int) ([
 }
 
 func (r *GormSiteRepository) GetBySiteID(ctx context.Context, siteID string) (*model.Site, error) {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
 	var out model.Site
-	if err := r.db.WithContext(ctx).
+	if err := db.
 		Where("site_id = ?", siteID).
 		First(&out).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -59,8 +72,10 @@ func (r *GormSiteRepository) GetBySiteID(ctx context.Context, siteID string) (*m
 }
 
 func (r *GormSiteRepository) GetByDomain(ctx context.Context, domain string) (*model.Site, error) {
+	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
+	defer cancel()
 	var out model.Site
-	if err := r.db.WithContext(ctx).
+	if err := db.
 		Where("domain = ?", domain).
 		First(&out).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {

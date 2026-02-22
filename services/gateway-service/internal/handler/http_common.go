@@ -52,6 +52,64 @@ func (h *HTTPHandler) applyVisitorRateLimit(c *gin.Context, action string, siteI
 	return true
 }
 
+func (h *HTTPHandler) applyAgentRateLimit(c *gin.Context, action string, agentID uint64) bool {
+	if h.agentLimiter == nil {
+		return true
+	}
+	return applyActorRateLimit(c, h.agentLimiter, "agent", action, agentID)
+}
+
+func (h *HTTPHandler) applyAdminRateLimit(c *gin.Context, action string, agentID uint64) bool {
+	if h.adminLimiter == nil {
+		return true
+	}
+	return applyActorRateLimit(c, h.adminLimiter, "admin", action, agentID)
+}
+
+func applyActorRateLimit(c *gin.Context, limiter limiterAllow, scope string, action string, actorID uint64) bool {
+	keys := buildActorRateLimitKeys(scope, c.ClientIP(), action, actorID)
+	for _, key := range keys {
+		if limiter.Allow(key) {
+			continue
+		}
+		middleware.AbortWithError(c, http.StatusTooManyRequests, "rate_limited", "too many requests, please retry later")
+		return false
+	}
+	return true
+}
+
+type limiterAllow interface {
+	Allow(key string) bool
+}
+
+func buildActorRateLimitKeys(scope string, clientIP string, action string, actorID uint64) []string {
+	scopeSeg := sanitizeRateLimitSegment(scope)
+	if scopeSeg == "" {
+		scopeSeg = "actor"
+	}
+	actionSeg := sanitizeRateLimitSegment(action)
+	if actionSeg == "" {
+		actionSeg = "unknown_action"
+	}
+	ip := sanitizeRateLimitSegment(clientIP)
+	if ip == "" {
+		ip = "ip_unknown"
+	}
+
+	keys := []string{
+		fmt.Sprintf("%s:ip:%s", scopeSeg, ip),
+		fmt.Sprintf("%s:ip_action:%s:%s", scopeSeg, actionSeg, ip),
+	}
+	if actorID > 0 {
+		keys = append(keys,
+			fmt.Sprintf("%s:id:%d", scopeSeg, actorID),
+			fmt.Sprintf("%s:id_action:%s:%d", scopeSeg, actionSeg, actorID),
+			fmt.Sprintf("%s:id_ip:%d:%s", scopeSeg, actorID, ip),
+		)
+	}
+	return dedupeRateLimitKeys(keys)
+}
+
 func buildVisitorRateLimitKeys(clientIP string, action string, siteID string, conversationID uint64, visitorToken string) []string {
 	actionSeg := sanitizeRateLimitSegment(action)
 	if actionSeg == "" {
@@ -141,6 +199,18 @@ func (h *HTTPHandler) requireAgentActor(c *gin.Context) (*authv1.MeResponse, err
 	}
 	if actor.GetRole() != "agent" {
 		return nil, status.Error(codes.PermissionDenied, "agent role required")
+	}
+	return actor, nil
+}
+
+func (h *HTTPHandler) requireAdminActor(c *gin.Context) (*authv1.MeResponse, error) {
+	actor, err := h.requireActor(c)
+	if err != nil {
+		return nil, err
+	}
+	role := strings.ToLower(strings.TrimSpace(actor.GetRole()))
+	if role != "admin" && role != "super_admin" {
+		return nil, status.Error(codes.PermissionDenied, "admin role required")
 	}
 	return actor, nil
 }
