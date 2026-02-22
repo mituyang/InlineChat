@@ -38,13 +38,13 @@ func (s *AuthGatewayServer) Login(ctx context.Context, req *authv1.LoginRequest)
 	return toAuthResultPB(result), nil
 }
 
-func (s *AuthGatewayServer) Me(_ context.Context, req *authv1.MeRequest) (*authv1.MeResponse, error) {
+func (s *AuthGatewayServer) Me(ctx context.Context, req *authv1.MeRequest) (*authv1.MeResponse, error) {
 	token := parseBearerToken(req.GetAuthorization())
 	if token == "" {
 		return nil, status.Error(codes.Unauthenticated, "missing bearer token")
 	}
 
-	claims, err := s.authService.ParseToken(token)
+	claims, err := s.authService.ValidateToken(ctx, token)
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid token")
 	}

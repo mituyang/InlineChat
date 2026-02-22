@@ -26,8 +26,14 @@ type AdminGatewayServiceClient interface {
 	ListSites(ctx context.Context, in *ListSitesRequest, opts ...grpc.CallOption) (*ListSitesResponse, error)
 	GetSiteBySiteID(ctx context.Context, in *GetSiteBySiteIDRequest, opts ...grpc.CallOption) (*Site, error)
 	GetSiteByDomain(ctx context.Context, in *GetSiteByDomainRequest, opts ...grpc.CallOption) (*Site, error)
+	UpdateSiteStatus(ctx context.Context, in *UpdateSiteStatusRequest, opts ...grpc.CallOption) (*Site, error)
+	RotateSiteWidgetKey(ctx context.Context, in *RotateSiteWidgetKeyRequest, opts ...grpc.CallOption) (*Site, error)
 	CreateAgent(ctx context.Context, in *CreateAgentRequest, opts ...grpc.CallOption) (*Agent, error)
 	ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error)
+	UpdateAgentStatus(ctx context.Context, in *UpdateAgentStatusRequest, opts ...grpc.CallOption) (*Agent, error)
+	ResetAgentPassword(ctx context.Context, in *ResetAgentPasswordRequest, opts ...grpc.CallOption) (*Agent, error)
+	ForceAgentLogout(ctx context.Context, in *ForceAgentLogoutRequest, opts ...grpc.CallOption) (*Agent, error)
+	ListAuditLogs(ctx context.Context, in *ListAuditLogsRequest, opts ...grpc.CallOption) (*ListAuditLogsResponse, error)
 }
 
 type adminGatewayServiceClient struct {
@@ -74,6 +80,24 @@ func (c *adminGatewayServiceClient) GetSiteByDomain(ctx context.Context, in *Get
 	return out, nil
 }
 
+func (c *adminGatewayServiceClient) UpdateSiteStatus(ctx context.Context, in *UpdateSiteStatusRequest, opts ...grpc.CallOption) (*Site, error) {
+	out := new(Site)
+	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/UpdateSiteStatus", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminGatewayServiceClient) RotateSiteWidgetKey(ctx context.Context, in *RotateSiteWidgetKeyRequest, opts ...grpc.CallOption) (*Site, error) {
+	out := new(Site)
+	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/RotateSiteWidgetKey", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *adminGatewayServiceClient) CreateAgent(ctx context.Context, in *CreateAgentRequest, opts ...grpc.CallOption) (*Agent, error) {
 	out := new(Agent)
 	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/CreateAgent", in, out, opts...)
@@ -92,6 +116,42 @@ func (c *adminGatewayServiceClient) ListAgents(ctx context.Context, in *ListAgen
 	return out, nil
 }
 
+func (c *adminGatewayServiceClient) UpdateAgentStatus(ctx context.Context, in *UpdateAgentStatusRequest, opts ...grpc.CallOption) (*Agent, error) {
+	out := new(Agent)
+	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/UpdateAgentStatus", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminGatewayServiceClient) ResetAgentPassword(ctx context.Context, in *ResetAgentPasswordRequest, opts ...grpc.CallOption) (*Agent, error) {
+	out := new(Agent)
+	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/ResetAgentPassword", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminGatewayServiceClient) ForceAgentLogout(ctx context.Context, in *ForceAgentLogoutRequest, opts ...grpc.CallOption) (*Agent, error) {
+	out := new(Agent)
+	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/ForceAgentLogout", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminGatewayServiceClient) ListAuditLogs(ctx context.Context, in *ListAuditLogsRequest, opts ...grpc.CallOption) (*ListAuditLogsResponse, error) {
+	out := new(ListAuditLogsResponse)
+	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/ListAuditLogs", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AdminGatewayServiceServer is the server API for AdminGatewayService service.
 // All implementations must embed UnimplementedAdminGatewayServiceServer
 // for forward compatibility
@@ -100,8 +160,14 @@ type AdminGatewayServiceServer interface {
 	ListSites(context.Context, *ListSitesRequest) (*ListSitesResponse, error)
 	GetSiteBySiteID(context.Context, *GetSiteBySiteIDRequest) (*Site, error)
 	GetSiteByDomain(context.Context, *GetSiteByDomainRequest) (*Site, error)
+	UpdateSiteStatus(context.Context, *UpdateSiteStatusRequest) (*Site, error)
+	RotateSiteWidgetKey(context.Context, *RotateSiteWidgetKeyRequest) (*Site, error)
 	CreateAgent(context.Context, *CreateAgentRequest) (*Agent, error)
 	ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error)
+	UpdateAgentStatus(context.Context, *UpdateAgentStatusRequest) (*Agent, error)
+	ResetAgentPassword(context.Context, *ResetAgentPasswordRequest) (*Agent, error)
+	ForceAgentLogout(context.Context, *ForceAgentLogoutRequest) (*Agent, error)
+	ListAuditLogs(context.Context, *ListAuditLogsRequest) (*ListAuditLogsResponse, error)
 	mustEmbedUnimplementedAdminGatewayServiceServer()
 }
 
@@ -121,11 +187,29 @@ func (UnimplementedAdminGatewayServiceServer) GetSiteBySiteID(context.Context, *
 func (UnimplementedAdminGatewayServiceServer) GetSiteByDomain(context.Context, *GetSiteByDomainRequest) (*Site, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetSiteByDomain not implemented")
 }
+func (UnimplementedAdminGatewayServiceServer) UpdateSiteStatus(context.Context, *UpdateSiteStatusRequest) (*Site, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateSiteStatus not implemented")
+}
+func (UnimplementedAdminGatewayServiceServer) RotateSiteWidgetKey(context.Context, *RotateSiteWidgetKeyRequest) (*Site, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RotateSiteWidgetKey not implemented")
+}
 func (UnimplementedAdminGatewayServiceServer) CreateAgent(context.Context, *CreateAgentRequest) (*Agent, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateAgent not implemented")
 }
 func (UnimplementedAdminGatewayServiceServer) ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListAgents not implemented")
+}
+func (UnimplementedAdminGatewayServiceServer) UpdateAgentStatus(context.Context, *UpdateAgentStatusRequest) (*Agent, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateAgentStatus not implemented")
+}
+func (UnimplementedAdminGatewayServiceServer) ResetAgentPassword(context.Context, *ResetAgentPasswordRequest) (*Agent, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResetAgentPassword not implemented")
+}
+func (UnimplementedAdminGatewayServiceServer) ForceAgentLogout(context.Context, *ForceAgentLogoutRequest) (*Agent, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ForceAgentLogout not implemented")
+}
+func (UnimplementedAdminGatewayServiceServer) ListAuditLogs(context.Context, *ListAuditLogsRequest) (*ListAuditLogsResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ListAuditLogs not implemented")
 }
 func (UnimplementedAdminGatewayServiceServer) mustEmbedUnimplementedAdminGatewayServiceServer() {}
 
@@ -212,6 +296,42 @@ func _AdminGatewayService_GetSiteByDomain_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AdminGatewayService_UpdateSiteStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateSiteStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminGatewayServiceServer).UpdateSiteStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/inlinechat.admin.v1.AdminGatewayService/UpdateSiteStatus",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminGatewayServiceServer).UpdateSiteStatus(ctx, req.(*UpdateSiteStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminGatewayService_RotateSiteWidgetKey_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RotateSiteWidgetKeyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminGatewayServiceServer).RotateSiteWidgetKey(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/inlinechat.admin.v1.AdminGatewayService/RotateSiteWidgetKey",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminGatewayServiceServer).RotateSiteWidgetKey(ctx, req.(*RotateSiteWidgetKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AdminGatewayService_CreateAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateAgentRequest)
 	if err := dec(in); err != nil {
@@ -248,6 +368,78 @@ func _AdminGatewayService_ListAgents_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AdminGatewayService_UpdateAgentStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateAgentStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminGatewayServiceServer).UpdateAgentStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/inlinechat.admin.v1.AdminGatewayService/UpdateAgentStatus",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminGatewayServiceServer).UpdateAgentStatus(ctx, req.(*UpdateAgentStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminGatewayService_ResetAgentPassword_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResetAgentPasswordRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminGatewayServiceServer).ResetAgentPassword(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/inlinechat.admin.v1.AdminGatewayService/ResetAgentPassword",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminGatewayServiceServer).ResetAgentPassword(ctx, req.(*ResetAgentPasswordRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminGatewayService_ForceAgentLogout_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ForceAgentLogoutRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminGatewayServiceServer).ForceAgentLogout(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/inlinechat.admin.v1.AdminGatewayService/ForceAgentLogout",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminGatewayServiceServer).ForceAgentLogout(ctx, req.(*ForceAgentLogoutRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminGatewayService_ListAuditLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAuditLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminGatewayServiceServer).ListAuditLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/inlinechat.admin.v1.AdminGatewayService/ListAuditLogs",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminGatewayServiceServer).ListAuditLogs(ctx, req.(*ListAuditLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AdminGatewayService_ServiceDesc is the grpc.ServiceDesc for AdminGatewayService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -272,12 +464,36 @@ var AdminGatewayService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _AdminGatewayService_GetSiteByDomain_Handler,
 		},
 		{
+			MethodName: "UpdateSiteStatus",
+			Handler:    _AdminGatewayService_UpdateSiteStatus_Handler,
+		},
+		{
+			MethodName: "RotateSiteWidgetKey",
+			Handler:    _AdminGatewayService_RotateSiteWidgetKey_Handler,
+		},
+		{
 			MethodName: "CreateAgent",
 			Handler:    _AdminGatewayService_CreateAgent_Handler,
 		},
 		{
 			MethodName: "ListAgents",
 			Handler:    _AdminGatewayService_ListAgents_Handler,
+		},
+		{
+			MethodName: "UpdateAgentStatus",
+			Handler:    _AdminGatewayService_UpdateAgentStatus_Handler,
+		},
+		{
+			MethodName: "ResetAgentPassword",
+			Handler:    _AdminGatewayService_ResetAgentPassword_Handler,
+		},
+		{
+			MethodName: "ForceAgentLogout",
+			Handler:    _AdminGatewayService_ForceAgentLogout_Handler,
+		},
+		{
+			MethodName: "ListAuditLogs",
+			Handler:    _AdminGatewayService_ListAuditLogs_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -61,7 +61,7 @@ func (h *HTTPHandler) me(c *gin.Context) {
 		return
 	}
 
-	claims, err := h.authService.ParseToken(token)
+	claims, err := h.authService.ValidateToken(c.Request.Context(), token)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 		return

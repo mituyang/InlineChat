@@ -21,6 +21,7 @@ var ErrNotFound = errors.New("not found")
 type AdminService struct {
 	siteRepo   repository.SiteRepository
 	agentRepo  repository.AgentRepository
+	auditRepo  repository.AuditLogRepository
 	bcryptCost int
 }
 
@@ -38,11 +39,58 @@ type CreateAgentInput struct {
 	Role        string
 }
 
-func New(siteRepo repository.SiteRepository, agentRepo repository.AgentRepository, bcryptCost int) *AdminService {
-	return &AdminService{siteRepo: siteRepo, agentRepo: agentRepo, bcryptCost: bcryptCost}
+type ActorContext struct {
+	AgentID   uint64
+	Email     string
+	Role      string
+	IP        string
+	UserAgent string
+}
+
+type UpdateSiteStatusInput struct {
+	SiteID string
+	Status string
+}
+
+type RotateSiteWidgetKeyInput struct {
+	SiteID string
+}
+
+type UpdateAgentStatusInput struct {
+	AgentID uint64
+	Status  string
+}
+
+type ResetAgentPasswordInput struct {
+	AgentID     uint64
+	NewPassword string
+}
+
+type ForceAgentLogoutInput struct {
+	AgentID uint64
+}
+
+type ListAuditLogsInput struct {
+	Limit        int
+	Offset       int
+	ActorAgentID uint64
+	Action       string
+	ResourceType string
+}
+
+func New(siteRepo repository.SiteRepository, agentRepo repository.AgentRepository, auditRepo repository.AuditLogRepository, bcryptCost int) *AdminService {
+	return &AdminService{siteRepo: siteRepo, agentRepo: agentRepo, auditRepo: auditRepo, bcryptCost: bcryptCost}
 }
 
 func (s *AdminService) CreateSite(ctx context.Context, in CreateSiteInput) (*model.Site, error) {
+	return s.createSite(ctx, in, ActorContext{})
+}
+
+func (s *AdminService) CreateSiteWithActor(ctx context.Context, in CreateSiteInput, actor ActorContext) (*model.Site, error) {
+	return s.createSite(ctx, in, actor)
+}
+
+func (s *AdminService) createSite(ctx context.Context, in CreateSiteInput, actor ActorContext) (*model.Site, error) {
 	siteID, err := normalizeSiteID(in.SiteID)
 	if err != nil {
 		return nil, err
@@ -71,6 +119,7 @@ func (s *AdminService) CreateSite(ctx context.Context, in CreateSiteInput) (*mod
 		}
 		return nil, err
 	}
+	_ = s.writeAuditLog(ctx, actor, "site.create", "site", site.SiteID, fmt.Sprintf("创建站点 %s", site.SiteID))
 	return site, nil
 }
 
@@ -110,7 +159,69 @@ func (s *AdminService) GetSiteByDomain(ctx context.Context, domain string) (*mod
 	return site, nil
 }
 
+func (s *AdminService) UpdateSiteStatus(ctx context.Context, in UpdateSiteStatusInput, actor ActorContext) (*model.Site, error) {
+	siteID := strings.TrimSpace(in.SiteID)
+	if siteID == "" {
+		return nil, fmt.Errorf("site_id is required")
+	}
+	status, err := normalizeSiteStatus(in.Status)
+	if err != nil {
+		return nil, err
+	}
+
+	site, err := s.siteRepo.GetBySiteID(ctx, siteID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	oldStatus := site.Status
+	site.Status = status
+	if err := s.siteRepo.Save(ctx, site); err != nil {
+		return nil, err
+	}
+	_ = s.writeAuditLog(ctx, actor, "site.update_status", "site", site.SiteID, fmt.Sprintf("站点状态 %s -> %s", oldStatus, status))
+	return site, nil
+}
+
+func (s *AdminService) RotateSiteWidgetKey(ctx context.Context, in RotateSiteWidgetKeyInput, actor ActorContext) (*model.Site, error) {
+	siteID := strings.TrimSpace(in.SiteID)
+	if siteID == "" {
+		return nil, fmt.Errorf("site_id is required")
+	}
+
+	site, err := s.siteRepo.GetBySiteID(ctx, siteID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	widgetKey, err := randomHex("wk", 16)
+	if err != nil {
+		return nil, err
+	}
+
+	site.WidgetKey = widgetKey
+	if err := s.siteRepo.Save(ctx, site); err != nil {
+		return nil, err
+	}
+	_ = s.writeAuditLog(ctx, actor, "site.rotate_widget_key", "site", site.SiteID, "轮换站点 widget_key")
+	return site, nil
+}
+
 func (s *AdminService) CreateAgent(ctx context.Context, in CreateAgentInput) (*model.Agent, error) {
+	return s.createAgent(ctx, in, ActorContext{})
+}
+
+func (s *AdminService) CreateAgentWithActor(ctx context.Context, in CreateAgentInput, actor ActorContext) (*model.Agent, error) {
+	return s.createAgent(ctx, in, actor)
+}
+
+func (s *AdminService) createAgent(ctx context.Context, in CreateAgentInput, actor ActorContext) (*model.Agent, error) {
 	agentID, err := normalizeAgentID(in.AgentID)
 	if err != nil {
 		return nil, err
@@ -145,6 +256,7 @@ func (s *AdminService) CreateAgent(ctx context.Context, in CreateAgentInput) (*m
 		DisplayName:  displayName,
 		Role:         role,
 		Status:       "active",
+		TokenVersion: 1,
 	}
 	if err := s.agentRepo.Create(ctx, agent); err != nil {
 		if isDuplicateError(err) {
@@ -152,11 +264,116 @@ func (s *AdminService) CreateAgent(ctx context.Context, in CreateAgentInput) (*m
 		}
 		return nil, err
 	}
+	_ = s.writeAuditLog(ctx, actor, "agent.create", "agent", formatAgentID(agent.ID), fmt.Sprintf("创建坐席 %s", formatAgentID(agent.ID)))
 	return agent, nil
 }
 
 func (s *AdminService) ListAgents(ctx context.Context, limit int, offset int) ([]model.Agent, error) {
 	return s.agentRepo.List(ctx, limit, offset)
+}
+
+func (s *AdminService) UpdateAgentStatus(ctx context.Context, in UpdateAgentStatusInput, actor ActorContext) (*model.Agent, error) {
+	if in.AgentID == 0 {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+	status, err := normalizeAgentStatus(in.Status)
+	if err != nil {
+		return nil, err
+	}
+
+	agent, err := s.agentRepo.GetByID(ctx, in.AgentID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if agent.Role == "super_admin" && status != "active" {
+		return nil, fmt.Errorf("invalid status transition for super_admin")
+	}
+
+	oldStatus := agent.Status
+	agent.Status = status
+	if status != "active" {
+		agent.TokenVersion = nextTokenVersion(agent.TokenVersion)
+	}
+	if err := s.agentRepo.Save(ctx, agent); err != nil {
+		return nil, err
+	}
+	_ = s.writeAuditLog(ctx, actor, "agent.update_status", "agent", formatAgentID(agent.ID), fmt.Sprintf("坐席状态 %s -> %s", oldStatus, status))
+	return agent, nil
+}
+
+func (s *AdminService) ResetAgentPassword(ctx context.Context, in ResetAgentPasswordInput, actor ActorContext) (*model.Agent, error) {
+	if in.AgentID == 0 {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+	if err := security.ValidatePasswordPolicy(in.NewPassword); err != nil {
+		return nil, err
+	}
+
+	agent, err := s.agentRepo.GetByID(ctx, in.AgentID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	hash, err := security.HashPassword(in.NewPassword, s.bcryptCost)
+	if err != nil {
+		return nil, err
+	}
+	agent.PasswordHash = hash
+	agent.TokenVersion = nextTokenVersion(agent.TokenVersion)
+	if err := s.agentRepo.Save(ctx, agent); err != nil {
+		return nil, err
+	}
+	_ = s.writeAuditLog(ctx, actor, "agent.reset_password", "agent", formatAgentID(agent.ID), "重置坐席密码并强制下线")
+	return agent, nil
+}
+
+func (s *AdminService) ForceAgentLogout(ctx context.Context, in ForceAgentLogoutInput, actor ActorContext) (*model.Agent, error) {
+	if in.AgentID == 0 {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+
+	agent, err := s.agentRepo.GetByID(ctx, in.AgentID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	agent.TokenVersion = nextTokenVersion(agent.TokenVersion)
+	if err := s.agentRepo.Save(ctx, agent); err != nil {
+		return nil, err
+	}
+	_ = s.writeAuditLog(ctx, actor, "agent.force_logout", "agent", formatAgentID(agent.ID), "强制坐席下线")
+	return agent, nil
+}
+
+func (s *AdminService) ListAuditLogs(ctx context.Context, in ListAuditLogsInput) ([]model.AuditLog, error) {
+	if s.auditRepo == nil {
+		return []model.AuditLog{}, nil
+	}
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		return nil, fmt.Errorf("invalid limit")
+	}
+	if in.Offset < 0 {
+		return nil, fmt.Errorf("invalid offset")
+	}
+	filter := repository.AuditLogFilter{
+		ActorAgentID: in.ActorAgentID,
+		Action:       strings.TrimSpace(in.Action),
+		ResourceType: strings.TrimSpace(in.ResourceType),
+	}
+	return s.auditRepo.List(ctx, filter, limit, in.Offset)
 }
 
 func randomHex(prefix string, bytesLen int) (string, error) {
@@ -208,10 +425,64 @@ func normalizeAgentID(raw string) (uint64, error) {
 	return value, nil
 }
 
+func normalizeSiteStatus(raw string) (string, error) {
+	status := strings.ToLower(strings.TrimSpace(raw))
+	if status != "active" && status != "disabled" {
+		return "", fmt.Errorf("invalid site status")
+	}
+	return status, nil
+}
+
+func normalizeAgentStatus(raw string) (string, error) {
+	status := strings.ToLower(strings.TrimSpace(raw))
+	if status != "active" && status != "inactive" {
+		return "", fmt.Errorf("invalid agent status")
+	}
+	return status, nil
+}
+
+func nextTokenVersion(current uint64) uint64 {
+	if current == 0 {
+		return 2
+	}
+	return current + 1
+}
+
+func formatAgentID(id uint64) string {
+	return fmt.Sprintf("%04d", id)
+}
+
 func isDuplicateError(err error) bool {
 	if err == nil {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "duplicate") || strings.Contains(msg, "unique")
+}
+
+func (s *AdminService) writeAuditLog(ctx context.Context, actor ActorContext, action string, resourceType string, resourceID string, summary string) error {
+	if s.auditRepo == nil || strings.TrimSpace(action) == "" {
+		return nil
+	}
+	if actor.AgentID == 0 {
+		return nil
+	}
+	auditLog := &model.AuditLog{
+		ActorAgentID: actor.AgentID,
+		ActorEmail:   strings.TrimSpace(actor.Email),
+		ActorRole:    strings.TrimSpace(actor.Role),
+		Action:       strings.TrimSpace(action),
+		ResourceType: strings.TrimSpace(resourceType),
+		ResourceID:   strings.TrimSpace(resourceID),
+		Summary:      strings.TrimSpace(summary),
+		IP:           strings.TrimSpace(actor.IP),
+		UserAgent:    strings.TrimSpace(actor.UserAgent),
+	}
+	if auditLog.ActorEmail == "" {
+		auditLog.ActorEmail = "-"
+	}
+	if auditLog.ActorRole == "" {
+		auditLog.ActorRole = "-"
+	}
+	return s.auditRepo.Create(ctx, auditLog)
 }

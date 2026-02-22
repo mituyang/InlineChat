@@ -80,7 +80,8 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 		return nil, ErrInvalidCredential
 	}
 
-	token, err := security.IssueToken(s.jwtSecret, s.jwtIssuer, s.jwtExpire, agent.ID, agent.Email, agent.Role)
+	tokenVersion := normalizeTokenVersion(agent.TokenVersion)
+	token, err := security.IssueToken(s.jwtSecret, s.jwtIssuer, s.jwtExpire, agent.ID, agent.Email, agent.Role, tokenVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -90,6 +91,27 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 
 func (s *AuthService) ParseToken(token string) (*security.Claims, error) {
 	return security.ParseTokenAny(s.jwtVerifySecrets, s.jwtIssuer, token)
+}
+
+func (s *AuthService) ValidateToken(ctx context.Context, token string) (*security.Claims, error) {
+	claims, err := s.ParseToken(token)
+	if err != nil {
+		return nil, ErrUnauthorized
+	}
+	agent, err := s.repo.GetByID(ctx, claims.AgentID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrUnauthorized
+		}
+		return nil, err
+	}
+	if agent.Status != "active" {
+		return nil, ErrUnauthorized
+	}
+	if normalizeTokenVersion(claims.TokenVersion) != normalizeTokenVersion(agent.TokenVersion) {
+		return nil, ErrUnauthorized
+	}
+	return claims, nil
 }
 
 func buildJWTVerifySecrets(primary string, previous string) [][]byte {
@@ -127,6 +149,7 @@ func (s *AuthService) EnsureSuperAdmin(ctx context.Context) error {
 				DisplayName:  s.superAdminDisplayName,
 				Role:         "super_admin",
 				Status:       "active",
+				TokenVersion: 1,
 			}
 			return s.repo.Create(ctx, created)
 		}
@@ -146,6 +169,10 @@ func (s *AuthService) EnsureSuperAdmin(ctx context.Context) error {
 		agent.Status = "active"
 		needSave = true
 	}
+	if agent.TokenVersion == 0 {
+		agent.TokenVersion = 1
+		needSave = true
+	}
 	if err := security.ComparePassword(agent.PasswordHash, s.superAdminPassword); err != nil {
 		hash, hashErr := security.HashPassword(s.superAdminPassword, s.bcryptCost)
 		if hashErr != nil {
@@ -159,4 +186,11 @@ func (s *AuthService) EnsureSuperAdmin(ctx context.Context) error {
 		return nil
 	}
 	return s.repo.Save(ctx, agent)
+}
+
+func normalizeTokenVersion(v uint64) uint64 {
+	if v == 0 {
+		return 1
+	}
+	return v
 }

@@ -13,6 +13,7 @@ var ErrNotFound = errors.New("not found")
 
 type SiteRepository interface {
 	Create(ctx context.Context, site *model.Site) error
+	Save(ctx context.Context, site *model.Site) error
 	List(ctx context.Context, limit int, offset int) ([]model.Site, error)
 	GetBySiteID(ctx context.Context, siteID string) (*model.Site, error)
 	GetByDomain(ctx context.Context, domain string) (*model.Site, error)
@@ -28,6 +29,10 @@ func NewSiteRepository(db *gorm.DB) *GormSiteRepository {
 
 func (r *GormSiteRepository) Create(ctx context.Context, site *model.Site) error {
 	return r.db.WithContext(ctx).Create(site).Error
+}
+
+func (r *GormSiteRepository) Save(ctx context.Context, site *model.Site) error {
+	return r.db.WithContext(ctx).Save(site).Error
 }
 
 func (r *GormSiteRepository) List(ctx context.Context, limit int, offset int) ([]model.Site, error) {

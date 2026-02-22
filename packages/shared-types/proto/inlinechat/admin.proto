@@ -9,8 +9,14 @@ service AdminGatewayService {
   rpc ListSites(ListSitesRequest) returns (ListSitesResponse);
   rpc GetSiteBySiteID(GetSiteBySiteIDRequest) returns (Site);
   rpc GetSiteByDomain(GetSiteByDomainRequest) returns (Site);
+  rpc UpdateSiteStatus(UpdateSiteStatusRequest) returns (Site);
+  rpc RotateSiteWidgetKey(RotateSiteWidgetKeyRequest) returns (Site);
   rpc CreateAgent(CreateAgentRequest) returns (Agent);
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  rpc UpdateAgentStatus(UpdateAgentStatusRequest) returns (Agent);
+  rpc ResetAgentPassword(ResetAgentPasswordRequest) returns (Agent);
+  rpc ForceAgentLogout(ForceAgentLogoutRequest) returns (Agent);
+  rpc ListAuditLogs(ListAuditLogsRequest) returns (ListAuditLogsResponse);
 }
 
 message CreateSiteRequest {
@@ -34,6 +40,17 @@ message GetSiteByDomainRequest {
   string domain = 1;
 }
 
+message UpdateSiteStatusRequest {
+  string authorization = 1;
+  string site_id = 2;
+  string status = 3;
+}
+
+message RotateSiteWidgetKeyRequest {
+  string authorization = 1;
+  string site_id = 2;
+}
+
 message CreateAgentRequest {
   string authorization = 1;
   string email = 2;
@@ -47,6 +64,32 @@ message ListAgentsRequest {
   string authorization = 1;
   int32 limit = 2;
   int32 offset = 3;
+}
+
+message UpdateAgentStatusRequest {
+  string authorization = 1;
+  uint64 agent_id = 2;
+  string status = 3;
+}
+
+message ResetAgentPasswordRequest {
+  string authorization = 1;
+  uint64 agent_id = 2;
+  string new_password = 3;
+}
+
+message ForceAgentLogoutRequest {
+  string authorization = 1;
+  uint64 agent_id = 2;
+}
+
+message ListAuditLogsRequest {
+  string authorization = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+  uint64 actor_agent_id = 4;
+  string action = 5;
+  string resource_type = 6;
 }
 
 message Site {
@@ -76,4 +119,22 @@ message ListSitesResponse {
 
 message ListAgentsResponse {
   repeated Agent items = 1;
+}
+
+message AuditLog {
+  uint64 id = 1;
+  uint64 actor_agent_id = 2;
+  string actor_email = 3;
+  string actor_role = 4;
+  string action = 5;
+  string resource_type = 6;
+  string resource_id = 7;
+  string summary = 8;
+  string ip = 9;
+  string user_agent = 10;
+  string created_at = 11;
+}
+
+message ListAuditLogsResponse {
+  repeated AuditLog items = 1;
 }

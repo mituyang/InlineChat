@@ -14,6 +14,7 @@ import (
 type fakeSiteRepository struct {
 	items       []model.Site
 	createCalls int
+	saveCalls   int
 	createErr   error
 }
 
@@ -31,6 +32,18 @@ func (r *fakeSiteRepository) List(_ context.Context, _ int, _ int) ([]model.Site
 	out := make([]model.Site, len(r.items))
 	copy(out, r.items)
 	return out, nil
+}
+
+func (r *fakeSiteRepository) Save(_ context.Context, site *model.Site) error {
+	r.saveCalls++
+	for i := range r.items {
+		if r.items[i].SiteID == site.SiteID {
+			r.items[i] = *site
+			return nil
+		}
+	}
+	r.items = append(r.items, *site)
+	return nil
 }
 
 func (r *fakeSiteRepository) GetBySiteID(_ context.Context, siteID string) (*model.Site, error) {
@@ -56,6 +69,7 @@ func (r *fakeSiteRepository) GetByDomain(_ context.Context, domain string) (*mod
 type fakeAgentRepository struct {
 	items       []model.Agent
 	createCalls int
+	saveCalls   int
 	createErr   error
 }
 
@@ -75,10 +89,52 @@ func (r *fakeAgentRepository) List(_ context.Context, _ int, _ int) ([]model.Age
 	return out, nil
 }
 
+func (r *fakeAgentRepository) Save(_ context.Context, agent *model.Agent) error {
+	r.saveCalls++
+	for i := range r.items {
+		if r.items[i].ID == agent.ID {
+			r.items[i] = *agent
+			return nil
+		}
+	}
+	r.items = append(r.items, *agent)
+	return nil
+}
+
+func (r *fakeAgentRepository) GetByID(_ context.Context, id uint64) (*model.Agent, error) {
+	for i := range r.items {
+		if r.items[i].ID == id {
+			out := r.items[i]
+			return &out, nil
+		}
+	}
+	return nil, repository.ErrNotFound
+}
+
+type fakeAuditLogRepository struct {
+	items []model.AuditLog
+}
+
+func (r *fakeAuditLogRepository) Create(_ context.Context, auditLog *model.AuditLog) error {
+	copyLog := *auditLog
+	r.items = append(r.items, copyLog)
+	return nil
+}
+
+func (r *fakeAuditLogRepository) List(_ context.Context, _ repository.AuditLogFilter, _ int, _ int) ([]model.AuditLog, error) {
+	out := make([]model.AuditLog, len(r.items))
+	copy(out, r.items)
+	return out, nil
+}
+
+func newTestAdminService(siteRepo repository.SiteRepository, agentRepo repository.AgentRepository) *AdminService {
+	return New(siteRepo, agentRepo, &fakeAuditLogRepository{}, 10)
+}
+
 func TestCreateAgentDefaultRoleAndHashPassword(t *testing.T) {
 	siteRepo := &fakeSiteRepository{}
 	agentRepo := &fakeAgentRepository{}
-	svc := New(siteRepo, agentRepo, 10)
+	svc := newTestAdminService(siteRepo, agentRepo)
 
 	agent, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 		AgentID:     "0012",
@@ -114,7 +170,7 @@ func TestCreateAgentDefaultRoleAndHashPassword(t *testing.T) {
 }
 
 func TestCreateAgentRejectInvalidRole(t *testing.T) {
-	svc := New(&fakeSiteRepository{}, &fakeAgentRepository{}, 10)
+	svc := newTestAdminService(&fakeSiteRepository{}, &fakeAgentRepository{})
 
 	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 		AgentID:     "1001",
@@ -135,7 +191,7 @@ func TestCreateAgentMapDuplicateToConflict(t *testing.T) {
 	agentRepo := &fakeAgentRepository{
 		createErr: errors.New("Duplicate entry"),
 	}
-	svc := New(&fakeSiteRepository{}, agentRepo, 10)
+	svc := newTestAdminService(&fakeSiteRepository{}, agentRepo)
 
 	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 		AgentID:     "1001",
@@ -150,7 +206,7 @@ func TestCreateAgentMapDuplicateToConflict(t *testing.T) {
 }
 
 func TestCreateAgentRejectWeakPassword(t *testing.T) {
-	svc := New(&fakeSiteRepository{}, &fakeAgentRepository{}, 10)
+	svc := newTestAdminService(&fakeSiteRepository{}, &fakeAgentRepository{})
 
 	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 		AgentID:     "1001",
@@ -168,7 +224,7 @@ func TestCreateAgentRejectWeakPassword(t *testing.T) {
 }
 
 func TestCreateAgentRejectInvalidAgentID(t *testing.T) {
-	svc := New(&fakeSiteRepository{}, &fakeAgentRepository{}, 10)
+	svc := newTestAdminService(&fakeSiteRepository{}, &fakeAgentRepository{})
 
 	cases := []string{"", "12", "abc1", "10000", "0000"}
 	for _, agentID := range cases {
@@ -187,7 +243,7 @@ func TestCreateAgentRejectInvalidAgentID(t *testing.T) {
 
 func TestCreateSiteNormalizeDomainAndGenerateKeys(t *testing.T) {
 	siteRepo := &fakeSiteRepository{}
-	svc := New(siteRepo, &fakeAgentRepository{}, 10)
+	svc := newTestAdminService(siteRepo, &fakeAgentRepository{})
 
 	site, err := svc.CreateSite(context.Background(), CreateSiteInput{
 		SiteID: "Shop_Main",
@@ -217,7 +273,7 @@ func TestCreateSiteNormalizeDomainAndGenerateKeys(t *testing.T) {
 
 func TestCreateSiteRequireSiteID(t *testing.T) {
 	siteRepo := &fakeSiteRepository{}
-	svc := New(siteRepo, &fakeAgentRepository{}, 10)
+	svc := newTestAdminService(siteRepo, &fakeAgentRepository{})
 
 	_, err := svc.CreateSite(context.Background(), CreateSiteInput{
 		SiteID: "",
@@ -238,7 +294,7 @@ func TestGetSiteBySiteID(t *testing.T) {
 			{SiteID: "site_abc", Name: "测试站点"},
 		},
 	}
-	svc := New(siteRepo, &fakeAgentRepository{}, 10)
+	svc := newTestAdminService(siteRepo, &fakeAgentRepository{})
 
 	site, err := svc.GetSiteBySiteID(context.Background(), " site_abc ")
 	if err != nil {
@@ -250,7 +306,7 @@ func TestGetSiteBySiteID(t *testing.T) {
 }
 
 func TestGetSiteBySiteIDNotFound(t *testing.T) {
-	svc := New(&fakeSiteRepository{}, &fakeAgentRepository{}, 10)
+	svc := newTestAdminService(&fakeSiteRepository{}, &fakeAgentRepository{})
 
 	_, err := svc.GetSiteBySiteID(context.Background(), "site_missing")
 	if !errors.Is(err, ErrNotFound) {
@@ -264,7 +320,7 @@ func TestGetSiteByDomain(t *testing.T) {
 			{SiteID: "site_abc", Domain: "shop.example.com", Name: "测试站点"},
 		},
 	}
-	svc := New(siteRepo, &fakeAgentRepository{}, 10)
+	svc := newTestAdminService(siteRepo, &fakeAgentRepository{})
 
 	site, err := svc.GetSiteByDomain(context.Background(), " Shop.Example.com ")
 	if err != nil {
@@ -276,10 +332,50 @@ func TestGetSiteByDomain(t *testing.T) {
 }
 
 func TestGetSiteByDomainNotFound(t *testing.T) {
-	svc := New(&fakeSiteRepository{}, &fakeAgentRepository{}, 10)
+	svc := newTestAdminService(&fakeSiteRepository{}, &fakeAgentRepository{})
 
 	_, err := svc.GetSiteByDomain(context.Background(), "missing.example.com")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestForceAgentLogoutIncrementsTokenVersion(t *testing.T) {
+	agentRepo := &fakeAgentRepository{
+		items: []model.Agent{
+			{ID: 12, Email: "a@example.com", Role: "agent", Status: "active", TokenVersion: 1},
+		},
+	}
+	svc := newTestAdminService(&fakeSiteRepository{}, agentRepo)
+
+	updated, err := svc.ForceAgentLogout(context.Background(), ForceAgentLogoutInput{AgentID: 12}, ActorContext{AgentID: 9001})
+	if err != nil {
+		t.Fatalf("ForceAgentLogout failed: %v", err)
+	}
+	if updated.TokenVersion != 2 {
+		t.Fatalf("unexpected token_version: %d", updated.TokenVersion)
+	}
+}
+
+func TestUpdateSiteStatus(t *testing.T) {
+	siteRepo := &fakeSiteRepository{
+		items: []model.Site{
+			{SiteID: "site_demo", Status: "active"},
+		},
+	}
+	svc := newTestAdminService(siteRepo, &fakeAgentRepository{})
+
+	updated, err := svc.UpdateSiteStatus(context.Background(), UpdateSiteStatusInput{
+		SiteID: "site_demo",
+		Status: "disabled",
+	}, ActorContext{AgentID: 9001})
+	if err != nil {
+		t.Fatalf("UpdateSiteStatus failed: %v", err)
+	}
+	if updated.Status != "disabled" {
+		t.Fatalf("unexpected status: %s", updated.Status)
+	}
+	if siteRepo.saveCalls != 1 {
+		t.Fatalf("expected saveCalls=1, got %d", siteRepo.saveCalls)
 	}
 }

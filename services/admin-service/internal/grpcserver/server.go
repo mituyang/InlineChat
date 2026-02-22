@@ -30,20 +30,59 @@ func New(adminService *service.AdminService, jwtSecret string, jwtPreviousSecret
 }
 
 func (s *AdminGatewayServer) CreateSite(ctx context.Context, req *adminv1.CreateSiteRequest) (*adminv1.Site, error) {
-	if _, err := s.requireAdmin(req.GetAuthorization()); err != nil {
+	claims, err := s.requireAdmin(req.GetAuthorization())
+	if err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(req.GetSiteId()) == "" || strings.TrimSpace(req.GetName()) == "" || strings.TrimSpace(req.GetDomain()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "site_id name and domain are required")
 	}
 
-	site, err := s.adminService.CreateSite(ctx, service.CreateSiteInput{
+	site, err := s.adminService.CreateSiteWithActor(ctx, service.CreateSiteInput{
 		SiteID: req.GetSiteId(),
 		Name:   req.GetName(),
 		Domain: req.GetDomain(),
-	})
+	}, toActorContext(claims))
 	if err != nil {
 		return nil, mapError(err)
+	}
+
+	return toSitePB(site), nil
+}
+
+func (s *AdminGatewayServer) UpdateSiteStatus(ctx context.Context, req *adminv1.UpdateSiteStatusRequest) (*adminv1.Site, error) {
+	claims, err := s.requireAdmin(req.GetAuthorization())
+	if err != nil {
+		return nil, err
+	}
+	if claims.Role != "super_admin" {
+		return nil, status.Error(codes.PermissionDenied, "super_admin role required")
+	}
+
+	site, svcErr := s.adminService.UpdateSiteStatus(ctx, service.UpdateSiteStatusInput{
+		SiteID: req.GetSiteId(),
+		Status: req.GetStatus(),
+	}, toActorContext(claims))
+	if svcErr != nil {
+		return nil, mapError(svcErr)
+	}
+	return toSitePB(site), nil
+}
+
+func (s *AdminGatewayServer) RotateSiteWidgetKey(ctx context.Context, req *adminv1.RotateSiteWidgetKeyRequest) (*adminv1.Site, error) {
+	claims, err := s.requireAdmin(req.GetAuthorization())
+	if err != nil {
+		return nil, err
+	}
+	if claims.Role != "super_admin" {
+		return nil, status.Error(codes.PermissionDenied, "super_admin role required")
+	}
+
+	site, svcErr := s.adminService.RotateSiteWidgetKey(ctx, service.RotateSiteWidgetKeyInput{
+		SiteID: req.GetSiteId(),
+	}, toActorContext(claims))
+	if svcErr != nil {
+		return nil, mapError(svcErr)
 	}
 
 	return toSitePB(site), nil
@@ -118,13 +157,13 @@ func (s *AdminGatewayServer) CreateAgent(ctx context.Context, req *adminv1.Creat
 		return nil, status.Error(codes.PermissionDenied, "super_admin role required")
 	}
 
-	agent, svcErr := s.adminService.CreateAgent(ctx, service.CreateAgentInput{
+	agent, svcErr := s.adminService.CreateAgentWithActor(ctx, service.CreateAgentInput{
 		AgentID:     req.GetAgentId(),
 		Email:       req.GetEmail(),
 		Password:    req.GetPassword(),
 		DisplayName: req.GetDisplayName(),
 		Role:        req.GetRole(),
-	})
+	}, toActorContext(claims))
 	if svcErr != nil {
 		return nil, mapError(svcErr)
 	}
@@ -160,6 +199,88 @@ func (s *AdminGatewayServer) ListAgents(ctx context.Context, req *adminv1.ListAg
 	for i := range items {
 		item := items[i]
 		resp.Items = append(resp.Items, toAgentPB(&item))
+	}
+	return resp, nil
+}
+
+func (s *AdminGatewayServer) UpdateAgentStatus(ctx context.Context, req *adminv1.UpdateAgentStatusRequest) (*adminv1.Agent, error) {
+	claims, err := s.requireAdmin(req.GetAuthorization())
+	if err != nil {
+		return nil, err
+	}
+	if claims.Role != "super_admin" {
+		return nil, status.Error(codes.PermissionDenied, "super_admin role required")
+	}
+
+	agent, svcErr := s.adminService.UpdateAgentStatus(ctx, service.UpdateAgentStatusInput{
+		AgentID: req.GetAgentId(),
+		Status:  req.GetStatus(),
+	}, toActorContext(claims))
+	if svcErr != nil {
+		return nil, mapError(svcErr)
+	}
+	return toAgentPB(agent), nil
+}
+
+func (s *AdminGatewayServer) ResetAgentPassword(ctx context.Context, req *adminv1.ResetAgentPasswordRequest) (*adminv1.Agent, error) {
+	claims, err := s.requireAdmin(req.GetAuthorization())
+	if err != nil {
+		return nil, err
+	}
+	if claims.Role != "super_admin" {
+		return nil, status.Error(codes.PermissionDenied, "super_admin role required")
+	}
+
+	agent, svcErr := s.adminService.ResetAgentPassword(ctx, service.ResetAgentPasswordInput{
+		AgentID:     req.GetAgentId(),
+		NewPassword: req.GetNewPassword(),
+	}, toActorContext(claims))
+	if svcErr != nil {
+		return nil, mapError(svcErr)
+	}
+	return toAgentPB(agent), nil
+}
+
+func (s *AdminGatewayServer) ForceAgentLogout(ctx context.Context, req *adminv1.ForceAgentLogoutRequest) (*adminv1.Agent, error) {
+	claims, err := s.requireAdmin(req.GetAuthorization())
+	if err != nil {
+		return nil, err
+	}
+	if claims.Role != "super_admin" {
+		return nil, status.Error(codes.PermissionDenied, "super_admin role required")
+	}
+
+	agent, svcErr := s.adminService.ForceAgentLogout(ctx, service.ForceAgentLogoutInput{
+		AgentID: req.GetAgentId(),
+	}, toActorContext(claims))
+	if svcErr != nil {
+		return nil, mapError(svcErr)
+	}
+	return toAgentPB(agent), nil
+}
+
+func (s *AdminGatewayServer) ListAuditLogs(ctx context.Context, req *adminv1.ListAuditLogsRequest) (*adminv1.ListAuditLogsResponse, error) {
+	if _, err := s.requireAdmin(req.GetAuthorization()); err != nil {
+		return nil, err
+	}
+
+	items, svcErr := s.adminService.ListAuditLogs(ctx, service.ListAuditLogsInput{
+		Limit:        int(req.GetLimit()),
+		Offset:       int(req.GetOffset()),
+		ActorAgentID: req.GetActorAgentId(),
+		Action:       req.GetAction(),
+		ResourceType: req.GetResourceType(),
+	})
+	if svcErr != nil {
+		return nil, mapError(svcErr)
+	}
+
+	resp := &adminv1.ListAuditLogsResponse{
+		Items: make([]*adminv1.AuditLog, 0, len(items)),
+	}
+	for i := range items {
+		item := items[i]
+		resp.Items = append(resp.Items, toAuditLogPB(&item))
 	}
 	return resp, nil
 }
@@ -212,7 +333,12 @@ func mapError(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	default:
 		msg := strings.ToLower(err.Error())
-		if strings.Contains(msg, "required") || strings.Contains(msg, "invalid") {
+		if strings.Contains(msg, "required") ||
+			strings.Contains(msg, "invalid") ||
+			strings.Contains(msg, "password") ||
+			strings.Contains(msg, "status") ||
+			strings.Contains(msg, "format") ||
+			strings.Contains(msg, "length") {
 			return status.Error(codes.InvalidArgument, err.Error())
 		}
 		return status.Error(codes.Internal, "internal error")
@@ -247,5 +373,35 @@ func toAgentPB(agent *model.Agent) *adminv1.Agent {
 		Status:      agent.Status,
 		CreatedAt:   agent.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt:   agent.UpdatedAt.Format(time.RFC3339Nano),
+	}
+}
+
+func toAuditLogPB(auditLog *model.AuditLog) *adminv1.AuditLog {
+	if auditLog == nil {
+		return &adminv1.AuditLog{}
+	}
+	return &adminv1.AuditLog{
+		Id:           auditLog.ID,
+		ActorAgentId: auditLog.ActorAgentID,
+		ActorEmail:   auditLog.ActorEmail,
+		ActorRole:    auditLog.ActorRole,
+		Action:       auditLog.Action,
+		ResourceType: auditLog.ResourceType,
+		ResourceId:   auditLog.ResourceID,
+		Summary:      auditLog.Summary,
+		Ip:           auditLog.IP,
+		UserAgent:    auditLog.UserAgent,
+		CreatedAt:    auditLog.CreatedAt.Format(time.RFC3339Nano),
+	}
+}
+
+func toActorContext(claims *security.Claims) service.ActorContext {
+	if claims == nil {
+		return service.ActorContext{}
+	}
+	return service.ActorContext{
+		AgentID: claims.AgentID,
+		Email:   claims.Email,
+		Role:    claims.Role,
 	}
 }

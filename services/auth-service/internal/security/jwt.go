@@ -8,18 +8,20 @@ import (
 )
 
 type Claims struct {
-	AgentID uint64 `json:"agent_id"`
-	Email   string `json:"email"`
-	Role    string `json:"role"`
+	AgentID      uint64 `json:"agent_id"`
+	Email        string `json:"email"`
+	Role         string `json:"role"`
+	TokenVersion uint64 `json:"token_version,omitempty"`
 	jwt.RegisteredClaims
 }
 
-func IssueToken(secret []byte, issuer string, expire time.Duration, agentID uint64, email string, role string) (string, error) {
+func IssueToken(secret []byte, issuer string, expire time.Duration, agentID uint64, email string, role string, tokenVersion uint64) (string, error) {
 	now := time.Now()
 	claims := Claims{
-		AgentID: agentID,
-		Email:   email,
-		Role:    role,
+		AgentID:      agentID,
+		Email:        email,
+		Role:         role,
+		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    issuer,
 			Subject:   fmt.Sprintf("agent:%d", agentID),

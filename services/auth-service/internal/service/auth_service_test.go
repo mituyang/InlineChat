@@ -62,6 +62,20 @@ func (r *fakeAgentRepository) GetByEmail(_ context.Context, email string) (*mode
 	return &copyAgent, nil
 }
 
+func (r *fakeAgentRepository) GetByID(_ context.Context, id uint64) (*model.Agent, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	for _, item := range r.items {
+		if item.ID != id {
+			continue
+		}
+		copyAgent := *item
+		return &copyAgent, nil
+	}
+	return nil, repository.ErrNotFound
+}
+
 func newTestAuthService(repo repository.AgentRepository, email string, password string, displayName string) *AuthService {
 	return New(repo, "test-secret", "", "test-issuer", time.Hour, 10, email, password, displayName)
 }
@@ -155,6 +169,7 @@ func TestEnsureSuperAdminNoopWhenAlreadyAligned(t *testing.T) {
 		DisplayName:  "超级管理员",
 		Role:         "super_admin",
 		Status:       "active",
+		TokenVersion: 1,
 	}
 
 	svc := newTestAuthService(repo, "super@example.com", "SamePassword123!", "超级管理员")
@@ -200,5 +215,59 @@ func TestEnsureSuperAdminRejectWeakPassword(t *testing.T) {
 	}
 	if repo.saveCalls != 0 {
 		t.Fatalf("expected saveCalls=0, got %d", repo.saveCalls)
+	}
+}
+
+func TestValidateTokenChecksTokenVersion(t *testing.T) {
+	repo := newFakeAgentRepository()
+	repo.items["agent@example.com"] = &model.Agent{
+		ID:           1001,
+		Email:        "agent@example.com",
+		PasswordHash: "unused",
+		DisplayName:  "客服A",
+		Role:         "agent",
+		Status:       "active",
+		TokenVersion: 2,
+	}
+	svc := newTestAuthService(repo, "super@example.com", "Sup3rAdmin#2026!", "超级管理员")
+
+	token, err := security.IssueToken([]byte("test-secret"), "test-issuer", time.Hour, 1001, "agent@example.com", "agent", 2)
+	if err != nil {
+		t.Fatalf("IssueToken failed: %v", err)
+	}
+
+	claims, err := svc.ValidateToken(context.Background(), token)
+	if err != nil {
+		t.Fatalf("ValidateToken failed: %v", err)
+	}
+	if claims.AgentID != 1001 {
+		t.Fatalf("unexpected agent_id: %d", claims.AgentID)
+	}
+
+	repo.items["agent@example.com"].TokenVersion = 3
+	if _, err := svc.ValidateToken(context.Background(), token); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected ErrUnauthorized for token version mismatch, got: %v", err)
+	}
+}
+
+func TestValidateTokenChecksStatus(t *testing.T) {
+	repo := newFakeAgentRepository()
+	repo.items["agent@example.com"] = &model.Agent{
+		ID:           1002,
+		Email:        "agent@example.com",
+		PasswordHash: "unused",
+		DisplayName:  "客服B",
+		Role:         "agent",
+		Status:       "inactive",
+		TokenVersion: 1,
+	}
+	svc := newTestAuthService(repo, "super@example.com", "Sup3rAdmin#2026!", "超级管理员")
+
+	token, err := security.IssueToken([]byte("test-secret"), "test-issuer", time.Hour, 1002, "agent@example.com", "agent", 1)
+	if err != nil {
+		t.Fatalf("IssueToken failed: %v", err)
+	}
+	if _, err := svc.ValidateToken(context.Background(), token); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected ErrUnauthorized for inactive agent, got: %v", err)
 	}
 }

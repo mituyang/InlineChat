@@ -67,8 +67,14 @@ func (h *HTTPHandler) RegisterRoutes(r *gin.Engine) {
 	adminV1 := r.Group("/api/admin/v1/admin")
 	adminV1.POST("/sites", h.createSite)
 	adminV1.GET("/sites", h.listSites)
+	adminV1.PATCH("/sites/:site_id/status", h.updateSiteStatus)
+	adminV1.POST("/sites/:site_id/rotate-widget-key", h.rotateSiteWidgetKey)
 	adminV1.POST("/agents", h.createAgent)
 	adminV1.GET("/agents", h.listAgents)
+	adminV1.PATCH("/agents/:id/status", h.updateAgentStatus)
+	adminV1.POST("/agents/:id/reset-password", h.resetAgentPassword)
+	adminV1.POST("/agents/:id/force-logout", h.forceAgentLogout)
+	adminV1.GET("/audit-logs", h.listAuditLogs)
 }
 
 type createConversationRequest struct {
@@ -775,12 +781,63 @@ func (h *HTTPHandler) listSites(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
 
+func (h *HTTPHandler) updateSiteStatus(c *gin.Context) {
+	var req updateSiteStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		abortBadRequest(c, err.Error())
+		return
+	}
+
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	resp, err := h.clients.Admin.UpdateSiteStatus(ctx, &adminv1.UpdateSiteStatusRequest{
+		Authorization: c.GetHeader("Authorization"),
+		SiteId:        c.Param("site_id"),
+		Status:        req.Status,
+	})
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, siteToJSON(resp))
+}
+
+func (h *HTTPHandler) rotateSiteWidgetKey(c *gin.Context) {
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	resp, err := h.clients.Admin.RotateSiteWidgetKey(ctx, &adminv1.RotateSiteWidgetKeyRequest{
+		Authorization: c.GetHeader("Authorization"),
+		SiteId:        c.Param("site_id"),
+	})
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, siteToJSON(resp))
+}
+
 type createAgentRequest struct {
 	AgentID     string `json:"agent_id" binding:"required,len=4,numeric"`
 	Email       string `json:"email" binding:"required,email"`
 	Password    string `json:"password" binding:"required,min=12,max=72"`
 	DisplayName string `json:"display_name" binding:"required,min=1,max=128"`
 	Role        string `json:"role" binding:"omitempty,oneof=agent"`
+}
+
+type updateSiteStatusRequest struct {
+	Status string `json:"status" binding:"required,oneof=active disabled"`
+}
+
+type updateAgentStatusRequest struct {
+	Status string `json:"status" binding:"required,oneof=active inactive"`
+}
+
+type resetAgentPasswordRequest struct {
+	NewPassword string `json:"new_password" binding:"required,min=12,max=72"`
 }
 
 func (h *HTTPHandler) createAgent(c *gin.Context) {
@@ -845,6 +902,139 @@ func (h *HTTPHandler) listAgents(c *gin.Context) {
 	items := make([]any, 0, len(resp.GetItems()))
 	for _, item := range resp.GetItems() {
 		items = append(items, adminAgentToJSON(item))
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items})
+}
+
+func (h *HTTPHandler) updateAgentStatus(c *gin.Context) {
+	agentID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || agentID == 0 {
+		abortBadRequest(c, "invalid agent_id")
+		return
+	}
+
+	var req updateAgentStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		abortBadRequest(c, err.Error())
+		return
+	}
+
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	resp, err := h.clients.Admin.UpdateAgentStatus(ctx, &adminv1.UpdateAgentStatusRequest{
+		Authorization: c.GetHeader("Authorization"),
+		AgentId:       agentID,
+		Status:        req.Status,
+	})
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, adminAgentToJSON(resp))
+}
+
+func (h *HTTPHandler) resetAgentPassword(c *gin.Context) {
+	agentID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || agentID == 0 {
+		abortBadRequest(c, "invalid agent_id")
+		return
+	}
+
+	var req resetAgentPasswordRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		abortBadRequest(c, err.Error())
+		return
+	}
+
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	resp, err := h.clients.Admin.ResetAgentPassword(ctx, &adminv1.ResetAgentPasswordRequest{
+		Authorization: c.GetHeader("Authorization"),
+		AgentId:       agentID,
+		NewPassword:   req.NewPassword,
+	})
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, adminAgentToJSON(resp))
+}
+
+func (h *HTTPHandler) forceAgentLogout(c *gin.Context) {
+	agentID, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || agentID == 0 {
+		abortBadRequest(c, "invalid agent_id")
+		return
+	}
+
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	resp, err := h.clients.Admin.ForceAgentLogout(ctx, &adminv1.ForceAgentLogoutRequest{
+		Authorization: c.GetHeader("Authorization"),
+		AgentId:       agentID,
+	})
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, adminAgentToJSON(resp))
+}
+
+func (h *HTTPHandler) listAuditLogs(c *gin.Context) {
+	limit := 50
+	offset := 0
+	if raw := c.Query("limit"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v <= 0 || v > 200 {
+			abortBadRequest(c, "invalid limit")
+			return
+		}
+		limit = v
+	}
+	if raw := c.Query("offset"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 0 {
+			abortBadRequest(c, "invalid offset")
+			return
+		}
+		offset = v
+	}
+
+	var actorAgentID uint64
+	if raw := strings.TrimSpace(c.Query("actor_agent_id")); raw != "" {
+		parsed, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			abortBadRequest(c, "invalid actor_agent_id")
+			return
+		}
+		actorAgentID = parsed
+	}
+
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	resp, err := h.clients.Admin.ListAuditLogs(ctx, &adminv1.ListAuditLogsRequest{
+		Authorization: c.GetHeader("Authorization"),
+		Limit:         int32(limit),
+		Offset:        int32(offset),
+		ActorAgentId:  actorAgentID,
+		Action:        c.Query("action"),
+		ResourceType:  c.Query("resource_type"),
+	})
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+
+	items := make([]any, 0, len(resp.GetItems()))
+	for _, item := range resp.GetItems() {
+		items = append(items, auditLogToJSON(item))
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items})
 }
@@ -1104,5 +1294,21 @@ func adminAgentToJSON(item *adminv1.Agent) gin.H {
 		"status":       item.GetStatus(),
 		"created_at":   item.GetCreatedAt(),
 		"updated_at":   item.GetUpdatedAt(),
+	}
+}
+
+func auditLogToJSON(item *adminv1.AuditLog) gin.H {
+	return gin.H{
+		"id":             item.GetId(),
+		"actor_agent_id": item.GetActorAgentId(),
+		"actor_email":    item.GetActorEmail(),
+		"actor_role":     item.GetActorRole(),
+		"action":         item.GetAction(),
+		"resource_type":  item.GetResourceType(),
+		"resource_id":    item.GetResourceId(),
+		"summary":        item.GetSummary(),
+		"ip":             item.GetIp(),
+		"user_agent":     item.GetUserAgent(),
+		"created_at":     item.GetCreatedAt(),
 	}
 }

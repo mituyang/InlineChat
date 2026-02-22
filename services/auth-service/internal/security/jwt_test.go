@@ -7,7 +7,7 @@ import (
 
 func TestIssueAndParseToken(t *testing.T) {
 	secret := []byte("test-secret")
-	token, err := IssueToken(secret, "test-issuer", time.Hour, 1001, "admin@example.com", "admin")
+	token, err := IssueToken(secret, "test-issuer", time.Hour, 1001, "admin@example.com", "admin", 3)
 	if err != nil {
 		t.Fatalf("issue token failed: %v", err)
 	}
@@ -26,12 +26,15 @@ func TestIssueAndParseToken(t *testing.T) {
 	if claims.Role != "admin" {
 		t.Fatalf("unexpected role: %s", claims.Role)
 	}
+	if claims.TokenVersion != 3 {
+		t.Fatalf("unexpected token_version: %d", claims.TokenVersion)
+	}
 }
 
 func TestParseTokenAnyWithPreviousSecret(t *testing.T) {
 	currentSecret := []byte("current-secret")
 	previousSecret := []byte("previous-secret")
-	token, err := IssueToken(previousSecret, "test-issuer", time.Hour, 1002, "agent@example.com", "agent")
+	token, err := IssueToken(previousSecret, "test-issuer", time.Hour, 1002, "agent@example.com", "agent", 1)
 	if err != nil {
 		t.Fatalf("issue token failed: %v", err)
 	}

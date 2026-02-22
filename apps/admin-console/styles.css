@@ -191,7 +191,7 @@ body.auth-guard .shell {
 }
 
 .panel-ops {
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
 }
 
 .panel-head {
@@ -288,6 +288,18 @@ body.auth-guard .shell {
   font-size: 11px;
 }
 
+.item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.item-actions button {
+  min-height: 34px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
 .demo-link {
   width: fit-content;
   font-size: 12px;
@@ -374,6 +386,11 @@ body.auth-guard .shell {
 }
 
 .operation-time {
+  font-size: 12px;
+  color: var(--text-sub);
+}
+
+.operation-meta {
   font-size: 12px;
   color: var(--text-sub);
 }

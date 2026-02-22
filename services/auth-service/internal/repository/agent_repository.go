@@ -15,6 +15,7 @@ type AgentRepository interface {
 	Create(ctx context.Context, agent *model.Agent) error
 	Save(ctx context.Context, agent *model.Agent) error
 	GetByEmail(ctx context.Context, email string) (*model.Agent, error)
+	GetByID(ctx context.Context, id uint64) (*model.Agent, error)
 }
 
 type GormAgentRepository struct {
@@ -36,6 +37,17 @@ func (r *GormAgentRepository) Save(ctx context.Context, agent *model.Agent) erro
 func (r *GormAgentRepository) GetByEmail(ctx context.Context, email string) (*model.Agent, error) {
 	var agent model.Agent
 	if err := r.db.WithContext(ctx).Where("email = ?", email).First(&agent).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &agent, nil
+}
+
+func (r *GormAgentRepository) GetByID(ctx context.Context, id uint64) (*model.Agent, error) {
+	var agent model.Agent
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&agent).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}

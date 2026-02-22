@@ -346,6 +346,18 @@ func (c *dynamicAdminClient) ListSites(ctx context.Context, in *adminv1.ListSite
 	})
 }
 
+func (c *dynamicAdminClient) UpdateSiteStatus(ctx context.Context, in *adminv1.UpdateSiteStatusRequest, opts ...grpc.CallOption) (*adminv1.Site, error) {
+	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.Site, error) {
+		return client.UpdateSiteStatus(ctx, in, opts...)
+	})
+}
+
+func (c *dynamicAdminClient) RotateSiteWidgetKey(ctx context.Context, in *adminv1.RotateSiteWidgetKeyRequest, opts ...grpc.CallOption) (*adminv1.Site, error) {
+	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.Site, error) {
+		return client.RotateSiteWidgetKey(ctx, in, opts...)
+	})
+}
+
 func (c *dynamicAdminClient) GetSiteBySiteID(ctx context.Context, in *adminv1.GetSiteBySiteIDRequest, opts ...grpc.CallOption) (*adminv1.Site, error) {
 	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.Site, error) {
 		return client.GetSiteBySiteID(ctx, in, opts...)
@@ -367,5 +379,29 @@ func (c *dynamicAdminClient) CreateAgent(ctx context.Context, in *adminv1.Create
 func (c *dynamicAdminClient) ListAgents(ctx context.Context, in *adminv1.ListAgentsRequest, opts ...grpc.CallOption) (*adminv1.ListAgentsResponse, error) {
 	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.ListAgentsResponse, error) {
 		return client.ListAgents(ctx, in, opts...)
+	})
+}
+
+func (c *dynamicAdminClient) UpdateAgentStatus(ctx context.Context, in *adminv1.UpdateAgentStatusRequest, opts ...grpc.CallOption) (*adminv1.Agent, error) {
+	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.Agent, error) {
+		return client.UpdateAgentStatus(ctx, in, opts...)
+	})
+}
+
+func (c *dynamicAdminClient) ResetAgentPassword(ctx context.Context, in *adminv1.ResetAgentPasswordRequest, opts ...grpc.CallOption) (*adminv1.Agent, error) {
+	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.Agent, error) {
+		return client.ResetAgentPassword(ctx, in, opts...)
+	})
+}
+
+func (c *dynamicAdminClient) ForceAgentLogout(ctx context.Context, in *adminv1.ForceAgentLogoutRequest, opts ...grpc.CallOption) (*adminv1.Agent, error) {
+	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.Agent, error) {
+		return client.ForceAgentLogout(ctx, in, opts...)
+	})
+}
+
+func (c *dynamicAdminClient) ListAuditLogs(ctx context.Context, in *adminv1.ListAuditLogsRequest, opts ...grpc.CallOption) (*adminv1.ListAuditLogsResponse, error) {
+	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.ListAuditLogsResponse, error) {
+		return client.ListAuditLogs(ctx, in, opts...)
 	})
 }

@@ -9,6 +9,7 @@ type Agent struct {
 	DisplayName  string    `gorm:"size:128;not null;uniqueIndex" json:"display_name"`
 	Role         string    `gorm:"size:32;not null;index" json:"role"`
 	Status       string    `gorm:"size:32;not null;index" json:"status"`
+	TokenVersion uint64    `gorm:"not null;default:1" json:"token_version"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

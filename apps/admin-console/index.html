@@ -119,8 +119,28 @@
 
         <section class="card panel panel-ops">
           <div class="panel-head">
-            <h2>操作动态</h2>
-            <button id="clearFeedBtn" type="button" class="ghost">清空</button>
+            <h2>审计日志</h2>
+            <button id="refreshAuditBtn" type="button" class="ghost">刷新</button>
+          </div>
+          <div class="panel-tools">
+            <input id="auditActorInput" type="search" placeholder="按操作者ID筛选（可选）" />
+            <div class="panel-tools two-col">
+              <select id="auditActionFilter">
+                <option value="">全部动作</option>
+                <option value="site.create">site.create</option>
+                <option value="site.update_status">site.update_status</option>
+                <option value="site.rotate_widget_key">site.rotate_widget_key</option>
+                <option value="agent.create">agent.create</option>
+                <option value="agent.update_status">agent.update_status</option>
+                <option value="agent.reset_password">agent.reset_password</option>
+                <option value="agent.force_logout">agent.force_logout</option>
+              </select>
+              <select id="auditResourceFilter">
+                <option value="">全部资源</option>
+                <option value="site">site</option>
+                <option value="agent">agent</option>
+              </select>
+            </div>
           </div>
           <ul id="operationFeed" class="operation-feed"></ul>
         </section>
