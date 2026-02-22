@@ -68,6 +68,7 @@ async function bootstrap() {
         upsertConversationHistoryEntry({
           conversation_id: storedConversationID,
           status: normalizeConversationStatus(conversation.status) || "open",
+          assigned_agent_id: conversation.assigned_agent_id,
           updated_at: String(conversation.updated_at || conversation.created_at || "").trim() || new Date().toISOString(),
         });
       } else {
@@ -229,6 +230,7 @@ function normalizeHistoryEntry(item) {
   return {
     conversation_id: conversationID,
     status: normalizeConversationStatus(item.status) || "open",
+    assigned_agent_id: normalizeAssignedAgentID(item.assigned_agent_id),
     preview: String(item.preview || "").trim().slice(0, 120),
     updated_at: String(item.updated_at || "").trim(),
   };
@@ -254,6 +256,8 @@ function upsertConversationHistoryEntry(entry) {
   if (!normalized) {
     return;
   }
+  const hasAssignedAgentID =
+    Boolean(entry) && typeof entry === "object" && Object.prototype.hasOwnProperty.call(entry, "assigned_agent_id");
 
   let found = false;
   const next = state.conversationHistory.map((item) => {
@@ -264,6 +268,7 @@ function upsertConversationHistoryEntry(entry) {
     return {
       ...item,
       status: normalized.status || item.status,
+      assigned_agent_id: hasAssignedAgentID ? normalized.assigned_agent_id : normalizeAssignedAgentID(item.assigned_agent_id),
       preview: normalized.preview || item.preview,
       updated_at: normalized.updated_at || item.updated_at,
     };
@@ -292,6 +297,22 @@ function summarizeMessagePreview(text) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 80);
+}
+
+function normalizeAssignedAgentID(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 0;
+  }
+  return Math.floor(numeric);
+}
+
+function formatAgentID4(value) {
+  const numeric = normalizeAssignedAgentID(value);
+  if (numeric <= 0) {
+    return "";
+  }
+  return String(numeric).padStart(4, "0");
 }
 
 function formatHistoryTime(value) {
@@ -346,7 +367,8 @@ function renderConversationHistory() {
 
     const title = document.createElement("div");
     title.className = "history-item-title";
-    title.textContent = "与客服聊天";
+    const formattedAgentID = formatAgentID4(item.assigned_agent_id);
+    title.textContent = formattedAgentID ? `客服${formattedAgentID}` : "客服待接入";
 
     const time = document.createElement("div");
     time.className = "history-item-time";
@@ -395,6 +417,7 @@ async function refreshHistoryConversationStatuses() {
       upsertConversationHistoryEntry({
         conversation_id: conversationID,
         status: normalizeConversationStatus(conversation.status) || item.status || "open",
+        assigned_agent_id: conversation.assigned_agent_id,
         updated_at: String(conversation.updated_at || conversation.created_at || item.updated_at || "").trim() || new Date().toISOString(),
       });
     } catch {
@@ -523,6 +546,12 @@ async function syncConversationStatus() {
     return;
   }
   applyConversationStatus(conversation.status, true);
+  upsertConversationHistoryEntry({
+    conversation_id: state.conversationID,
+    status: normalizeConversationStatus(conversation.status) || state.conversationStatus || "open",
+    assigned_agent_id: conversation.assigned_agent_id,
+    updated_at: String(conversation.updated_at || conversation.created_at || "").trim(),
+  });
 }
 
 function loadVisitorToken() {
@@ -584,6 +613,7 @@ async function prepareConversation(forceNew, createWhenMissing = true) {
   upsertConversationHistoryEntry({
     conversation_id: conversationID,
     status: state.conversationStatus,
+    assigned_agent_id: conversationMeta?.assigned_agent_id,
     updated_at: String(conversationMeta?.updated_at || conversationMeta?.created_at || "").trim() || new Date().toISOString(),
   });
   updateSessionUI();
