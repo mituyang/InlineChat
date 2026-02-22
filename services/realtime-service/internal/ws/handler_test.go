@@ -15,7 +15,10 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
+	"inlinechat/services/realtime-service/internal/authclient"
 	"inlinechat/services/realtime-service/internal/chatclient"
 )
 
@@ -35,6 +38,30 @@ type fakeChatClient struct {
 	conversationErr error
 	listMessages    []*chatclient.Message
 	listMessagesErr error
+}
+
+type fakeAuthClient struct {
+	mu             sync.Mutex
+	meResp         *authclient.MeResult
+	meErr          error
+	authorizations []string
+}
+
+func (f *fakeAuthClient) Me(_ context.Context, authorization string) (*authclient.MeResult, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.authorizations = append(f.authorizations, authorization)
+	if f.meErr != nil {
+		return nil, f.meErr
+	}
+	if f.meResp == nil {
+		return &authclient.MeResult{
+			AgentID: 7,
+			Role:    "agent",
+		}, nil
+	}
+	cp := *f.meResp
+	return &cp, nil
 }
 
 func (f *fakeChatClient) CreateMessage(_ context.Context, conversationID uint64, req chatclient.CreateMessageRequest) (*chatclient.Message, error) {
@@ -104,7 +131,7 @@ func TestHandlerMessageSendDefaultVisitor(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{resp: &chatclient.Message{ID: 11, ConversationID: 1, Status: "sent"}}
-	handler := NewHandler(NewHub(), fakeClient, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
 
@@ -156,7 +183,8 @@ func TestHandlerMessageSendAgentWithToken(t *testing.T) {
 	token := mustIssueAgentToken(t, secret, issuer, 7, "agent")
 
 	fakeClient := &fakeChatClient{resp: &chatclient.Message{ID: 22, ConversationID: 2, Status: "sent"}}
-	handler := NewHandler(NewHub(), fakeClient, []string{testAllowedOrigin}, time.Second, secret, "", issuer, zap.NewNop())
+	fakeAuth := &fakeAuthClient{meResp: &authclient.MeResult{AgentID: 7, Role: "agent"}}
+	handler := NewHandler(NewHub(), fakeClient, fakeAuth, []string{testAllowedOrigin}, time.Second, secret, "", issuer, zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
 
@@ -199,7 +227,7 @@ func TestHandlerMessageSendAgentWithoutToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{}
-	handler := NewHandler(NewHub(), fakeClient, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
 
@@ -246,7 +274,7 @@ func TestHandlerMessageSendCreateMessageFailedReturnsNack(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{err: context.DeadlineExceeded}
-	handler := NewHandler(NewHub(), fakeClient, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
 
@@ -286,7 +314,7 @@ func TestHandlerMessageSendTooLongReturnsNack(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{}
-	handler := NewHandler(NewHub(), fakeClient, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
 
@@ -329,7 +357,7 @@ func TestHandlerMessageSendTooLongReturnsNack(t *testing.T) {
 func TestHandlerRejectInvalidAccessToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	handler := NewHandler(NewHub(), &fakeChatClient{}, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/4?access_token=bad"
@@ -342,10 +370,41 @@ func TestHandlerRejectInvalidAccessToken(t *testing.T) {
 	}
 }
 
+func TestHandlerRejectAccessTokenInvalidatedByAuthService(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	secret := "secret"
+	issuer := "inlinechat-auth"
+	token := mustIssueAgentToken(t, secret, issuer, 7, "agent")
+	fakeAuth := &fakeAuthClient{
+		meErr: status.Error(codes.Unauthenticated, "invalid token"),
+	}
+	handler := NewHandler(NewHub(), &fakeChatClient{}, fakeAuth, []string{testAllowedOrigin}, time.Second, secret, "", issuer, zap.NewNop())
+	ts := newWSTestServer(t, handler)
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/4?access_token=" + url.QueryEscape(token)
+	_, resp, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
+	if err == nil {
+		t.Fatal("expected websocket handshake error")
+	}
+	if resp == nil || resp.StatusCode != 401 {
+		t.Fatalf("expected 401 handshake response, got %+v err=%v", resp, err)
+	}
+
+	fakeAuth.mu.Lock()
+	defer fakeAuth.mu.Unlock()
+	if len(fakeAuth.authorizations) != 1 {
+		t.Fatalf("expected auth me called once, got %d", len(fakeAuth.authorizations))
+	}
+	if fakeAuth.authorizations[0] != "Bearer "+token {
+		t.Fatalf("unexpected authorization header: %s", fakeAuth.authorizations[0])
+	}
+}
+
 func TestHandlerRejectMissingVisitorToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	handler := NewHandler(NewHub(), &fakeChatClient{}, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6"
@@ -361,7 +420,7 @@ func TestHandlerRejectMissingVisitorToken(t *testing.T) {
 func TestHandlerRejectDisallowedOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	handler := NewHandler(NewHub(), &fakeChatClient{}, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6?visitor_token=vt_1"
@@ -384,7 +443,7 @@ func TestHandlerReplayMessagesAfterLastMessageID(t *testing.T) {
 			{ID: 13, ConversationID: 1, SenderType: "agent", Content: "m13", ClientMsgID: "c13", Status: "sent"},
 		},
 	}
-	handler := NewHandler(NewHub(), fakeClient, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
 
@@ -403,11 +462,87 @@ func TestHandlerReplayMessagesAfterLastMessageID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read second replay message failed: %v", err)
 	}
+	_, endRaw, err := readWSMessage(t, conn)
+	if err != nil {
+		t.Fatalf("read replay end message failed: %v", err)
+	}
 
 	firstID := mustReadMessageIDFromEvent(t, firstRaw)
 	secondID := mustReadMessageIDFromEvent(t, secondRaw)
 	if firstID != 14 || secondID != 15 {
 		t.Fatalf("expected replay order 14 -> 15, got %d -> %d", firstID, secondID)
+	}
+	replayEnd := mustReadReplayEndPayload(t, endRaw)
+	if replayEnd.LastMessageID != 15 {
+		t.Fatalf("expected replay end last_message_id=15, got %d", replayEnd.LastMessageID)
+	}
+	if replayEnd.ReplayedCount != 2 {
+		t.Fatalf("expected replayed_count=2, got %d", replayEnd.ReplayedCount)
+	}
+	if replayEnd.Truncated {
+		t.Fatal("expected truncated=false")
+	}
+	if replayEnd.NextBeforeID != 0 {
+		t.Fatalf("expected next_before_id=0, got %d", replayEnd.NextBeforeID)
+	}
+}
+
+func TestHandlerReplayMessagesTruncatedSendsNextBeforeID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	previousLimit := maxReplayMessages
+	maxReplayMessages = 3
+	t.Cleanup(func() {
+		maxReplayMessages = previousLimit
+	})
+
+	fakeClient := &fakeChatClient{
+		listMessages: []*chatclient.Message{
+			{ID: 16, ConversationID: 1, SenderType: "agent", Content: "m16", ClientMsgID: "c16", Status: "sent"},
+			{ID: 15, ConversationID: 1, SenderType: "agent", Content: "m15", ClientMsgID: "c15", Status: "sent"},
+			{ID: 14, ConversationID: 1, SenderType: "agent", Content: "m14", ClientMsgID: "c14", Status: "sent"},
+			{ID: 13, ConversationID: 1, SenderType: "agent", Content: "m13", ClientMsgID: "c13", Status: "sent"},
+			{ID: 12, ConversationID: 1, SenderType: "agent", Content: "m12", ClientMsgID: "c12", Status: "sent"},
+		},
+	}
+	handler := NewHandler(NewHub(), fakeClient, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+
+	ts := newWSTestServer(t, handler)
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/1?visitor_token=vt_1&last_message_id=1"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
+	if err != nil {
+		t.Fatalf("dial websocket failed: %v", err)
+	}
+	defer conn.Close()
+
+	gotIDs := make([]uint64, 0, 3)
+	for i := 0; i < 3; i++ {
+		_, raw, readErr := readWSMessage(t, conn)
+		if readErr != nil {
+			t.Fatalf("read replay message failed: %v", readErr)
+		}
+		gotIDs = append(gotIDs, mustReadMessageIDFromEvent(t, raw))
+	}
+	if gotIDs[0] != 14 || gotIDs[1] != 15 || gotIDs[2] != 16 {
+		t.Fatalf("expected replay order 14 -> 15 -> 16, got %v", gotIDs)
+	}
+
+	_, endRaw, err := readWSMessage(t, conn)
+	if err != nil {
+		t.Fatalf("read replay end message failed: %v", err)
+	}
+	replayEnd := mustReadReplayEndPayload(t, endRaw)
+	if replayEnd.LastMessageID != 16 {
+		t.Fatalf("expected replay end last_message_id=16, got %d", replayEnd.LastMessageID)
+	}
+	if replayEnd.ReplayedCount != 3 {
+		t.Fatalf("expected replayed_count=3, got %d", replayEnd.ReplayedCount)
+	}
+	if !replayEnd.Truncated {
+		t.Fatal("expected truncated=true")
+	}
+	if replayEnd.NextBeforeID != 14 {
+		t.Fatalf("expected next_before_id=14, got %d", replayEnd.NextBeforeID)
 	}
 }
 
@@ -509,4 +644,36 @@ func mustReadMessageIDFromEvent(t *testing.T, raw []byte) uint64 {
 		t.Fatalf("expected message.new event, got %s", env.Type)
 	}
 	return env.Payload.Message.ID
+}
+
+type replayEndPayload struct {
+	LastMessageID uint64
+	ReplayedCount int
+	Truncated     bool
+	NextBeforeID  uint64
+}
+
+func mustReadReplayEndPayload(t *testing.T, raw []byte) replayEndPayload {
+	t.Helper()
+	var env struct {
+		Type    string `json:"type"`
+		Payload struct {
+			LastMessageID uint64 `json:"last_message_id"`
+			ReplayedCount int    `json:"replayed_count"`
+			Truncated     bool   `json:"truncated"`
+			NextBeforeID  uint64 `json:"next_before_id"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("unmarshal replay end event failed: %v", err)
+	}
+	if env.Type != "replay.end" {
+		t.Fatalf("expected replay.end event, got %s", env.Type)
+	}
+	return replayEndPayload{
+		LastMessageID: env.Payload.LastMessageID,
+		ReplayedCount: env.Payload.ReplayedCount,
+		Truncated:     env.Payload.Truncated,
+		NextBeforeID:  env.Payload.NextBeforeID,
+	}
 }

@@ -24,6 +24,7 @@ type Config struct {
 	ETCDRegisterTTLSec           int
 	DiscoveryPrefix              string
 	ChatServiceName              string
+	AuthServiceName              string
 	ServiceName                  string
 	ServiceInstanceID            string
 	ServiceAdvertiseHTTPEndpoint string
@@ -47,6 +48,7 @@ func Load() (Config, error) {
 		ETCDRegisterTTLSec:           getIntEnv("ETCD_REGISTER_TTL_SEC", 15),
 		DiscoveryPrefix:              getEnv("DISCOVERY_PREFIX", "/inlinechat/services"),
 		ChatServiceName:              getEnv("CHAT_SERVICE_NAME", "chat-service"),
+		AuthServiceName:              getEnv("AUTH_SERVICE_NAME", "auth-service"),
 		ServiceName:                  getEnv("SERVICE_NAME", "realtime-service"),
 		ServiceInstanceID:            strings.TrimSpace(os.Getenv("SERVICE_INSTANCE_ID")),
 		ServiceAdvertiseHTTPEndpoint: os.Getenv("SERVICE_ADVERTISE_HTTP_ENDPOINT"),
@@ -75,6 +77,9 @@ func Load() (Config, error) {
 	}
 	if cfg.ChatServiceName == "" {
 		return Config{}, fmt.Errorf("CHAT_SERVICE_NAME is required")
+	}
+	if cfg.AuthServiceName == "" {
+		return Config{}, fmt.Errorf("AUTH_SERVICE_NAME is required")
 	}
 	if cfg.ServiceName == "" {
 		return Config{}, fmt.Errorf("SERVICE_NAME is required")

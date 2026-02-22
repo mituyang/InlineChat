@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 )
 
 type fakeConversationRepository struct {
+	mu     sync.RWMutex
 	items  map[uint64]*model.Conversation
 	nextID uint64
 }
@@ -36,6 +38,8 @@ func newFakeConversationRepository(seed map[uint64]*model.Conversation) *fakeCon
 }
 
 func (r *fakeConversationRepository) Create(_ context.Context, conversation *model.Conversation) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if conversation.ID == 0 {
 		conversation.ID = r.nextID
 		r.nextID++
@@ -45,6 +49,8 @@ func (r *fakeConversationRepository) Create(_ context.Context, conversation *mod
 }
 
 func (r *fakeConversationRepository) GetByID(_ context.Context, id uint64) (*model.Conversation, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	item, ok := r.items[id]
 	if !ok {
 		return nil, repository.ErrNotFound
@@ -53,6 +59,8 @@ func (r *fakeConversationRepository) GetByID(_ context.Context, id uint64) (*mod
 }
 
 func (r *fakeConversationRepository) GetLatestOpenBySiteVisitor(_ context.Context, siteID string, visitorToken string) (*model.Conversation, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	var latest *model.Conversation
 	for _, item := range r.items {
 		if item.SiteID != siteID || item.VisitorToken != visitorToken || item.Status != "open" {
@@ -69,6 +77,8 @@ func (r *fakeConversationRepository) GetLatestOpenBySiteVisitor(_ context.Contex
 }
 
 func (r *fakeConversationRepository) List(_ context.Context, filter repository.ListConversationsFilter) ([]model.Conversation, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	filtered := make([]*model.Conversation, 0, len(r.items))
 	for _, item := range r.items {
 		if filter.Status != "" && item.Status != filter.Status {
@@ -113,6 +123,8 @@ func (r *fakeConversationRepository) List(_ context.Context, filter repository.L
 }
 
 func (r *fakeConversationRepository) Mutate(_ context.Context, id uint64, mutation repository.ConversationMutation) (*model.Conversation, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	current, ok := r.items[id]
 	if !ok {
 		return nil, repository.ErrNotFound
@@ -127,6 +139,42 @@ func (r *fakeConversationRepository) Mutate(_ context.Context, id uint64, mutati
 		r.items[id] = cloneConversation(working)
 	}
 	return cloneConversation(r.items[id]), nil
+}
+
+type fakeConversationLocker struct {
+	lockFn func(ctx context.Context, key string, ttl time.Duration) (UnlockFunc, error)
+}
+
+func (f *fakeConversationLocker) Lock(ctx context.Context, key string, ttl time.Duration) (UnlockFunc, error) {
+	if f != nil && f.lockFn != nil {
+		return f.lockFn(ctx, key, ttl)
+	}
+	return func(context.Context) error { return nil }, nil
+}
+
+type serialConversationLocker struct {
+	token chan struct{}
+}
+
+func newSerialConversationLocker() *serialConversationLocker {
+	ch := make(chan struct{}, 1)
+	ch <- struct{}{}
+	return &serialConversationLocker{token: ch}
+}
+
+func (l *serialConversationLocker) Lock(ctx context.Context, _ string, _ time.Duration) (UnlockFunc, error) {
+	if l == nil || l.token == nil {
+		return nil, errors.New("locker unavailable")
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-l.token:
+	}
+	return func(context.Context) error {
+		l.token <- struct{}{}
+		return nil
+	}, nil
 }
 
 type fakeMessageRepository struct {
@@ -463,6 +511,76 @@ func TestCreateConversationCreatesNewWhenNoOpenConversation(t *testing.T) {
 	}
 	if len(repo.items) != 2 {
 		t.Fatalf("expected total conversations=2, got %d", len(repo.items))
+	}
+}
+
+func TestCreateConversationReturnsErrorWhenLockFailed(t *testing.T) {
+	svc, repo, _, _ := testChatServiceWithConversations(nil)
+	lockErr := errors.New("lock unavailable")
+	svc.SetConversationLocker(&fakeConversationLocker{
+		lockFn: func(_ context.Context, _ string, _ time.Duration) (UnlockFunc, error) {
+			return nil, lockErr
+		},
+	})
+
+	_, err := svc.CreateConversation(context.Background(), CreateConversationInput{
+		SiteID:       "site_demo",
+		VisitorToken: "vt_1",
+	})
+	if !errors.Is(err, lockErr) {
+		t.Fatalf("expected lock error, got %v", err)
+	}
+	if len(repo.items) != 0 {
+		t.Fatalf("expected no conversation created, got %d", len(repo.items))
+	}
+}
+
+func TestCreateConversationConcurrentIdempotentWithLocker(t *testing.T) {
+	svc, repo, _, _ := testChatServiceWithConversations(nil)
+	svc.SetConversationLocker(newSerialConversationLocker())
+
+	const workers = 8
+	var (
+		wg      sync.WaitGroup
+		mu      sync.Mutex
+		created []uint64
+	)
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			out, err := svc.CreateConversation(context.Background(), CreateConversationInput{
+				SiteID:       "site_demo",
+				VisitorToken: "vt_concurrent",
+			})
+			if err != nil {
+				t.Errorf("CreateConversation failed: %v", err)
+				return
+			}
+			mu.Lock()
+			created = append(created, out.ID)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	if len(created) != workers {
+		t.Fatalf("expected %d results, got %d", workers, len(created))
+	}
+	firstID := created[0]
+	if firstID == 0 {
+		t.Fatal("expected created conversation id > 0")
+	}
+	for i := range created {
+		if created[i] != firstID {
+			t.Fatalf("expected all goroutines share one conversation id=%d, got %+v", firstID, created)
+		}
+	}
+
+	repo.mu.RLock()
+	defer repo.mu.RUnlock()
+	if len(repo.items) != 1 {
+		t.Fatalf("expected one conversation in repository, got %d", len(repo.items))
 	}
 }
 

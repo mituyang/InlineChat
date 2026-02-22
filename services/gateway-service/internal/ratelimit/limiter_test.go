@@ -80,3 +80,37 @@ func TestLimiterDistributedCounterFallbackToLocal(t *testing.T) {
 		t.Fatal("third request should be blocked by local fallback")
 	}
 }
+
+func TestLimiterDistributedCounterCircuitOpenAndRecover(t *testing.T) {
+	limiter := New(1000, 1000, time.Minute, 100)
+	counter := &fakeDistributedCounter{err: errors.New("redis unavailable")}
+	limiter.EnableDistributedCounterWithCircuit(counter, "gateway:ratelimit:test", time.Minute, 50*time.Millisecond, 2, 200*time.Millisecond)
+
+	key := "visitor:circuit"
+	if !limiter.Allow(key) {
+		t.Fatal("first request should be allowed by local fallback")
+	}
+	if !limiter.Allow(key) {
+		t.Fatal("second request should be allowed by local fallback")
+	}
+	callsAfterOpen := len(counter.calls)
+	if callsAfterOpen != 2 {
+		t.Fatalf("expected 2 distributed calls before circuit open, got %d", callsAfterOpen)
+	}
+
+	if !limiter.Allow(key) {
+		t.Fatal("third request should be allowed by local fallback while circuit open")
+	}
+	if len(counter.calls) != callsAfterOpen {
+		t.Fatalf("expected circuit open to skip distributed calls, got %d calls", len(counter.calls))
+	}
+
+	time.Sleep(220 * time.Millisecond)
+	counter.err = nil
+	if !limiter.Allow(key) {
+		t.Fatal("request should be allowed after circuit window and remote recovery")
+	}
+	if len(counter.calls) <= callsAfterOpen {
+		t.Fatalf("expected distributed calls resumed after circuit window, got %d calls", len(counter.calls))
+	}
+}

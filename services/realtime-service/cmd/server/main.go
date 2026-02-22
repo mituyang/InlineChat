@@ -18,6 +18,7 @@ import (
 
 	shareddiscovery "inlinechat/packages/discovery"
 	httpmiddleware "inlinechat/packages/httpmiddleware"
+	"inlinechat/services/realtime-service/internal/authclient"
 	"inlinechat/services/realtime-service/internal/chatclient"
 	"inlinechat/services/realtime-service/internal/config"
 	"inlinechat/services/realtime-service/internal/logger"
@@ -70,6 +71,9 @@ func main() {
 	if _, err := shareddiscovery.ResolveWithRetry(resolver, cfg.ChatServiceName, "grpc", 30*time.Second); err != nil {
 		appLogger.Fatal("failed to resolve chat grpc target from etcd", zap.Error(err), zap.String("service_name", cfg.ChatServiceName))
 	}
+	if _, err := shareddiscovery.ResolveWithRetry(resolver, cfg.AuthServiceName, "grpc", 30*time.Second); err != nil {
+		appLogger.Fatal("failed to resolve auth grpc target from etcd", zap.Error(err), zap.String("service_name", cfg.AuthServiceName))
+	}
 	chatClient, err := chatclient.NewDynamic(resolver, cfg.ChatServiceName, "grpc", dialTimeout)
 	if err != nil {
 		appLogger.Fatal("failed to connect chat grpc", zap.Error(err), zap.String("service_name", cfg.ChatServiceName))
@@ -79,9 +83,19 @@ func main() {
 			appLogger.Warn("close chat grpc client failed", zap.Error(err))
 		}
 	}()
+	authClient, err := authclient.NewDynamic(resolver, cfg.AuthServiceName, "grpc", dialTimeout)
+	if err != nil {
+		appLogger.Fatal("failed to connect auth grpc", zap.Error(err), zap.String("service_name", cfg.AuthServiceName))
+	}
+	defer func() {
+		if err := authClient.Close(); err != nil {
+			appLogger.Warn("close auth grpc client failed", zap.Error(err))
+		}
+	}()
 	wsHandler := ws.NewHandler(
 		hub,
 		chatClient,
+		authClient,
 		cfg.AllowedOrigins,
 		callTimeout,
 		cfg.JWTSecret,
@@ -116,6 +130,7 @@ func main() {
 
 	appLogger.Info("resolved and registered discovery endpoints",
 		zap.String("chat_grpc_target", chatClient.Target()),
+		zap.String("auth_grpc_target", authClient.Target()),
 		zap.String("realtime_http_advertise", cfg.ServiceAdvertiseHTTPEndpoint),
 		zap.String("service_name", cfg.ServiceName),
 	)
@@ -217,6 +232,12 @@ func main() {
 			failures["chat_grpc"] = err.Error()
 		} else if strings.TrimSpace(target) == "" {
 			failures["chat_grpc"] = "empty target"
+		}
+		target, err = resolver.Resolve(checkCtx, cfg.AuthServiceName, "grpc")
+		if err != nil {
+			failures["auth_grpc"] = err.Error()
+		} else if strings.TrimSpace(target) == "" {
+			failures["auth_grpc"] = "empty target"
 		}
 
 		if len(failures) > 0 {

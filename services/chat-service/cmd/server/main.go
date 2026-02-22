@@ -23,6 +23,7 @@ import (
 	chatv1 "inlinechat/services/chat-service/internal/gen/chatv1"
 	"inlinechat/services/chat-service/internal/grpcserver"
 	"inlinechat/services/chat-service/internal/handler"
+	"inlinechat/services/chat-service/internal/locker"
 	"inlinechat/services/chat-service/internal/logger"
 	"inlinechat/services/chat-service/internal/pubsub"
 	"inlinechat/services/chat-service/internal/repository"
@@ -100,6 +101,7 @@ func main() {
 	outboxWakeupBus := pubsub.NewRedisOutboxWakeupBus(redisClient, 2*time.Second)
 	autoCloseAfter := time.Duration(cfg.AutoCloseAfterSec) * time.Second
 	chatSvc := service.New(conversationRepo, messageRepo, appLogger, messagePublisher, autoCloseAfter)
+	chatSvc.SetConversationLocker(locker.NewRedisConversationLocker(redisClient, "", 0))
 	if cfg.EventOutboxEnabled {
 		chatSvc.EnableEventOutbox(txManager, outboxRepo)
 		chatSvc.SetOutboxNotifier(outboxWakeupBus)

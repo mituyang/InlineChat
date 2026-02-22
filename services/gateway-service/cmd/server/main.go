@@ -128,11 +128,14 @@ func main() {
 		} else {
 			counter := ratelimit.NewRedisCounter(rateLimitRedis)
 			timeout := time.Duration(cfg.RateLimitRedisTimeout) * time.Millisecond
-			loginLimiter.EnableDistributedCounter(counter, cfg.RateLimitRedisPrefix+":login", time.Minute, timeout)
-			visitorLimiter.EnableDistributedCounter(counter, cfg.RateLimitRedisPrefix+":visitor", time.Minute, timeout)
+			circuitOpenWindow := time.Duration(cfg.RateLimitRedisCircuitOpenSec) * time.Second
+			loginLimiter.EnableDistributedCounterWithCircuit(counter, cfg.RateLimitRedisPrefix+":login", time.Minute, timeout, cfg.RateLimitRedisFailThreshold, circuitOpenWindow)
+			visitorLimiter.EnableDistributedCounterWithCircuit(counter, cfg.RateLimitRedisPrefix+":visitor", time.Minute, timeout, cfg.RateLimitRedisFailThreshold, circuitOpenWindow)
 			appLogger.Info("rate limit distributed mode enabled",
 				zap.String("redis_addr", redisAddr),
 				zap.String("prefix", cfg.RateLimitRedisPrefix),
+				zap.Int("fail_threshold", cfg.RateLimitRedisFailThreshold),
+				zap.Duration("circuit_open_window", circuitOpenWindow),
 			)
 		}
 	}

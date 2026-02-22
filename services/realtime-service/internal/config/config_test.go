@@ -17,6 +17,7 @@ func TestLoadSuccessWithDefaultTimeout(t *testing.T) {
 	t.Setenv("ETCD_DIAL_TIMEOUT_SEC", "")
 	t.Setenv("ETCD_REGISTER_TTL_SEC", "")
 	t.Setenv("CHAT_SERVICE_NAME", "chat-service")
+	t.Setenv("AUTH_SERVICE_NAME", "auth-service")
 	t.Setenv("SERVICE_NAME", "realtime-service")
 	t.Setenv("SERVICE_ADVERTISE_HTTP_ENDPOINT", "http://realtime-service:8203")
 
@@ -48,6 +49,7 @@ func TestLoadRejectsInvalidTimeout(t *testing.T) {
 	t.Setenv("ETCD_DIAL_TIMEOUT_SEC", "5")
 	t.Setenv("ETCD_REGISTER_TTL_SEC", "15")
 	t.Setenv("CHAT_SERVICE_NAME", "chat-service")
+	t.Setenv("AUTH_SERVICE_NAME", "auth-service")
 	t.Setenv("SERVICE_NAME", "realtime-service")
 	t.Setenv("SERVICE_ADVERTISE_HTTP_ENDPOINT", "http://realtime-service:8203")
 
@@ -72,6 +74,7 @@ func TestLoadRejectsMissingAllowedOrigins(t *testing.T) {
 	t.Setenv("ETCD_DIAL_TIMEOUT_SEC", "5")
 	t.Setenv("ETCD_REGISTER_TTL_SEC", "15")
 	t.Setenv("CHAT_SERVICE_NAME", "chat-service")
+	t.Setenv("AUTH_SERVICE_NAME", "auth-service")
 	t.Setenv("SERVICE_NAME", "realtime-service")
 	t.Setenv("SERVICE_ADVERTISE_HTTP_ENDPOINT", "http://realtime-service:8203")
 

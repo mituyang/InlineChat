@@ -32,11 +32,13 @@ const (
 	MessageStatusDelivered = "delivered"
 	MessageStatusRead      = "read"
 	MaxMessageContentChars = 2000
+	conversationCreateLock = 5 * time.Second
 )
 
 type ChatService struct {
 	conversationRepo   repository.ConversationRepository
 	messageRepo        repository.MessageRepository
+	conversationLocker ConversationLocker
 	txManager          repository.TransactionManager
 	outboxRepo         repository.EventOutboxRepository
 	outboxNotifier     OutboxEventNotifier
@@ -48,6 +50,12 @@ type ChatService struct {
 
 type OutboxEventNotifier interface {
 	NotifyOutbox(ctx context.Context) error
+}
+
+type UnlockFunc = func(ctx context.Context) error
+
+type ConversationLocker interface {
+	Lock(ctx context.Context, key string, ttl time.Duration) (UnlockFunc, error)
 }
 
 type outboxNotifyContextKey struct{}
@@ -181,6 +189,10 @@ func (s *ChatService) SetOutboxNotifier(notifier OutboxEventNotifier) {
 	s.outboxNotifier = notifier
 }
 
+func (s *ChatService) SetConversationLocker(locker ConversationLocker) {
+	s.conversationLocker = locker
+}
+
 func (s *ChatService) eventOutboxEnabled() bool {
 	return s.txManager != nil && s.outboxRepo != nil
 }
@@ -214,6 +226,25 @@ func (s *ChatService) CreateConversation(ctx context.Context, input CreateConver
 	if input.VisitorToken == "" {
 		return nil, fmt.Errorf("visitor_token is required")
 	}
+	if s.conversationLocker != nil {
+		lockKey := buildConversationCreateLockKey(input.SiteID, input.VisitorToken)
+		unlock, err := s.conversationLocker.Lock(ctx, lockKey, conversationCreateLock)
+		if err != nil {
+			return nil, err
+		}
+		if unlock != nil {
+			defer func() {
+				releaseCtx, releaseCancel := context.WithTimeout(context.Background(), time.Second)
+				defer releaseCancel()
+				if releaseErr := unlock(releaseCtx); releaseErr != nil && s.logger != nil {
+					s.logger.Warn("release conversation create lock failed",
+						zap.Error(releaseErr),
+						zap.String("lock_key", lockKey),
+					)
+				}
+			}()
+		}
+	}
 
 	existing, err := s.conversationRepo.GetLatestOpenBySiteVisitor(ctx, input.SiteID, input.VisitorToken)
 	if err == nil {
@@ -234,6 +265,10 @@ func (s *ChatService) CreateConversation(ctx context.Context, input CreateConver
 	}
 
 	return conversation, nil
+}
+
+func buildConversationCreateLockKey(siteID string, visitorToken string) string {
+	return fmt.Sprintf("conversation:create:%s:%s", siteID, visitorToken)
 }
 
 func (s *ChatService) GetConversation(ctx context.Context, id uint64) (*model.Conversation, error) {

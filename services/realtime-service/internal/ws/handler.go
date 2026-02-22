@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"inlinechat/services/realtime-service/internal/authclient"
 	"inlinechat/services/realtime-service/internal/chatclient"
 	"inlinechat/services/realtime-service/internal/security"
 )
@@ -25,12 +26,14 @@ import (
 const (
 	maxMessageContentChars = 2000
 	replayPageSize         = 100
-	maxReplayMessages      = 500
 )
+
+var maxReplayMessages = 500
 
 type Handler struct {
 	hub             *Hub
 	chatClient      messageClient
+	authClient      authMeClient
 	jwtSecrets      [][]byte
 	jwtIssuer       string
 	allowedOrigins  map[string]struct{}
@@ -63,9 +66,14 @@ type messageClient interface {
 	ListMessages(ctx context.Context, conversationID uint64, in chatclient.ListMessagesInput) ([]*chatclient.Message, error)
 }
 
+type authMeClient interface {
+	Me(ctx context.Context, authorization string) (*authclient.MeResult, error)
+}
+
 func NewHandler(
 	hub *Hub,
 	chatClient messageClient,
+	authClient authMeClient,
 	allowedOrigins []string,
 	chatCallTimeout time.Duration,
 	jwtSecret string,
@@ -85,6 +93,7 @@ func NewHandler(
 	return &Handler{
 		hub:             hub,
 		chatClient:      chatClient,
+		authClient:      authClient,
 		jwtSecrets:      buildJWTSecrets(jwtSecret, jwtPreviousSecret),
 		jwtIssuer:       jwtIssuer,
 		allowedOrigins:  originMap,
@@ -171,10 +180,39 @@ func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64
 		if claims.AgentID == 0 {
 			return connectionContext{}, http.StatusUnauthorized, fmt.Errorf("invalid access_token")
 		}
+		if h.authClient == nil {
+			return connectionContext{}, http.StatusBadGateway, fmt.Errorf("upstream unavailable")
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), h.chatCallTimeout)
+		defer cancel()
+
+		me, err := h.authClient.Me(ctx, "Bearer "+accessToken)
+		if err != nil {
+			if st, ok := status.FromError(err); ok {
+				switch st.Code() {
+				case codes.Unauthenticated:
+					return connectionContext{}, http.StatusUnauthorized, fmt.Errorf("invalid access_token")
+				case codes.PermissionDenied:
+					return connectionContext{}, http.StatusForbidden, fmt.Errorf("agent role required")
+				case codes.DeadlineExceeded:
+					return connectionContext{}, http.StatusGatewayTimeout, fmt.Errorf("upstream timeout")
+				default:
+					return connectionContext{}, http.StatusBadGateway, fmt.Errorf("upstream unavailable")
+				}
+			}
+			return connectionContext{}, http.StatusBadGateway, fmt.Errorf("upstream unavailable")
+		}
+		if strings.TrimSpace(me.Role) != "agent" {
+			return connectionContext{}, http.StatusForbidden, fmt.Errorf("agent role required")
+		}
+		if me.AgentID == 0 || me.AgentID != claims.AgentID {
+			return connectionContext{}, http.StatusUnauthorized, fmt.Errorf("invalid access_token")
+		}
 
 		return connectionContext{
 			Role:    "agent",
-			AgentID: claims.AgentID,
+			AgentID: me.AgentID,
 		}, 0, nil
 	}
 
@@ -259,6 +297,7 @@ func (h *Handler) replayMessages(ctx context.Context, conversationID uint64, las
 
 	beforeID := uint64(0)
 	missed := make([]*chatclient.Message, 0, replayPageSize)
+	truncated := false
 	for len(missed) < maxReplayMessages {
 		callCtx, cancel := context.WithTimeout(ctx, h.chatCallTimeout)
 		items, err := h.chatClient.ListMessages(callCtx, conversationID, chatclient.ListMessagesInput{
@@ -285,6 +324,7 @@ func (h *Handler) replayMessages(ctx context.Context, conversationID uint64, las
 			}
 			missed = append(missed, item)
 			if len(missed) >= maxReplayMessages {
+				truncated = true
 				stop = true
 				break
 			}
@@ -313,6 +353,23 @@ func (h *Handler) replayMessages(ctx context.Context, conversationID uint64, las
 			return fmt.Errorf("client replay queue is full")
 		}
 	}
+
+	lastReplayedID := lastMessageID
+	nextBeforeID := uint64(0)
+	if len(missed) > 0 {
+		lastReplayedID = missed[len(missed)-1].ID
+		if truncated {
+			nextBeforeID = missed[0].ID
+		}
+	}
+	replayEndPayload, err := marshalReplayEndEvent(conversationID, lastReplayedID, len(missed), truncated, nextBeforeID)
+	if err != nil {
+		return err
+	}
+	if !client.TrySend(replayEndPayload) {
+		return fmt.Errorf("client replay queue is full")
+	}
+
 	return nil
 }
 
@@ -340,6 +397,21 @@ func marshalMessageNewEvent(conversationID uint64, msg *chatclient.Message) ([]b
 				"updated_at":      msg.UpdatedAt,
 			},
 		},
+	}
+	return json.Marshal(env)
+}
+
+func marshalReplayEndEvent(conversationID uint64, lastMessageID uint64, replayedCount int, truncated bool, nextBeforeID uint64) ([]byte, error) {
+	payload := map[string]any{
+		"conversation_id": conversationID,
+		"last_message_id": lastMessageID,
+		"replayed_count":  replayedCount,
+		"truncated":       truncated,
+		"next_before_id":  nextBeforeID,
+	}
+	env := map[string]any{
+		"type":    "replay.end",
+		"payload": payload,
 	}
 	return json.Marshal(env)
 }
