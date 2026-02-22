@@ -1063,31 +1063,76 @@ func (h *HTTPHandler) applyVisitorRateLimit(c *gin.Context, action string, siteI
 	if h.visitorLimiter == nil {
 		return true
 	}
-	key := buildVisitorRateLimitKey(c.ClientIP(), action, siteID, conversationID, visitorToken)
-	if h.visitorLimiter.Allow(key) {
-		return true
+	keys := buildVisitorRateLimitKeys(c.ClientIP(), action, siteID, conversationID, visitorToken)
+	for _, key := range keys {
+		if h.visitorLimiter.Allow(key) {
+			continue
+		}
+		middleware.AbortWithError(c, http.StatusTooManyRequests, "rate_limited", "too many requests, please retry later")
+		return false
 	}
-	middleware.AbortWithError(c, http.StatusTooManyRequests, "rate_limited", "too many requests, please retry later")
-	return false
+	return true
 }
 
-func buildVisitorRateLimitKey(clientIP string, action string, siteID string, conversationID uint64, visitorToken string) string {
+func buildVisitorRateLimitKeys(clientIP string, action string, siteID string, conversationID uint64, visitorToken string) []string {
+	actionSeg := sanitizeRateLimitSegment(action)
+	if actionSeg == "" {
+		actionSeg = "unknown_action"
+	}
+
 	visitor := sanitizeRateLimitSegment(visitorToken)
-	if visitor == "" {
-		visitor = "anonymous"
-	}
 	site := sanitizeRateLimitSegment(siteID)
-	if site == "" {
-		site = "unknown"
-	}
 	ip := sanitizeRateLimitSegment(clientIP)
 	if ip == "" {
 		ip = "ip_unknown"
 	}
-	if conversationID > 0 {
-		return fmt.Sprintf("visitor:%s:%s:%d:%s:%s", sanitizeRateLimitSegment(action), site, conversationID, visitor, ip)
+
+	keys := []string{
+		fmt.Sprintf("visitor:ip:%s", ip),
+		fmt.Sprintf("visitor:ip_action:%s:%s", actionSeg, ip),
 	}
-	return fmt.Sprintf("visitor:%s:%s:%s:%s", sanitizeRateLimitSegment(action), site, visitor, ip)
+
+	if site != "" {
+		keys = append(keys,
+			fmt.Sprintf("visitor:site:%s:%s", site, ip),
+			fmt.Sprintf("visitor:site_action:%s:%s:%s", actionSeg, site, ip),
+		)
+	}
+
+	if visitor != "" {
+		keys = append(keys,
+			fmt.Sprintf("visitor:token:%s", visitor),
+			fmt.Sprintf("visitor:token_action:%s:%s", actionSeg, visitor),
+			fmt.Sprintf("visitor:token_ip:%s:%s", visitor, ip),
+		)
+	}
+
+	if conversationID > 0 {
+		keys = append(keys, fmt.Sprintf("visitor:conversation:%d", conversationID))
+		keys = append(keys, fmt.Sprintf("visitor:conversation_action:%s:%d", actionSeg, conversationID))
+		if visitor != "" {
+			keys = append(keys, fmt.Sprintf("visitor:conversation_token:%d:%s", conversationID, visitor))
+		}
+	}
+
+	return dedupeRateLimitKeys(keys)
+}
+
+func dedupeRateLimitKeys(keys []string) []string {
+	seen := make(map[string]struct{}, len(keys))
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		normalized := strings.TrimSpace(key)
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
 }
 
 func sanitizeRateLimitSegment(v string) string {

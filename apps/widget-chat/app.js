@@ -1,12 +1,19 @@
 const params = new URLSearchParams(window.location.search);
 const ACK_TIMEOUT_MS = 5000;
 const CONVERSATION_META_SYNC_MIN_INTERVAL_MS = 2000;
+const WS_AUTO_RETRY_MAX = 2;
+const BACKFILL_SYNC_INTERVAL_MS = 12000;
+const VISITOR_TOKEN_RECORD_VERSION = 1;
+const VISITOR_TOKEN_IDLE_TTL_MS = 1000 * 60 * 60 * 24 * 90;
+const VISITOR_TOKEN_TOUCH_MIN_INTERVAL_MS = 1000 * 60;
 
 const state = {
   siteID: (params.get("site_id") || "").trim(),
   title: (params.get("title") || "在线客服").trim(),
   parentOrigin: (params.get("parent_origin") || "*").trim(),
   visitorToken: "",
+  visitorTokenIssuedAt: 0,
+  visitorTokenLastTouchedAt: 0,
   conversationHistory: [],
   conversationID: "",
   conversationStatus: "",
@@ -21,6 +28,8 @@ const state = {
   pollTimer: null,
   pollInFlight: false,
   pollAttempt: 0,
+  backfillTimer: null,
+  backfillInFlight: false,
   conversationMetaSyncTimer: null,
   conversationMetaSyncInFlight: false,
   conversationMetaSyncedAt: 0,
@@ -160,6 +169,7 @@ function withVisitorToken(path) {
   if (!rawPath) {
     return rawPath;
   }
+  touchVisitorToken();
   const token = String(state.visitorToken || "").trim();
   if (!token) {
     return rawPath;
@@ -600,15 +610,121 @@ async function syncConversationStatus() {
 }
 
 function loadVisitorToken() {
-  const key = visitorTokenKey();
-  const saved = localStorage.getItem(key);
-  if (saved && saved.trim()) {
-    return saved.trim();
+  const now = Date.now();
+  const record = parseVisitorTokenRecord(localStorage.getItem(visitorTokenKey()), now);
+  if (record && !shouldRotateVisitorToken(record, now)) {
+    state.visitorTokenIssuedAt = record.issuedAt;
+    state.visitorTokenLastTouchedAt = now;
+    persistVisitorTokenRecord({
+      token: record.token,
+      issuedAt: record.issuedAt,
+      lastSeenAt: now,
+    });
+    return record.token;
   }
 
   const generated = `vt_${safeUUID()}`;
-  localStorage.setItem(key, generated);
+  state.visitorTokenIssuedAt = now;
+  state.visitorTokenLastTouchedAt = now;
+  persistVisitorTokenRecord({
+    token: generated,
+    issuedAt: now,
+    lastSeenAt: now,
+  });
   return generated;
+}
+
+function touchVisitorToken(force = false) {
+  const token = String(state.visitorToken || "").trim();
+  if (!isValidVisitorToken(token)) {
+    return;
+  }
+  const now = Date.now();
+  if (!force && now - Number(state.visitorTokenLastTouchedAt || 0) < VISITOR_TOKEN_TOUCH_MIN_INTERVAL_MS) {
+    return;
+  }
+
+  const issuedAt = toSafeEpoch(state.visitorTokenIssuedAt, now);
+  state.visitorTokenIssuedAt = issuedAt;
+  state.visitorTokenLastTouchedAt = now;
+  persistVisitorTokenRecord({
+    token,
+    issuedAt,
+    lastSeenAt: now,
+  });
+}
+
+function shouldRotateVisitorToken(record, now) {
+  if (!record || !isValidVisitorToken(record.token)) {
+    return true;
+  }
+  return now < record.lastSeenAt || now - record.lastSeenAt > VISITOR_TOKEN_IDLE_TTL_MS;
+}
+
+function parseVisitorTokenRecord(raw, now) {
+  const text = String(raw || "").trim();
+  if (!text) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(text);
+    if (!parsed || typeof parsed !== "object") {
+      return null;
+    }
+    const token = String(parsed.token || "").trim();
+    if (!isValidVisitorToken(token)) {
+      return null;
+    }
+    const issuedAt = toSafeEpoch(parsed.issued_at, now);
+    const lastSeenAt = toSafeEpoch(parsed.last_seen_at, issuedAt);
+    return {
+      token,
+      issuedAt,
+      lastSeenAt,
+    };
+  } catch {
+    if (!isValidVisitorToken(text)) {
+      return null;
+    }
+    return {
+      token: text,
+      issuedAt: now,
+      lastSeenAt: now,
+    };
+  }
+}
+
+function persistVisitorTokenRecord(record) {
+  const token = String(record?.token || "").trim();
+  if (!isValidVisitorToken(token)) {
+    return;
+  }
+  const issuedAt = toSafeEpoch(record?.issuedAt, Date.now());
+  const lastSeenAt = toSafeEpoch(record?.lastSeenAt, issuedAt);
+  const payload = {
+    version: VISITOR_TOKEN_RECORD_VERSION,
+    token,
+    issued_at: issuedAt,
+    last_seen_at: lastSeenAt,
+  };
+  try {
+    localStorage.setItem(visitorTokenKey(), JSON.stringify(payload));
+  } catch {
+    // localStorage 不可写时保持内存态，不阻断消息流程。
+  }
+}
+
+function toSafeEpoch(value, fallback) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) {
+    return Math.max(1, Math.floor(Number(fallback) || Date.now()));
+  }
+  return Math.floor(num);
+}
+
+function isValidVisitorToken(token) {
+  return /^vt_[a-z0-9_-]{12,}$/i.test(String(token || "").trim());
 }
 
 async function prepareConversation(forceNew, createWhenMissing = true) {
@@ -834,16 +950,18 @@ async function sendMessage() {
       throw new Error("会话已关闭，无法继续发送，请点击“新建聊天”。");
     }
 
+    touchVisitorToken(true);
     clientMsgID = `cw_${safeUUID()}`;
-    mergeMessages([createLocalOutgoingMessage(content, clientMsgID, "visitor")]);
-    sendMessageViaWS({
+    const payload = {
       sender_type: "visitor",
       content,
       client_msg_id: clientMsgID,
       visitor_token: state.visitorToken,
-    });
-    els.contentInput.value = "";
+    };
+    mergeMessages([createLocalOutgoingMessage(content, clientMsgID, "visitor")]);
     setStatus("消息发送中...");
+    await dispatchOutgoingMessage(payload);
+    els.contentInput.value = "";
   } catch (error) {
     if (clientMsgID) {
       markMessageFailedByClientMsgID(clientMsgID);
@@ -854,6 +972,40 @@ async function sendMessage() {
     updateSessionUI();
     els.contentInput.focus();
   }
+}
+
+async function dispatchOutgoingMessage(payload) {
+  try {
+    sendMessageViaWS(payload);
+    return;
+  } catch {
+    // WS 发送失败时降级到 HTTP，保证消息尽量不丢。
+  }
+
+  const message = await sendMessageViaHTTP(payload);
+  clearPending(payload.client_msg_id, true);
+  mergeMessages([message]);
+  setStatus("实时通道不稳定，已切换备用通道发送");
+}
+
+async function sendMessageViaHTTP(payload) {
+  if (!state.conversationID) {
+    throw new Error("会话不存在，无法发送消息");
+  }
+  const reqBody = {
+    sender_type: "visitor",
+    content: String(payload?.content || ""),
+    client_msg_id: String(payload?.client_msg_id || "").trim(),
+    visitor_token: state.visitorToken,
+  };
+  if (!reqBody.client_msg_id) {
+    throw new Error("client_msg_id is required");
+  }
+
+  return apiRequest(`/api/chat/v1/conversations/${state.conversationID}/messages`, {
+    method: "POST",
+    body: reqBody,
+  });
 }
 
 async function refreshMessages() {
@@ -894,6 +1046,8 @@ function connectWebSocket() {
     state.wsConnected = true;
     state.wsReconnectAttempt = 0;
     stopPolling();
+    void runBackfillSync(false);
+    startBackfillSync(0);
     setStatus("实时连接已建立");
   });
 
@@ -946,6 +1100,7 @@ function connectWebSocket() {
     }
     state.ws = null;
     state.wsConnected = false;
+    stopBackfillSync();
     if (conversationID !== state.conversationID) {
       return;
     }
@@ -962,6 +1117,7 @@ function connectWebSocket() {
       return;
     }
     state.wsConnected = false;
+    stopBackfillSync();
     startPolling(0);
     setStatus("实时连接异常，正在自动重连");
   });
@@ -972,6 +1128,7 @@ function connectWebSocket() {
 function closeWebSocket() {
   clearWsReconnectTimer();
   clearConversationMetaSyncTimer();
+  stopBackfillSync();
   if (state.ws) {
     state.ws.close();
     state.ws = null;
@@ -1095,6 +1252,64 @@ function stopPolling() {
   }
   state.pollInFlight = false;
   state.pollAttempt = 0;
+}
+
+function shouldRunBackfillSync() {
+  if (!state.conversationID) {
+    return false;
+  }
+  if (state.conversationStatus !== "open") {
+    return false;
+  }
+  return state.wsConnected && state.wsConversationID === state.conversationID;
+}
+
+function startBackfillSync(delayMs = BACKFILL_SYNC_INTERVAL_MS) {
+  stopBackfillSync();
+  scheduleBackfillSync(delayMs);
+}
+
+function stopBackfillSync() {
+  if (state.backfillTimer) {
+    clearTimeout(state.backfillTimer);
+    state.backfillTimer = null;
+  }
+  state.backfillInFlight = false;
+}
+
+function scheduleBackfillSync(delayMs = BACKFILL_SYNC_INTERVAL_MS) {
+  if (!shouldRunBackfillSync()) {
+    return;
+  }
+  if (state.backfillTimer) {
+    return;
+  }
+  const delay = Number.isFinite(Number(delayMs)) ? Math.max(0, Number(delayMs)) : BACKFILL_SYNC_INTERVAL_MS;
+  state.backfillTimer = setTimeout(async () => {
+    state.backfillTimer = null;
+    if (!shouldRunBackfillSync()) {
+      return;
+    }
+    await runBackfillSync(false);
+    scheduleBackfillSync(BACKFILL_SYNC_INTERVAL_MS);
+  }, delay);
+}
+
+async function runBackfillSync(announceError) {
+  if (!shouldRunBackfillSync() || state.backfillInFlight) {
+    return;
+  }
+  state.backfillInFlight = true;
+  try {
+    await syncConversationStatus();
+    await refreshMessages();
+  } catch {
+    if (announceError) {
+      setStatus("消息补拉失败，稍后自动重试");
+    }
+  } finally {
+    state.backfillInFlight = false;
+  }
 }
 
 function mergeMessages(items) {
@@ -1261,7 +1476,7 @@ function sendMessageViaWS(payload) {
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
     throw new Error("实时通道未连接，请重连后重发");
   }
-  beginPending(payload.client_msg_id);
+  beginPending(payload);
   try {
     state.ws.send(
       JSON.stringify({
@@ -1275,16 +1490,81 @@ function sendMessageViaWS(payload) {
   }
 }
 
-function beginPending(clientMsgID) {
+function beginPending(payload) {
+  const clientMsgID = String(payload?.client_msg_id || "").trim();
+  if (!clientMsgID) {
+    return;
+  }
   clearPending(clientMsgID, true);
-  const timer = setTimeout(() => {
-    clearPending(clientMsgID, true);
-    markMessageFailedByClientMsgID(clientMsgID);
-    setStatus("消息发送超时，请重发");
-  }, ACK_TIMEOUT_MS);
   state.pendingMap[clientMsgID] = {
-    timer,
+    payload: {
+      sender_type: String(payload.sender_type || "").trim().toLowerCase() || "visitor",
+      content: String(payload.content || ""),
+      client_msg_id: clientMsgID,
+      visitor_token: String(payload.visitor_token || state.visitorToken || "").trim(),
+    },
+    attempt: 0,
+    fallbackUsed: false,
+    timer: null,
   };
+  schedulePendingTimeout(clientMsgID, ACK_TIMEOUT_MS);
+}
+
+function schedulePendingTimeout(clientMsgID, delayMs) {
+  const pending = state.pendingMap[clientMsgID];
+  if (!pending) {
+    return;
+  }
+  if (pending.timer) {
+    clearTimeout(pending.timer);
+  }
+  pending.timer = setTimeout(() => {
+    void handlePendingTimeout(clientMsgID);
+  }, Math.max(200, Number(delayMs) || ACK_TIMEOUT_MS));
+}
+
+async function handlePendingTimeout(clientMsgID) {
+  const pending = state.pendingMap[clientMsgID];
+  if (!pending) {
+    return;
+  }
+
+  if (isWebSocketReady() && pending.attempt < WS_AUTO_RETRY_MAX) {
+    pending.attempt += 1;
+    try {
+      state.ws.send(
+        JSON.stringify({
+          type: "message.send",
+          payload: pending.payload,
+        })
+      );
+      setStatus("网络抖动，正在自动重试...");
+      schedulePendingTimeout(clientMsgID, ACK_TIMEOUT_MS + pending.attempt * 1000);
+      return;
+    } catch {
+      // 发送失败时继续走备用通道兜底。
+    }
+  }
+
+  if (!pending.fallbackUsed) {
+    pending.fallbackUsed = true;
+    try {
+      const message = await sendMessageViaHTTP(pending.payload);
+      clearPending(clientMsgID, true);
+      mergeMessages([message]);
+      setStatus("实时通道不稳定，已切换备用通道发送");
+      return;
+    } catch (error) {
+      clearPending(clientMsgID, true);
+      markMessageFailedByClientMsgID(clientMsgID);
+      setStatus(error?.message || "消息发送失败，请重发");
+      return;
+    }
+  }
+
+  clearPending(clientMsgID, true);
+  markMessageFailedByClientMsgID(clientMsgID);
+  setStatus("消息发送超时，请重发");
 }
 
 function clearPending(clientMsgID, silent = false) {
@@ -1310,7 +1590,11 @@ function syncSendingStatusText() {
     return;
   }
   const current = String(els.statusText?.textContent || "").trim();
-  if (current === "消息发送中..." || current === "消息重发中...") {
+  if (
+    current === "消息发送中..." ||
+    current === "消息重发中..." ||
+    current === "网络抖动，正在自动重试..."
+  ) {
     setStatus("消息已发送");
   }
 }
@@ -1478,13 +1762,14 @@ async function resendMessage(clientMsgID) {
       status: "sending",
       updated_at: new Date().toISOString(),
     });
-    sendMessageViaWS({
+    touchVisitorToken(true);
+    setStatus("消息重发中...");
+    await dispatchOutgoingMessage({
       sender_type: "visitor",
       content: message.content || "",
       client_msg_id: key,
       visitor_token: state.visitorToken,
     });
-    setStatus("消息重发中...");
   } catch (error) {
     markMessageFailedByClientMsgID(key);
     setStatus(error.message || "重发失败");
@@ -1699,12 +1984,15 @@ function formatMessageStatus(status) {
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && state.viewMode === "chat") {
+    touchVisitorToken(true);
     void reportReadProgress();
+    void runBackfillSync(false);
     schedulePollingSync(0);
   }
 });
 
 window.addEventListener("beforeunload", () => {
+  touchVisitorToken(true);
   resetPendingMap();
   closeWebSocket();
   stopPolling();
