@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	shareddiscovery "inlinechat/packages/discovery"
@@ -101,12 +102,50 @@ func main() {
 		zap.String("realtime_http_target", initialRealtimeTarget),
 	)
 
-	httpHandler := handler.NewHTTPHandler(clients, callTimeout)
 	limitTTL := time.Duration(cfg.RateLimitKeyTTLMins) * time.Minute
-	httpHandler.SetRateLimiters(
-		ratelimit.New(cfg.LoginRateLimitPerMin, cfg.LoginRateLimitBurst, limitTTL, 100000),
-		ratelimit.New(cfg.VisitorRateLimitPerMin, cfg.VisitorRateLimitBurst, limitTTL, 200000),
-	)
+	loginLimiter := ratelimit.New(cfg.LoginRateLimitPerMin, cfg.LoginRateLimitBurst, limitTTL, 100000)
+	visitorLimiter := ratelimit.New(cfg.VisitorRateLimitPerMin, cfg.VisitorRateLimitBurst, limitTTL, 200000)
+
+	var rateLimitRedis *redis.Client
+	if redisAddr := strings.TrimSpace(cfg.RateLimitRedisAddr); redisAddr != "" {
+		rateLimitRedis = redis.NewClient(&redis.Options{
+			Addr:     redisAddr,
+			Password: cfg.RateLimitRedisPassword,
+			DB:       cfg.RateLimitRedisDB,
+		})
+		pingCtx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
+		pingErr := rateLimitRedis.Ping(pingCtx).Err()
+		cancel()
+		if pingErr != nil {
+			appLogger.Warn("rate limit redis unavailable, fallback to local limiter",
+				zap.Error(pingErr),
+				zap.String("redis_addr", redisAddr),
+			)
+			if closeErr := rateLimitRedis.Close(); closeErr != nil {
+				appLogger.Warn("close rate limit redis client failed", zap.Error(closeErr))
+			}
+			rateLimitRedis = nil
+		} else {
+			counter := ratelimit.NewRedisCounter(rateLimitRedis)
+			timeout := time.Duration(cfg.RateLimitRedisTimeout) * time.Millisecond
+			loginLimiter.EnableDistributedCounter(counter, cfg.RateLimitRedisPrefix+":login", time.Minute, timeout)
+			visitorLimiter.EnableDistributedCounter(counter, cfg.RateLimitRedisPrefix+":visitor", time.Minute, timeout)
+			appLogger.Info("rate limit distributed mode enabled",
+				zap.String("redis_addr", redisAddr),
+				zap.String("prefix", cfg.RateLimitRedisPrefix),
+			)
+		}
+	}
+	if rateLimitRedis != nil {
+		defer func() {
+			if err := rateLimitRedis.Close(); err != nil {
+				appLogger.Warn("close rate limit redis client failed", zap.Error(err))
+			}
+		}()
+	}
+
+	httpHandler := handler.NewHTTPHandler(clients, callTimeout)
+	httpHandler.SetRateLimiters(loginLimiter, visitorLimiter)
 	metrics := httpmiddleware.NewHTTPMetrics("gateway-service", nil)
 
 	r := gin.New()

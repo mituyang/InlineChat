@@ -16,6 +16,11 @@ type Config struct {
 	VisitorRateLimitPerMin int
 	VisitorRateLimitBurst  int
 	RateLimitKeyTTLMins    int
+	RateLimitRedisAddr     string
+	RateLimitRedisPassword string
+	RateLimitRedisDB       int
+	RateLimitRedisPrefix   string
+	RateLimitRedisTimeout  int
 	ETCDEndpoints          []string
 	ETCDDialTimeoutSec     int
 	DiscoveryPrefix        string
@@ -37,6 +42,11 @@ func Load() (Config, error) {
 		VisitorRateLimitPerMin: getIntEnv("VISITOR_RATE_LIMIT_PER_MIN", 180),
 		VisitorRateLimitBurst:  getIntEnv("VISITOR_RATE_LIMIT_BURST", 60),
 		RateLimitKeyTTLMins:    getIntEnv("RATE_LIMIT_KEY_TTL_MINS", 30),
+		RateLimitRedisAddr:     strings.TrimSpace(getEnv("RATE_LIMIT_REDIS_ADDR", os.Getenv("REDIS_ADDR"))),
+		RateLimitRedisPassword: getEnv("RATE_LIMIT_REDIS_PASSWORD", os.Getenv("REDIS_PASSWORD")),
+		RateLimitRedisDB:       getIntEnv("RATE_LIMIT_REDIS_DB", getIntEnv("REDIS_DB", 0)),
+		RateLimitRedisPrefix:   getEnv("RATE_LIMIT_REDIS_PREFIX", "gateway:ratelimit"),
+		RateLimitRedisTimeout:  getIntEnv("RATE_LIMIT_REDIS_TIMEOUT_MS", 120),
 		ETCDEndpoints:          splitAndTrim(os.Getenv("ETCD_ENDPOINTS")),
 		ETCDDialTimeoutSec:     getIntEnv("ETCD_DIAL_TIMEOUT_SEC", 5),
 		DiscoveryPrefix:        getEnv("DISCOVERY_PREFIX", "/inlinechat/services"),
@@ -65,6 +75,9 @@ func Load() (Config, error) {
 	}
 	if cfg.RateLimitKeyTTLMins <= 0 {
 		return Config{}, fmt.Errorf("RATE_LIMIT_KEY_TTL_MINS must be greater than 0")
+	}
+	if cfg.RateLimitRedisTimeout <= 0 {
+		return Config{}, fmt.Errorf("RATE_LIMIT_REDIS_TIMEOUT_MS must be greater than 0")
 	}
 	if cfg.ETCDDialTimeoutSec <= 0 {
 		return Config{}, fmt.Errorf("ETCD_DIAL_TIMEOUT_SEC must be greater than 0")

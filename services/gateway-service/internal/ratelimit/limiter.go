@@ -1,6 +1,8 @@
 package ratelimit
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -8,14 +10,25 @@ import (
 	"golang.org/x/time/rate"
 )
 
+type DistributedCounter interface {
+	IncrWithTTL(ctx context.Context, key string, ttl time.Duration) (int64, error)
+}
+
 type Limiter struct {
 	mu          sync.Mutex
 	entries     map[string]*entry
+	perMinute   int
 	ratePerSec  rate.Limit
 	burst       int
 	ttl         time.Duration
 	maxEntries  int
 	lastCleanup time.Time
+
+	distributedCounter DistributedCounter
+	distributedPrefix  string
+	distributedWindow  time.Duration
+	distributedTimeout time.Duration
+	distributedLimit   int
 }
 
 type entry struct {
@@ -37,12 +50,43 @@ func New(perMinute int, burst int, ttl time.Duration, maxEntries int) *Limiter {
 		maxEntries = 100000
 	}
 	return &Limiter{
-		entries:    make(map[string]*entry),
-		ratePerSec: rate.Limit(float64(perMinute) / 60.0),
-		burst:      burst,
-		ttl:        ttl,
-		maxEntries: maxEntries,
+		entries:          make(map[string]*entry),
+		perMinute:        perMinute,
+		ratePerSec:       rate.Limit(float64(perMinute) / 60.0),
+		burst:            burst,
+		ttl:              ttl,
+		maxEntries:       maxEntries,
+		distributedLimit: perMinute + burst,
 	}
+}
+
+func (l *Limiter) EnableDistributedCounter(counter DistributedCounter, prefix string, window time.Duration, timeout time.Duration) {
+	if l == nil || counter == nil {
+		return
+	}
+	if window <= 0 {
+		window = time.Minute
+	}
+	if timeout <= 0 {
+		timeout = 120 * time.Millisecond
+	}
+	normalizedPrefix := strings.TrimSpace(strings.ToLower(prefix))
+	if normalizedPrefix == "" {
+		normalizedPrefix = "gateway:ratelimit"
+	}
+	limit := l.perMinute + l.burst
+	if limit <= 0 {
+		limit = l.perMinute
+	}
+	if limit <= 0 {
+		limit = 1
+	}
+
+	l.distributedCounter = counter
+	l.distributedPrefix = normalizedPrefix
+	l.distributedWindow = window
+	l.distributedTimeout = timeout
+	l.distributedLimit = limit
 }
 
 func (l *Limiter) Allow(key string) bool {
@@ -50,6 +94,36 @@ func (l *Limiter) Allow(key string) bool {
 	if normalized == "" {
 		return true
 	}
+	if l.distributedCounter != nil {
+		if allowed, decided := l.allowDistributed(normalized); decided {
+			return allowed
+		}
+	}
+	return l.allowLocal(normalized)
+}
+
+func (l *Limiter) allowDistributed(normalizedKey string) (bool, bool) {
+	if l == nil || l.distributedCounter == nil {
+		return false, false
+	}
+	window := l.distributedWindow
+	if window <= 0 {
+		window = time.Minute
+	}
+	ttl := window + time.Minute
+	bucket := time.Now().UTC().Truncate(window).Unix()
+	distKey := fmt.Sprintf("%s:%d:%s", l.distributedPrefix, bucket, normalizedKey)
+	ctx, cancel := context.WithTimeout(context.Background(), l.distributedTimeout)
+	defer cancel()
+
+	count, err := l.distributedCounter.IncrWithTTL(ctx, distKey, ttl)
+	if err != nil {
+		return false, false
+	}
+	return count <= int64(l.distributedLimit), true
+}
+
+func (l *Limiter) allowLocal(normalized string) bool {
 	now := time.Now()
 
 	l.mu.Lock()
