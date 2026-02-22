@@ -13,6 +13,7 @@ type Config struct {
 	RedisPassword                string
 	RedisDB                      int
 	JWTSecret                    string
+	JWTPreviousSecret            string
 	JWTIssuer                    string
 	ChatGRPCDialTimeout          int
 	ChatGRPCCallTimeout          int
@@ -35,6 +36,7 @@ func Load() (Config, error) {
 		RedisPassword:                os.Getenv("REDIS_PASSWORD"),
 		RedisDB:                      getIntEnv("REDIS_DB", 0),
 		JWTSecret:                    os.Getenv("JWT_SECRET"),
+		JWTPreviousSecret:            strings.TrimSpace(os.Getenv("JWT_PREVIOUS_SECRET")),
 		JWTIssuer:                    getEnv("JWT_ISSUER", "inlinechat-auth"),
 		ChatGRPCDialTimeout:          getIntEnv("CHAT_GRPC_DIAL_TIMEOUT_SEC", 8),
 		ChatGRPCCallTimeout:          getIntEnv("CHAT_GRPC_CALL_TIMEOUT_SEC", 8),

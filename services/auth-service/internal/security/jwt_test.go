@@ -27,3 +27,20 @@ func TestIssueAndParseToken(t *testing.T) {
 		t.Fatalf("unexpected role: %s", claims.Role)
 	}
 }
+
+func TestParseTokenAnyWithPreviousSecret(t *testing.T) {
+	currentSecret := []byte("current-secret")
+	previousSecret := []byte("previous-secret")
+	token, err := IssueToken(previousSecret, "test-issuer", time.Hour, 1002, "agent@example.com", "agent")
+	if err != nil {
+		t.Fatalf("issue token failed: %v", err)
+	}
+
+	claims, err := ParseTokenAny([][]byte{currentSecret, previousSecret}, "test-issuer", token)
+	if err != nil {
+		t.Fatalf("parse token with previous secret failed: %v", err)
+	}
+	if claims.AgentID != 1002 {
+		t.Fatalf("unexpected agent_id: %d", claims.AgentID)
+	}
+}

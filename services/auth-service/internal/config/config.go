@@ -14,6 +14,7 @@ type Config struct {
 	LogLevel                     string
 	MySQLDSN                     string
 	JWTSecret                    string
+	JWTPreviousSecret            string
 	JWTIssuer                    string
 	JWTExpire                    time.Duration
 	SuperAdminEmail              string
@@ -41,6 +42,7 @@ func Load() (Config, error) {
 		LogLevel:                     getEnv("LOG_LEVEL", "info"),
 		MySQLDSN:                     os.Getenv("MYSQL_DSN"),
 		JWTSecret:                    os.Getenv("JWT_SECRET"),
+		JWTPreviousSecret:            strings.TrimSpace(os.Getenv("JWT_PREVIOUS_SECRET")),
 		JWTIssuer:                    getEnv("JWT_ISSUER", "inlinechat-auth"),
 		JWTExpire:                    expire,
 		SuperAdminEmail:              os.Getenv("SUPER_ADMIN_EMAIL"),

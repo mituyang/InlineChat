@@ -21,6 +21,7 @@
 - `apps/widget-sdk/inlinechat-widget.js`: 嵌入式 SDK 脚本源码
 - `apps/*`: 前端单一源码目录（gateway 镜像构建时直接打包，无需同步双份目录）
 - `infra/docker/docker-compose.yml`: 本地编排
+- `docs/production-roadmap.md`: 生产化改造路线图
 - `.env.example`: 环境变量模板
 
 前端资源加载规则：
@@ -32,9 +33,12 @@
 2. 在 `.env` 设置超级管理员账号（`SUPER_ADMIN_EMAIL`、`SUPER_ADMIN_PASSWORD`、`SUPER_ADMIN_DISPLAY_NAME`）
    - `SUPER_ADMIN_PASSWORD` 必须满足：12-72 位、包含大小写字母/数字/特殊字符、不能包含空白字符、不能使用常见弱口令。
    - 若浏览器出现“密码泄露/检查已保存密码”提示，通常是浏览器密码管理器检测到旧弱口令，不是后端报错；更新为强口令并更新浏览器已保存密码即可。
+   - 如需平滑轮换 JWT 密钥，设置 `JWT_PREVIOUS_SECRET` 为上一把密钥（留空表示不启用轮换）。
+   - 网关限流参数：`LOGIN_RATE_LIMIT_PER_MIN`、`LOGIN_RATE_LIMIT_BURST`、`VISITOR_RATE_LIMIT_PER_MIN`、`VISITOR_RATE_LIMIT_BURST`、`RATE_LIMIT_KEY_TTL_MINS`。
 3. `docker compose -f infra/docker/docker-compose.yml --env-file .env up --build`
-4. 网关健康检查：`GET http://localhost:8200/healthz`
-5. 网关会在请求与响应里统一透传 `X-Request-ID`（可用 `GATEWAY_REQUEST_ID_HEADER` 配置）
+4. 网关健康检查：`GET http://localhost:8200/healthz`（进程存活）
+5. 网关就绪检查：`GET http://localhost:8200/readyz`（上游依赖可用）
+6. 网关会在请求与响应里统一透传 `X-Request-ID`（可用 `GATEWAY_REQUEST_ID_HEADER` 配置）
 
 基础依赖默认宿主机端口：
 - MySQL: `8233 -> 3306`
@@ -114,6 +118,24 @@
 - CI 流水线：`.github/workflows/ci.yml`
   - `test` Job：执行 `make lint && make test && make test-race && make test-cover`（覆盖 `services/*` 与 `packages/*`）
   - `integration` Job：执行 `cp .env.example .env && make up && make integration`，并在结束后自动 `make down`
+
+## 生产化基线（已启用）
+- 全服务提供双探针：
+  - `GET /healthz`：仅表示进程存活（liveness）
+  - `GET /readyz`：表示依赖可用（readiness，含 MySQL/Redis/etcd 上游检查）
+- 所有 HTTP 服务启用基础超时：
+  - `ReadHeaderTimeout=5s`
+  - `ReadTimeout=15s`
+  - `WriteTimeout=20s`
+  - `IdleTimeout=60s`
+- 所有 HTTP 服务启用统一安全响应头中间件：
+  - `X-Content-Type-Options: nosniff`
+  - `Referrer-Policy`
+  - `Permissions-Policy`
+- 所有 HTTP 服务暴露 `GET /metrics`（Prometheus 格式），包含请求总量、延迟分布、在途请求数。
+- `gateway-service` 启用匿名侧与登录侧限流（基于客户端 + 业务维度 key），超限返回 `429 rate_limited`。
+- `auth-service`、`admin-service`、`realtime-service` 支持 JWT 双密钥验签（`JWT_SECRET` + `JWT_PREVIOUS_SECRET`），用于无损密钥轮换。
+- `docker compose` 已对业务服务启用 `readyz` 健康检查，并将关键依赖切换为 `service_healthy`，避免“已启动但不可用”的级联故障。
 
 ## 数据库迁移
 - 迁移目录：`services/chat-service/migrations`

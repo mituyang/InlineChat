@@ -74,7 +74,7 @@ func TestHandlerMessageSendDefaultVisitor(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{resp: &chatclient.Message{ID: 11, ConversationID: 1, Status: "sent"}}
-	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, "secret", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	r := gin.New()
 	r.GET("/ws/:conversation_id", handler.Serve)
@@ -129,7 +129,7 @@ func TestHandlerMessageSendAgentWithToken(t *testing.T) {
 	token := mustIssueAgentToken(t, secret, issuer, 7, "agent")
 
 	fakeClient := &fakeChatClient{resp: &chatclient.Message{ID: 22, ConversationID: 2, Status: "sent"}}
-	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, secret, issuer, zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, secret, "", issuer, zap.NewNop())
 
 	r := gin.New()
 	r.GET("/ws/:conversation_id", handler.Serve)
@@ -175,7 +175,7 @@ func TestHandlerMessageSendAgentWithoutToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{}
-	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, "secret", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	r := gin.New()
 	r.GET("/ws/:conversation_id", handler.Serve)
@@ -225,7 +225,7 @@ func TestHandlerMessageSendCreateMessageFailedReturnsNack(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{err: context.DeadlineExceeded}
-	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, "secret", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	r := gin.New()
 	r.GET("/ws/:conversation_id", handler.Serve)
@@ -268,7 +268,7 @@ func TestHandlerMessageSendTooLongReturnsNack(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{}
-	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, "secret", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	r := gin.New()
 	r.GET("/ws/:conversation_id", handler.Serve)
@@ -314,7 +314,7 @@ func TestHandlerMessageSendTooLongReturnsNack(t *testing.T) {
 func TestHandlerRejectInvalidAccessToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	handler := NewHandler(NewHub(), &fakeChatClient{}, []string{"*"}, time.Second, "secret", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), &fakeChatClient{}, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 	r := gin.New()
 	r.GET("/ws/:conversation_id", handler.Serve)
 	ts := httptest.NewServer(r)
@@ -333,7 +333,7 @@ func TestHandlerRejectInvalidAccessToken(t *testing.T) {
 func TestHandlerRejectMissingVisitorToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	handler := NewHandler(NewHub(), &fakeChatClient{}, []string{"*"}, time.Second, "secret", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), &fakeChatClient{}, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 	r := gin.New()
 	r.GET("/ws/:conversation_id", handler.Serve)
 	ts := httptest.NewServer(r)

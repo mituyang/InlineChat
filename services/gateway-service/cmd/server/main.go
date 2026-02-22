@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,23 +15,27 @@ import (
 	"go.uber.org/zap"
 
 	shareddiscovery "inlinechat/packages/discovery"
+	httpmiddleware "inlinechat/packages/httpmiddleware"
 	"inlinechat/services/gateway-service/internal/config"
 	"inlinechat/services/gateway-service/internal/grpcclient"
 	"inlinechat/services/gateway-service/internal/handler"
 	"inlinechat/services/gateway-service/internal/logger"
 	"inlinechat/services/gateway-service/internal/middleware"
 	"inlinechat/services/gateway-service/internal/proxy"
+	"inlinechat/services/gateway-service/internal/ratelimit"
 )
 
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "load config failed: %v\n", err)
+		os.Exit(1)
 	}
 
 	appLogger, err := logger.New(cfg.LogLevel)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "init logger failed: %v\n", err)
+		os.Exit(1)
 	}
 	defer func() {
 		_ = appLogger.Sync()
@@ -97,13 +102,69 @@ func main() {
 	)
 
 	httpHandler := handler.NewHTTPHandler(clients, callTimeout)
+	limitTTL := time.Duration(cfg.RateLimitKeyTTLMins) * time.Minute
+	httpHandler.SetRateLimiters(
+		ratelimit.New(cfg.LoginRateLimitPerMin, cfg.LoginRateLimitBurst, limitTTL, 100000),
+		ratelimit.New(cfg.VisitorRateLimitPerMin, cfg.VisitorRateLimitBurst, limitTTL, 200000),
+	)
+	metrics := httpmiddleware.NewHTTPMetrics("gateway-service", nil)
 
 	r := gin.New()
-	r.Use(middleware.RequestContext(cfg.RequestIDHeader, appLogger), middleware.Recovery(appLogger))
+	r.Use(
+		middleware.RequestContext(cfg.RequestIDHeader, appLogger),
+		middleware.Recovery(appLogger),
+		metrics.Middleware(),
+		httpmiddleware.SecurityHeaders(httpmiddleware.SecurityHeadersOptions{}),
+	)
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"service": "gateway-service", "status": "ok"})
 	})
+	r.GET("/readyz", func(c *gin.Context) {
+		type upstreamCheck struct {
+			name     string
+			protocol string
+			key      string
+		}
+		checks := []upstreamCheck{
+			{name: cfg.ChatServiceName, protocol: "grpc", key: "chat_grpc"},
+			{name: cfg.AuthServiceName, protocol: "grpc", key: "auth_grpc"},
+			{name: cfg.AdminServiceName, protocol: "grpc", key: "admin_grpc"},
+			{name: cfg.RealtimeServiceName, protocol: "http", key: "realtime_http"},
+		}
+		upstreams := make(gin.H, len(checks))
+		failures := make(gin.H)
+		for _, item := range checks {
+			checkCtx, cancel := context.WithTimeout(c.Request.Context(), 800*time.Millisecond)
+			target, err := resolver.Resolve(checkCtx, item.name, item.protocol)
+			cancel()
+			if err != nil {
+				failures[item.key] = err.Error()
+				continue
+			}
+			target = strings.TrimSpace(target)
+			if target == "" {
+				failures[item.key] = "empty target"
+				continue
+			}
+			upstreams[item.key] = target
+		}
+		if len(failures) > 0 {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"service":   "gateway-service",
+				"status":    "not_ready",
+				"upstreams": upstreams,
+				"errors":    failures,
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"service":   "gateway-service",
+			"status":    "ready",
+			"upstreams": upstreams,
+		})
+	})
+	r.GET("/metrics", httpmiddleware.MetricsHandler(nil))
 	r.GET("/app/customer", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/app/customer/")
 	})
@@ -141,6 +202,9 @@ func main() {
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           r,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      20 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	runCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

@@ -43,7 +43,7 @@ func TestMapError(t *testing.T) {
 }
 
 func TestGetSiteByDomainValidateRequest(t *testing.T) {
-	s := New(nil, "secret", "issuer")
+	s := New(nil, "secret", "", "issuer")
 	_, err := s.GetSiteByDomain(context.Background(), &adminv1.GetSiteByDomainRequest{})
 	if err == nil {
 		t.Fatal("expected validation error, got nil")
@@ -55,7 +55,7 @@ func TestGetSiteByDomainValidateRequest(t *testing.T) {
 }
 
 func TestGetSiteBySiteIDValidateRequest(t *testing.T) {
-	s := New(nil, "secret", "issuer")
+	s := New(nil, "secret", "", "issuer")
 	_, err := s.GetSiteBySiteID(context.Background(), &adminv1.GetSiteBySiteIDRequest{})
 	if err == nil {
 		t.Fatal("expected validation error, got nil")

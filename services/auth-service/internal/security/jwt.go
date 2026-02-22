@@ -32,6 +32,28 @@ func IssueToken(secret []byte, issuer string, expire time.Duration, agentID uint
 }
 
 func ParseToken(secret []byte, issuer string, token string) (*Claims, error) {
+	return ParseTokenAny([][]byte{secret}, issuer, token)
+}
+
+func ParseTokenAny(secrets [][]byte, issuer string, token string) (*Claims, error) {
+	var lastErr error
+	for _, secret := range secrets {
+		if len(secret) == 0 {
+			continue
+		}
+		claims, err := parseTokenWithSecret(secret, issuer, token)
+		if err == nil {
+			return claims, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("invalid token")
+}
+
+func parseTokenWithSecret(secret []byte, issuer string, token string) (*Claims, error) {
 	parsed, err := jwt.ParseWithClaims(token, &Claims{}, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method")

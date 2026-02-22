@@ -22,6 +22,7 @@ var (
 type AuthService struct {
 	repo                  repository.AgentRepository
 	jwtSecret             []byte
+	jwtVerifySecrets      [][]byte
 	jwtIssuer             string
 	jwtExpire             time.Duration
 	bcryptCost            int
@@ -43,6 +44,7 @@ type AuthResult struct {
 func New(
 	repo repository.AgentRepository,
 	jwtSecret string,
+	jwtPreviousSecret string,
 	jwtIssuer string,
 	jwtExpire time.Duration,
 	bcryptCost int,
@@ -53,6 +55,7 @@ func New(
 	return &AuthService{
 		repo:                  repo,
 		jwtSecret:             []byte(jwtSecret),
+		jwtVerifySecrets:      buildJWTVerifySecrets(jwtSecret, jwtPreviousSecret),
 		jwtIssuer:             jwtIssuer,
 		jwtExpire:             jwtExpire,
 		bcryptCost:            bcryptCost,
@@ -86,7 +89,20 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 }
 
 func (s *AuthService) ParseToken(token string) (*security.Claims, error) {
-	return security.ParseToken(s.jwtSecret, s.jwtIssuer, token)
+	return security.ParseTokenAny(s.jwtVerifySecrets, s.jwtIssuer, token)
+}
+
+func buildJWTVerifySecrets(primary string, previous string) [][]byte {
+	out := make([][]byte, 0, 2)
+	primaryText := strings.TrimSpace(primary)
+	if primaryText != "" {
+		out = append(out, []byte(primaryText))
+	}
+	previousText := strings.TrimSpace(previous)
+	if previousText != "" && previousText != primaryText {
+		out = append(out, []byte(previousText))
+	}
+	return out
 }
 
 func (s *AuthService) EnsureSuperAdmin(ctx context.Context) error {

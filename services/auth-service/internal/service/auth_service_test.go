@@ -63,7 +63,7 @@ func (r *fakeAgentRepository) GetByEmail(_ context.Context, email string) (*mode
 }
 
 func newTestAuthService(repo repository.AgentRepository, email string, password string, displayName string) *AuthService {
-	return New(repo, "test-secret", "test-issuer", time.Hour, 10, email, password, displayName)
+	return New(repo, "test-secret", "", "test-issuer", time.Hour, 10, email, password, displayName)
 }
 
 func TestEnsureSuperAdminCreateWhenMissing(t *testing.T) {

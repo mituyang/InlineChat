@@ -25,7 +25,7 @@ const maxMessageContentChars = 2000
 type Handler struct {
 	hub             *Hub
 	chatClient      messageClient
-	jwtSecret       []byte
+	jwtSecrets      [][]byte
 	jwtIssuer       string
 	allowedOrigins  map[string]struct{}
 	chatCallTimeout time.Duration
@@ -62,6 +62,7 @@ func NewHandler(
 	allowedOrigins []string,
 	chatCallTimeout time.Duration,
 	jwtSecret string,
+	jwtPreviousSecret string,
 	jwtIssuer string,
 	logger *zap.Logger,
 ) *Handler {
@@ -75,7 +76,7 @@ func NewHandler(
 	return &Handler{
 		hub:             hub,
 		chatClient:      chatClient,
-		jwtSecret:       []byte(jwtSecret),
+		jwtSecrets:      buildJWTSecrets(jwtSecret, jwtPreviousSecret),
 		jwtIssuer:       jwtIssuer,
 		allowedOrigins:  originMap,
 		chatCallTimeout: chatCallTimeout,
@@ -133,7 +134,7 @@ func (h *Handler) Serve(c *gin.Context) {
 func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64) (connectionContext, int, error) {
 	accessToken := strings.TrimSpace(c.Query("access_token"))
 	if accessToken != "" {
-		claims, err := security.ParseToken(h.jwtSecret, h.jwtIssuer, accessToken)
+		claims, err := security.ParseTokenAny(h.jwtSecrets, h.jwtIssuer, accessToken)
 		if err != nil {
 			h.logger.Warn("invalid ws access_token", zap.Error(err))
 			return connectionContext{}, http.StatusUnauthorized, fmt.Errorf("invalid access_token")
@@ -180,6 +181,19 @@ func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64
 		Role:         "visitor",
 		VisitorToken: visitorToken,
 	}, 0, nil
+}
+
+func buildJWTSecrets(primary string, previous string) [][]byte {
+	out := make([][]byte, 0, 2)
+	primaryText := strings.TrimSpace(primary)
+	if primaryText != "" {
+		out = append(out, []byte(primaryText))
+	}
+	previousText := strings.TrimSpace(previous)
+	if previousText != "" && previousText != primaryText {
+		out = append(out, []byte(previousText))
+	}
+	return out
 }
 
 func (h *Handler) handleMessage(ctx context.Context, conversationID string, raw []byte, client *Client, connCtx connectionContext) error {

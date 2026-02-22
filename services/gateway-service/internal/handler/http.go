@@ -15,6 +15,7 @@ import (
 
 	"inlinechat/services/gateway-service/internal/grpcclient"
 	"inlinechat/services/gateway-service/internal/middleware"
+	"inlinechat/services/gateway-service/internal/ratelimit"
 
 	adminv1 "inlinechat/services/gateway-service/internal/gen/adminv1"
 	authv1 "inlinechat/services/gateway-service/internal/gen/authv1"
@@ -24,8 +25,10 @@ import (
 const maxMessageContentChars = 2000
 
 type HTTPHandler struct {
-	clients     *grpcclient.Clients
-	callTimeout time.Duration
+	clients        *grpcclient.Clients
+	callTimeout    time.Duration
+	loginLimiter   *ratelimit.Limiter
+	visitorLimiter *ratelimit.Limiter
 }
 
 func NewHTTPHandler(clients *grpcclient.Clients, callTimeout time.Duration) *HTTPHandler {
@@ -36,6 +39,11 @@ func NewHTTPHandler(clients *grpcclient.Clients, callTimeout time.Duration) *HTT
 		clients:     clients,
 		callTimeout: callTimeout,
 	}
+}
+
+func (h *HTTPHandler) SetRateLimiters(loginLimiter *ratelimit.Limiter, visitorLimiter *ratelimit.Limiter) {
+	h.loginLimiter = loginLimiter
+	h.visitorLimiter = visitorLimiter
 }
 
 func (h *HTTPHandler) RegisterRoutes(r *gin.Engine) {
@@ -78,6 +86,9 @@ func (h *HTTPHandler) createConversation(c *gin.Context) {
 	req.VisitorToken = strings.TrimSpace(req.VisitorToken)
 	if req.SiteID == "" || req.VisitorToken == "" {
 		abortBadRequest(c, "site_id and visitor_token are required")
+		return
+	}
+	if !h.applyVisitorRateLimit(c, "create_conversation", req.SiteID, 0, req.VisitorToken) {
 		return
 	}
 
@@ -134,6 +145,9 @@ func (h *HTTPHandler) getConversation(c *gin.Context) {
 		visitorToken := strings.TrimSpace(c.Query("visitor_token"))
 		if visitorToken == "" {
 			abortBadRequest(c, "visitor_token is required when Authorization is missing")
+			return
+		}
+		if !h.applyVisitorRateLimit(c, "get_conversation", "", conversationID, visitorToken) {
 			return
 		}
 		conversation, err = h.requireConversationForVisitor(c, conversationID, visitorToken)
@@ -288,6 +302,9 @@ func (h *HTTPHandler) createMessage(c *gin.Context) {
 			abortBadRequest(c, "visitor_token is required for visitor sender_type")
 			return
 		}
+		if !h.applyVisitorRateLimit(c, "create_message", "", conversationID, req.VisitorToken) {
+			return
+		}
 		if _, convErr := h.requireConversationForVisitor(c, conversationID, req.VisitorToken); convErr != nil {
 			return
 		}
@@ -355,6 +372,9 @@ func (h *HTTPHandler) listMessages(c *gin.Context) {
 		visitorToken := strings.TrimSpace(c.Query("visitor_token"))
 		if visitorToken == "" {
 			abortBadRequest(c, "visitor_token is required when Authorization is missing")
+			return
+		}
+		if !h.applyVisitorRateLimit(c, "list_messages", "", conversationID, visitorToken) {
 			return
 		}
 		if _, convErr := h.requireConversationForVisitor(c, conversationID, visitorToken); convErr != nil {
@@ -425,6 +445,8 @@ func (h *HTTPHandler) markMessagesRead(c *gin.Context) {
 		}
 	} else if visitorToken == "" {
 		abortBadRequest(c, "visitor_token is required when Authorization is missing")
+		return
+	} else if !h.applyVisitorRateLimit(c, "mark_read", "", conversationID, visitorToken) {
 		return
 	}
 
@@ -644,6 +666,9 @@ func (h *HTTPHandler) login(c *gin.Context) {
 		abortBadRequest(c, err.Error())
 		return
 	}
+	if !h.applyLoginRateLimit(c, req.Email) {
+		return
+	}
 
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
@@ -826,6 +851,65 @@ func (h *HTTPHandler) listAgents(c *gin.Context) {
 
 func (h *HTTPHandler) newCallContext(c *gin.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(c.Request.Context(), h.callTimeout)
+}
+
+func (h *HTTPHandler) applyLoginRateLimit(c *gin.Context, email string) bool {
+	if h.loginLimiter == nil {
+		return true
+	}
+	key := strings.ToLower(strings.TrimSpace(email))
+	if key == "" {
+		key = "unknown"
+	}
+	key = fmt.Sprintf("login:%s:%s", sanitizeRateLimitSegment(c.ClientIP()), sanitizeRateLimitSegment(key))
+	if h.loginLimiter.Allow(key) {
+		return true
+	}
+	middleware.AbortWithError(c, http.StatusTooManyRequests, "rate_limited", "too many login attempts, please retry later")
+	return false
+}
+
+func (h *HTTPHandler) applyVisitorRateLimit(c *gin.Context, action string, siteID string, conversationID uint64, visitorToken string) bool {
+	if h.visitorLimiter == nil {
+		return true
+	}
+	key := buildVisitorRateLimitKey(c.ClientIP(), action, siteID, conversationID, visitorToken)
+	if h.visitorLimiter.Allow(key) {
+		return true
+	}
+	middleware.AbortWithError(c, http.StatusTooManyRequests, "rate_limited", "too many requests, please retry later")
+	return false
+}
+
+func buildVisitorRateLimitKey(clientIP string, action string, siteID string, conversationID uint64, visitorToken string) string {
+	visitor := sanitizeRateLimitSegment(visitorToken)
+	if visitor == "" {
+		visitor = "anonymous"
+	}
+	site := sanitizeRateLimitSegment(siteID)
+	if site == "" {
+		site = "unknown"
+	}
+	ip := sanitizeRateLimitSegment(clientIP)
+	if ip == "" {
+		ip = "ip_unknown"
+	}
+	if conversationID > 0 {
+		return fmt.Sprintf("visitor:%s:%s:%d:%s:%s", sanitizeRateLimitSegment(action), site, conversationID, visitor, ip)
+	}
+	return fmt.Sprintf("visitor:%s:%s:%s:%s", sanitizeRateLimitSegment(action), site, visitor, ip)
+}
+
+func sanitizeRateLimitSegment(v string) string {
+	text := strings.TrimSpace(strings.ToLower(v))
+	if text == "" {
+		return ""
+	}
+	text = strings.ReplaceAll(text, ":", "_")
+	if len(text) > 64 {
+		return text[:64]
+	}
+	return text
 }
 
 func (h *HTTPHandler) requireActor(c *gin.Context) (*authv1.MeResponse, error) {

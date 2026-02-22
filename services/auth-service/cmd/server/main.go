@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -28,12 +30,14 @@ import (
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "load config failed: %v\n", err)
+		os.Exit(1)
 	}
 
 	appLogger, err := logger.New(cfg.LogLevel)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "init logger failed: %v\n", err)
+		os.Exit(1)
 	}
 	defer func() {
 		_ = appLogger.Sync()
@@ -68,11 +72,16 @@ func main() {
 	if err != nil {
 		appLogger.Fatal("failed to connect mysql", zap.Error(err))
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		appLogger.Fatal("failed to get mysql sql.DB", zap.Error(err))
+	}
 
 	repo := repository.NewAgentRepository(db)
 	authSvc := service.New(
 		repo,
 		cfg.JWTSecret,
+		cfg.JWTPreviousSecret,
 		cfg.JWTIssuer,
 		cfg.JWTExpire,
 		cfg.BCryptCost,
@@ -88,13 +97,35 @@ func main() {
 	cancelEnsure()
 	appLogger.Info("super admin account ensured", zap.String("email", cfg.SuperAdminEmail))
 	h := handler.NewHTTPHandler(authSvc)
+	metrics := httpmiddleware.NewHTTPMetrics("auth-service", nil)
 
 	r := gin.New()
-	r.Use(httpmiddleware.RequestContext(httpmiddleware.DefaultRequestIDHeader, appLogger), httpmiddleware.Recovery(appLogger))
+	r.Use(
+		httpmiddleware.RequestContext(httpmiddleware.DefaultRequestIDHeader, appLogger),
+		httpmiddleware.Recovery(appLogger),
+		metrics.Middleware(),
+		httpmiddleware.SecurityHeaders(httpmiddleware.SecurityHeadersOptions{}),
+	)
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"service": "auth-service", "status": "ok"})
 	})
+	r.GET("/readyz", func(c *gin.Context) {
+		checkCtx, cancel := context.WithTimeout(c.Request.Context(), 1500*time.Millisecond)
+		defer cancel()
+		if err := sqlDB.PingContext(checkCtx); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"service": "auth-service",
+				"status":  "not_ready",
+				"errors": gin.H{
+					"mysql": err.Error(),
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"service": "auth-service", "status": "ready"})
+	})
+	r.GET("/metrics", httpmiddleware.MetricsHandler(nil))
 
 	v1 := r.Group("/v1")
 	h.RegisterRoutes(v1)
@@ -103,6 +134,9 @@ func main() {
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           r,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      20 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	grpcListener, err := net.Listen("tcp", ":"+cfg.GRPCPort)

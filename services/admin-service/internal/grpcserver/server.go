@@ -17,14 +17,14 @@ import (
 type AdminGatewayServer struct {
 	adminv1.UnimplementedAdminGatewayServiceServer
 	adminService *service.AdminService
-	jwtSecret    []byte
+	jwtSecrets   [][]byte
 	jwtIssuer    string
 }
 
-func New(adminService *service.AdminService, jwtSecret string, jwtIssuer string) *AdminGatewayServer {
+func New(adminService *service.AdminService, jwtSecret string, jwtPreviousSecret string, jwtIssuer string) *AdminGatewayServer {
 	return &AdminGatewayServer{
 		adminService: adminService,
-		jwtSecret:    []byte(jwtSecret),
+		jwtSecrets:   buildJWTSecrets(jwtSecret, jwtPreviousSecret),
 		jwtIssuer:    jwtIssuer,
 	}
 }
@@ -170,7 +170,7 @@ func (s *AdminGatewayServer) requireAdmin(authorization string) (*security.Claim
 		return nil, status.Error(codes.Unauthenticated, "missing bearer token")
 	}
 
-	claims, err := security.ParseToken(s.jwtSecret, s.jwtIssuer, token)
+	claims, err := security.ParseTokenAny(s.jwtSecrets, s.jwtIssuer, token)
 	if err != nil {
 		return nil, status.Error(codes.Unauthenticated, "invalid token")
 	}
@@ -189,6 +189,19 @@ func parseBearerToken(header string) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[1])
+}
+
+func buildJWTSecrets(primary string, previous string) [][]byte {
+	out := make([][]byte, 0, 2)
+	primaryText := strings.TrimSpace(primary)
+	if primaryText != "" {
+		out = append(out, []byte(primaryText))
+	}
+	previousText := strings.TrimSpace(previous)
+	if previousText != "" && previousText != primaryText {
+		out = append(out, []byte(previousText))
+	}
+	return out
 }
 
 func mapError(err error) error {

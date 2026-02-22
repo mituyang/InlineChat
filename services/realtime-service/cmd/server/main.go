@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"os/signal"
 	"strconv"
 	"strings"
@@ -26,12 +28,14 @@ import (
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "load config failed: %v\n", err)
+		os.Exit(1)
 	}
 
 	appLogger, err := logger.New(cfg.LogLevel)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "init logger failed: %v\n", err)
+		os.Exit(1)
 	}
 	defer func() {
 		_ = appLogger.Sync()
@@ -81,6 +85,7 @@ func main() {
 		cfg.AllowedOrigins,
 		callTimeout,
 		cfg.JWTSecret,
+		cfg.JWTPreviousSecret,
 		cfg.JWTIssuer,
 		appLogger,
 	)
@@ -188,11 +193,46 @@ func main() {
 	}()
 
 	r := gin.New()
-	r.Use(httpmiddleware.RequestContext(httpmiddleware.DefaultRequestIDHeader, appLogger), httpmiddleware.Recovery(appLogger))
+	metrics := httpmiddleware.NewHTTPMetrics("realtime-service", nil)
+	r.Use(
+		httpmiddleware.RequestContext(httpmiddleware.DefaultRequestIDHeader, appLogger),
+		httpmiddleware.Recovery(appLogger),
+		metrics.Middleware(),
+		httpmiddleware.SecurityHeaders(httpmiddleware.SecurityHeadersOptions{}),
+	)
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"service": "realtime-service", "status": "ok"})
 	})
+	r.GET("/readyz", func(c *gin.Context) {
+		checkCtx, cancel := context.WithTimeout(c.Request.Context(), 1500*time.Millisecond)
+		defer cancel()
+
+		failures := make(gin.H)
+		if err := redisClient.Ping(checkCtx).Err(); err != nil {
+			failures["redis"] = err.Error()
+		}
+		target, err := resolver.Resolve(checkCtx, cfg.ChatServiceName, "grpc")
+		if err != nil {
+			failures["chat_grpc"] = err.Error()
+		} else if strings.TrimSpace(target) == "" {
+			failures["chat_grpc"] = "empty target"
+		}
+
+		if len(failures) > 0 {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"service": "realtime-service",
+				"status":  "not_ready",
+				"errors":  failures,
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{
+			"service": "realtime-service",
+			"status":  "ready",
+		})
+	})
+	r.GET("/metrics", httpmiddleware.MetricsHandler(nil))
 
 	r.GET("/ws/:conversation_id", wsHandler.Serve)
 
@@ -200,6 +240,9 @@ func main() {
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           r,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      20 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	go func() {

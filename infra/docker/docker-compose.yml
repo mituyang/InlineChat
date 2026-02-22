@@ -80,6 +80,12 @@ services:
       DISCOVERY_PREFIX: ${DISCOVERY_PREFIX}
       SERVICE_NAME: ${CHAT_SERVICE_NAME}
       SERVICE_ADVERTISE_GRPC_ENDPOINT: ${CHAT_SERVICE_ADVERTISE_GRPC_ENDPOINT}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${CHAT_HTTP_PORT}/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     ports:
       - "${CHAT_HTTP_PORT}:${CHAT_HTTP_PORT}"
       - "${CHAT_GRPC_PORT}:${CHAT_GRPC_PORT}"
@@ -103,7 +109,7 @@ services:
       redis:
         condition: service_healthy
       chat-service:
-        condition: service_started
+        condition: service_healthy
       etcd:
         condition: service_healthy
     environment:
@@ -113,6 +119,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_DB: ${REDIS_DB}
       JWT_SECRET: ${JWT_SECRET}
+      JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
       JWT_ISSUER: ${JWT_ISSUER}
       CHAT_GRPC_DIAL_TIMEOUT_SEC: ${CHAT_GRPC_DIAL_TIMEOUT_SEC}
       CHAT_GRPC_CALL_TIMEOUT_SEC: ${CHAT_GRPC_CALL_TIMEOUT_SEC}
@@ -124,6 +131,12 @@ services:
       CHAT_SERVICE_NAME: ${CHAT_SERVICE_NAME}
       SERVICE_NAME: ${REALTIME_SERVICE_NAME}
       SERVICE_ADVERTISE_HTTP_ENDPOINT: ${REALTIME_SERVICE_ADVERTISE_HTTP_ENDPOINT}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${REALTIME_HTTP_PORT}/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     ports:
       - "${REALTIME_HTTP_PORT}:${REALTIME_HTTP_PORT}"
 
@@ -145,6 +158,7 @@ services:
       LOG_LEVEL: ${AUTH_LOG_LEVEL}
       MYSQL_DSN: ${AUTH_MYSQL_DSN}
       JWT_SECRET: ${JWT_SECRET}
+      JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
       JWT_ISSUER: ${JWT_ISSUER}
       JWT_EXPIRE: ${JWT_EXPIRE}
       BCRYPT_COST: ${BCRYPT_COST}
@@ -157,6 +171,12 @@ services:
       DISCOVERY_PREFIX: ${DISCOVERY_PREFIX}
       SERVICE_NAME: ${AUTH_SERVICE_NAME}
       SERVICE_ADVERTISE_GRPC_ENDPOINT: ${AUTH_SERVICE_ADVERTISE_GRPC_ENDPOINT}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${AUTH_HTTP_PORT}/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     ports:
       - "${AUTH_HTTP_PORT}:${AUTH_HTTP_PORT}"
       - "${AUTH_GRPC_PORT}:${AUTH_GRPC_PORT}"
@@ -191,6 +211,7 @@ services:
       LOG_LEVEL: ${ADMIN_LOG_LEVEL}
       MYSQL_DSN: ${ADMIN_MYSQL_DSN}
       JWT_SECRET: ${JWT_SECRET}
+      JWT_PREVIOUS_SECRET: ${JWT_PREVIOUS_SECRET}
       JWT_ISSUER: ${JWT_ISSUER}
       BCRYPT_COST: ${BCRYPT_COST}
       ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
@@ -199,6 +220,12 @@ services:
       DISCOVERY_PREFIX: ${DISCOVERY_PREFIX}
       SERVICE_NAME: ${ADMIN_SERVICE_NAME}
       SERVICE_ADVERTISE_GRPC_ENDPOINT: ${ADMIN_SERVICE_ADVERTISE_GRPC_ENDPOINT}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${ADMIN_HTTP_PORT}/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     ports:
       - "${ADMIN_HTTP_PORT}:${ADMIN_HTTP_PORT}"
       - "${ADMIN_GRPC_PORT}:${ADMIN_GRPC_PORT}"
@@ -220,19 +247,24 @@ services:
     restart: unless-stopped
     depends_on:
       chat-service:
-        condition: service_started
+        condition: service_healthy
       realtime-service:
-        condition: service_started
+        condition: service_healthy
       auth-service:
-        condition: service_started
+        condition: service_healthy
       admin-service:
-        condition: service_started
+        condition: service_healthy
       etcd:
         condition: service_healthy
     environment:
       HTTP_PORT: ${GATEWAY_HTTP_PORT}
       LOG_LEVEL: ${GATEWAY_LOG_LEVEL}
       REQUEST_ID_HEADER: ${GATEWAY_REQUEST_ID_HEADER}
+      LOGIN_RATE_LIMIT_PER_MIN: ${LOGIN_RATE_LIMIT_PER_MIN}
+      LOGIN_RATE_LIMIT_BURST: ${LOGIN_RATE_LIMIT_BURST}
+      VISITOR_RATE_LIMIT_PER_MIN: ${VISITOR_RATE_LIMIT_PER_MIN}
+      VISITOR_RATE_LIMIT_BURST: ${VISITOR_RATE_LIMIT_BURST}
+      RATE_LIMIT_KEY_TTL_MINS: ${RATE_LIMIT_KEY_TTL_MINS}
       ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
       ETCD_DIAL_TIMEOUT_SEC: ${ETCD_DIAL_TIMEOUT_SEC}
       DISCOVERY_PREFIX: ${DISCOVERY_PREFIX}
@@ -242,6 +274,12 @@ services:
       REALTIME_SERVICE_NAME: ${REALTIME_SERVICE_NAME}
       GRPC_DIAL_TIMEOUT_SEC: ${GRPC_DIAL_TIMEOUT_SEC}
       GRPC_CALL_TIMEOUT_SEC: ${GRPC_CALL_TIMEOUT_SEC}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${GATEWAY_HTTP_PORT}/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     ports:
       - "${GATEWAY_HTTP_PORT}:${GATEWAY_HTTP_PORT}"
 

@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -29,12 +31,14 @@ import (
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "load config failed: %v\n", err)
+		os.Exit(1)
 	}
 
 	appLogger, err := logger.New(cfg.LogLevel)
 	if err != nil {
-		panic(err)
+		fmt.Fprintf(os.Stderr, "init logger failed: %v\n", err)
+		os.Exit(1)
 	}
 	defer func() {
 		_ = appLogger.Sync()
@@ -69,19 +73,45 @@ func main() {
 	if err != nil {
 		appLogger.Fatal("failed to connect mysql", zap.Error(err))
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		appLogger.Fatal("failed to get mysql sql.DB", zap.Error(err))
+	}
 
 	siteRepo := repository.NewSiteRepository(db)
 	agentRepo := repository.NewAgentRepository(db)
 	adminSvc := service.New(siteRepo, agentRepo, cfg.BCryptCost)
 	h := handler.NewHTTPHandler(adminSvc)
-	authz := middleware.NewAuthz(cfg.JWTSecret, cfg.JWTIssuer)
+	authz := middleware.NewAuthz(cfg.JWTSecret, cfg.JWTPreviousSecret, cfg.JWTIssuer)
+	metrics := httpmiddleware.NewHTTPMetrics("admin-service", nil)
 
 	r := gin.New()
-	r.Use(httpmiddleware.RequestContext(httpmiddleware.DefaultRequestIDHeader, appLogger), httpmiddleware.Recovery(appLogger))
+	r.Use(
+		httpmiddleware.RequestContext(httpmiddleware.DefaultRequestIDHeader, appLogger),
+		httpmiddleware.Recovery(appLogger),
+		metrics.Middleware(),
+		httpmiddleware.SecurityHeaders(httpmiddleware.SecurityHeadersOptions{}),
+	)
 
 	r.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"service": "admin-service", "status": "ok"})
 	})
+	r.GET("/readyz", func(c *gin.Context) {
+		checkCtx, cancel := context.WithTimeout(c.Request.Context(), 1500*time.Millisecond)
+		defer cancel()
+		if err := sqlDB.PingContext(checkCtx); err != nil {
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				"service": "admin-service",
+				"status":  "not_ready",
+				"errors": gin.H{
+					"mysql": err.Error(),
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"service": "admin-service", "status": "ready"})
+	})
+	r.GET("/metrics", httpmiddleware.MetricsHandler(nil))
 
 	adminV1 := r.Group("/v1/admin")
 	adminV1.Use(authz.RequireAdmin())
@@ -91,6 +121,9 @@ func main() {
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           r,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      20 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	grpcListener, err := net.Listen("tcp", ":"+cfg.GRPCPort)
@@ -98,7 +131,7 @@ func main() {
 		appLogger.Fatal("failed to listen grpc port", zap.Error(err), zap.String("port", cfg.GRPCPort))
 	}
 	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(grpcserver.LoggingInterceptor(appLogger)))
-	adminv1.RegisterAdminGatewayServiceServer(grpcServer, grpcserver.New(adminSvc, cfg.JWTSecret, cfg.JWTIssuer))
+	adminv1.RegisterAdminGatewayServiceServer(grpcServer, grpcserver.New(adminSvc, cfg.JWTSecret, cfg.JWTPreviousSecret, cfg.JWTIssuer))
 
 	runCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

@@ -10,12 +10,12 @@ import (
 )
 
 type Authz struct {
-	secret []byte
-	issuer string
+	secrets [][]byte
+	issuer  string
 }
 
-func NewAuthz(secret string, issuer string) *Authz {
-	return &Authz{secret: []byte(secret), issuer: issuer}
+func NewAuthz(secret string, previousSecret string, issuer string) *Authz {
+	return &Authz{secrets: buildJWTSecrets(secret, previousSecret), issuer: issuer}
 }
 
 func (a *Authz) RequireAdmin() gin.HandlerFunc {
@@ -26,7 +26,7 @@ func (a *Authz) RequireAdmin() gin.HandlerFunc {
 			return
 		}
 
-		claims, err := security.ParseToken(a.secret, a.issuer, token)
+		claims, err := security.ParseTokenAny(a.secrets, a.issuer, token)
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 			return
@@ -50,4 +50,17 @@ func parseBearerToken(header string) string {
 		return ""
 	}
 	return strings.TrimSpace(parts[1])
+}
+
+func buildJWTSecrets(primary string, previous string) [][]byte {
+	out := make([][]byte, 0, 2)
+	primaryText := strings.TrimSpace(primary)
+	if primaryText != "" {
+		out = append(out, []byte(primaryText))
+	}
+	previousText := strings.TrimSpace(previous)
+	if previousText != "" && previousText != primaryText {
+		out = append(out, []byte(previousText))
+	}
+	return out
 }
