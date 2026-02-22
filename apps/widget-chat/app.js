@@ -1,5 +1,6 @@
 const params = new URLSearchParams(window.location.search);
 const ACK_TIMEOUT_MS = 5000;
+const CONVERSATION_META_SYNC_MIN_INTERVAL_MS = 2000;
 
 const state = {
   siteID: (params.get("site_id") || "").trim(),
@@ -20,6 +21,9 @@ const state = {
   pollTimer: null,
   pollInFlight: false,
   pollAttempt: 0,
+  conversationMetaSyncTimer: null,
+  conversationMetaSyncInFlight: false,
+  conversationMetaSyncedAt: 0,
   lastReadReported: 0,
   lastReadInFlight: 0,
   pendingMap: {},
@@ -537,6 +541,46 @@ function applyConversationStatus(nextStatus, announceClosed) {
   updateSessionUI();
 }
 
+function clearConversationMetaSyncTimer() {
+  if (state.conversationMetaSyncTimer) {
+    clearTimeout(state.conversationMetaSyncTimer);
+    state.conversationMetaSyncTimer = null;
+  }
+}
+
+function scheduleConversationMetaSync(force = false) {
+  if (!state.conversationID) {
+    return;
+  }
+  if (state.conversationMetaSyncInFlight || state.conversationMetaSyncTimer) {
+    return;
+  }
+
+  let delay = 0;
+  if (!force) {
+    const elapsed = Date.now() - Number(state.conversationMetaSyncedAt || 0);
+    if (elapsed < CONVERSATION_META_SYNC_MIN_INTERVAL_MS) {
+      delay = CONVERSATION_META_SYNC_MIN_INTERVAL_MS - elapsed;
+    }
+  }
+
+  state.conversationMetaSyncTimer = setTimeout(async () => {
+    state.conversationMetaSyncTimer = null;
+    if (!state.conversationID || state.conversationMetaSyncInFlight) {
+      return;
+    }
+
+    state.conversationMetaSyncInFlight = true;
+    try {
+      await syncConversationStatus();
+    } catch {
+      // 会话元信息同步失败时不影响消息流，等待下次事件重试。
+    } finally {
+      state.conversationMetaSyncInFlight = false;
+    }
+  }, delay);
+}
+
 async function syncConversationStatus() {
   if (!state.conversationID) {
     return;
@@ -552,6 +596,7 @@ async function syncConversationStatus() {
     assigned_agent_id: conversation.assigned_agent_id,
     updated_at: String(conversation.updated_at || conversation.created_at || "").trim(),
   });
+  state.conversationMetaSyncedAt = Date.now();
 }
 
 function loadVisitorToken() {
@@ -859,6 +904,12 @@ function connectWebSocket() {
         case "message.new":
           if (data.payload && data.payload.message) {
             mergeMessages([data.payload.message]);
+            const senderType = String(data.payload.message.sender_type || "")
+              .trim()
+              .toLowerCase();
+            if (senderType === "agent" || senderType === "system") {
+              scheduleConversationMetaSync();
+            }
           }
           break;
         case "message.ack":
@@ -920,6 +971,7 @@ function connectWebSocket() {
 
 function closeWebSocket() {
   clearWsReconnectTimer();
+  clearConversationMetaSyncTimer();
   if (state.ws) {
     state.ws.close();
     state.ws = null;
