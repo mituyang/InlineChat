@@ -52,6 +52,22 @@ func (r *fakeConversationRepository) GetByID(_ context.Context, id uint64) (*mod
 	return cloneConversation(item), nil
 }
 
+func (r *fakeConversationRepository) GetLatestOpenBySiteVisitor(_ context.Context, siteID string, visitorToken string) (*model.Conversation, error) {
+	var latest *model.Conversation
+	for _, item := range r.items {
+		if item.SiteID != siteID || item.VisitorToken != visitorToken || item.Status != "open" {
+			continue
+		}
+		if latest == nil || item.ID > latest.ID {
+			latest = item
+		}
+	}
+	if latest == nil {
+		return nil, repository.ErrNotFound
+	}
+	return cloneConversation(latest), nil
+}
+
 func (r *fakeConversationRepository) List(_ context.Context, filter repository.ListConversationsFilter) ([]model.Conversation, error) {
 	filtered := make([]*model.Conversation, 0, len(r.items))
 	for _, item := range r.items {
@@ -344,6 +360,14 @@ func (r *fakeOutboxRepository) MarkForRetry(context.Context, uint64, time.Time, 
 	return nil
 }
 
+func (r *fakeOutboxRepository) MarkDead(context.Context, uint64, string) error {
+	return nil
+}
+
+func (r *fakeOutboxRepository) ReplayDead(context.Context, int) (int64, error) {
+	return 0, nil
+}
+
 func (r *fakeOutboxRepository) RequeueStaleProcessing(context.Context, time.Time) (int64, error) {
 	return 0, nil
 }
@@ -396,6 +420,50 @@ func testChatServiceWithConversations(seed map[uint64]*model.Conversation) (*Cha
 	publisher := &fakePublisher{}
 	svc := New(conversationRepo, messageRepo, zap.NewNop(), publisher, 0)
 	return svc, conversationRepo, messageRepo, publisher
+}
+
+func TestCreateConversationReturnsExistingOpenConversation(t *testing.T) {
+	svc, repo, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "closed"},
+		2: {ID: 2, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open"},
+	})
+
+	out, err := svc.CreateConversation(context.Background(), CreateConversationInput{
+		SiteID:       "site_demo",
+		VisitorToken: "vt_1",
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation failed: %v", err)
+	}
+	if out.ID != 2 {
+		t.Fatalf("expected existing open conversation id=2, got %d", out.ID)
+	}
+	if len(repo.items) != 2 {
+		t.Fatalf("should not create new conversation, got total=%d", len(repo.items))
+	}
+}
+
+func TestCreateConversationCreatesNewWhenNoOpenConversation(t *testing.T) {
+	svc, repo, _, _ := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "closed"},
+	})
+
+	out, err := svc.CreateConversation(context.Background(), CreateConversationInput{
+		SiteID:       "site_demo",
+		VisitorToken: "vt_1",
+	})
+	if err != nil {
+		t.Fatalf("CreateConversation failed: %v", err)
+	}
+	if out.ID == 0 || out.ID == 1 {
+		t.Fatalf("expected new conversation id, got %d", out.ID)
+	}
+	if out.Status != "open" {
+		t.Fatalf("expected open status, got %s", out.Status)
+	}
+	if len(repo.items) != 2 {
+		t.Fatalf("expected total conversations=2, got %d", len(repo.items))
+	}
 }
 
 func TestClaimConversationSuccess(t *testing.T) {

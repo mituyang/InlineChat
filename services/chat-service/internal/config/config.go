@@ -16,9 +16,12 @@ type Config struct {
 	EventOutboxEnabled              bool
 	EventOutboxPollIntervalMS       int
 	EventOutboxBatchSize            int
+	EventOutboxMaxAttempts          int
 	EventOutboxRetryBaseMS          int
 	EventOutboxRetryMaxMS           int
 	EventOutboxProcessingTimeoutSec int
+	EventOutboxReplayDeadOnStart    bool
+	EventOutboxReplayDeadBatch      int
 	RedisAddr                       string
 	RedisPassword                   string
 	RedisDB                         int
@@ -41,9 +44,12 @@ func Load() (Config, error) {
 		EventOutboxEnabled:              getBoolEnv("EVENT_OUTBOX_ENABLED", true),
 		EventOutboxPollIntervalMS:       getIntEnv("EVENT_OUTBOX_POLL_INTERVAL_MS", 5000),
 		EventOutboxBatchSize:            getIntEnv("EVENT_OUTBOX_BATCH_SIZE", 100),
+		EventOutboxMaxAttempts:          getIntEnv("EVENT_OUTBOX_MAX_ATTEMPTS", 8),
 		EventOutboxRetryBaseMS:          getIntEnv("EVENT_OUTBOX_RETRY_BASE_MS", 500),
 		EventOutboxRetryMaxMS:           getIntEnv("EVENT_OUTBOX_RETRY_MAX_MS", 15000),
 		EventOutboxProcessingTimeoutSec: getIntEnv("EVENT_OUTBOX_PROCESSING_TIMEOUT_SEC", 30),
+		EventOutboxReplayDeadOnStart:    getBoolEnv("EVENT_OUTBOX_REPLAY_DEAD_ON_START", false),
+		EventOutboxReplayDeadBatch:      getIntEnv("EVENT_OUTBOX_REPLAY_DEAD_BATCH", 200),
 		RedisAddr:                       os.Getenv("REDIS_ADDR"),
 		RedisPassword:                   os.Getenv("REDIS_PASSWORD"),
 		RedisDB:                         getIntEnv("REDIS_DB", 0),
@@ -71,6 +77,9 @@ func Load() (Config, error) {
 	if cfg.EventOutboxBatchSize <= 0 {
 		return Config{}, fmt.Errorf("EVENT_OUTBOX_BATCH_SIZE must be greater than 0")
 	}
+	if cfg.EventOutboxMaxAttempts <= 0 {
+		return Config{}, fmt.Errorf("EVENT_OUTBOX_MAX_ATTEMPTS must be greater than 0")
+	}
 	if cfg.EventOutboxRetryBaseMS <= 0 {
 		return Config{}, fmt.Errorf("EVENT_OUTBOX_RETRY_BASE_MS must be greater than 0")
 	}
@@ -79,6 +88,9 @@ func Load() (Config, error) {
 	}
 	if cfg.EventOutboxProcessingTimeoutSec <= 0 {
 		return Config{}, fmt.Errorf("EVENT_OUTBOX_PROCESSING_TIMEOUT_SEC must be greater than 0")
+	}
+	if cfg.EventOutboxReplayDeadBatch <= 0 {
+		return Config{}, fmt.Errorf("EVENT_OUTBOX_REPLAY_DEAD_BATCH must be greater than 0")
 	}
 	if len(cfg.ETCDEndpoints) == 0 {
 		return Config{}, fmt.Errorf("ETCD_ENDPOINTS is required")

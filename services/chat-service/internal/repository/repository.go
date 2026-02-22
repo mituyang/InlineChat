@@ -16,6 +16,7 @@ var ErrNotFound = errors.New("not found")
 type ConversationRepository interface {
 	Create(ctx context.Context, conversation *model.Conversation) error
 	GetByID(ctx context.Context, id uint64) (*model.Conversation, error)
+	GetLatestOpenBySiteVisitor(ctx context.Context, siteID string, visitorToken string) (*model.Conversation, error)
 	List(ctx context.Context, filter ListConversationsFilter) ([]model.Conversation, error)
 	Mutate(ctx context.Context, id uint64, mutation ConversationMutation) (*model.Conversation, error)
 }
@@ -40,6 +41,8 @@ type EventOutboxRepository interface {
 	FetchPendingForUpdate(ctx context.Context, limit int, retryableBefore time.Time) ([]model.EventOutbox, error)
 	MarkPublished(ctx context.Context, id uint64, publishedAt time.Time) error
 	MarkForRetry(ctx context.Context, id uint64, nextRetryAt time.Time, lastError string) error
+	MarkDead(ctx context.Context, id uint64, lastError string) error
+	ReplayDead(ctx context.Context, limit int) (int64, error)
 	RequeueStaleProcessing(ctx context.Context, staleBefore time.Time) (int64, error)
 }
 
@@ -104,6 +107,20 @@ func (r *GormConversationRepository) Create(ctx context.Context, conversation *m
 func (r *GormConversationRepository) GetByID(ctx context.Context, id uint64) (*model.Conversation, error) {
 	var conversation model.Conversation
 	if err := dbWithContext(r.db, ctx).First(&conversation, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &conversation, nil
+}
+
+func (r *GormConversationRepository) GetLatestOpenBySiteVisitor(ctx context.Context, siteID string, visitorToken string) (*model.Conversation, error) {
+	var conversation model.Conversation
+	if err := dbWithContext(r.db, ctx).
+		Where("site_id = ? AND visitor_token = ? AND status = ?", siteID, visitorToken, "open").
+		Order("id DESC").
+		First(&conversation).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}
@@ -389,6 +406,43 @@ func (r *GormEventOutboxRepository) MarkForRetry(ctx context.Context, id uint64,
 			"last_error":    lastError,
 			"updated_at":    now,
 		}).Error
+}
+
+func (r *GormEventOutboxRepository) MarkDead(ctx context.Context, id uint64, lastError string) error {
+	now := time.Now()
+	return dbWithContext(r.db, ctx).
+		Model(&model.EventOutbox{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"status":        model.OutboxStatusDead,
+			"processing_at": nil,
+			"next_retry_at": nil,
+			"last_error":    lastError,
+			"updated_at":    now,
+		}).Error
+}
+
+func (r *GormEventOutboxRepository) ReplayDead(ctx context.Context, limit int) (int64, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	now := time.Now()
+	tx := dbWithContext(r.db, ctx).
+		Model(&model.EventOutbox{}).
+		Where("status = ?", model.OutboxStatusDead).
+		Order("id ASC").
+		Limit(limit).
+		Updates(map[string]any{
+			"status":        model.OutboxStatusPending,
+			"processing_at": nil,
+			"next_retry_at": now,
+			"last_error":    "",
+			"updated_at":    now,
+		})
+	if tx.Error != nil {
+		return 0, tx.Error
+	}
+	return tx.RowsAffected, nil
 }
 
 func (r *GormEventOutboxRepository) RequeueStaleProcessing(ctx context.Context, staleBefore time.Time) (int64, error) {

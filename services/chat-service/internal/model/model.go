@@ -6,6 +6,7 @@ const (
 	OutboxStatusPending    = "pending"
 	OutboxStatusProcessing = "processing"
 	OutboxStatusPublished  = "published"
+	OutboxStatusDead       = "dead"
 )
 
 type Conversation struct {

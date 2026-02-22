@@ -114,10 +114,19 @@ func main() {
 		outboxDispatcher = service.NewOutboxDispatcher(outboxRepo, messagePublisher, outboxWakeupBus, appLogger, service.OutboxDispatcherConfig{
 			PollInterval:      time.Duration(cfg.EventOutboxPollIntervalMS) * time.Millisecond,
 			BatchSize:         cfg.EventOutboxBatchSize,
+			MaxAttempts:       cfg.EventOutboxMaxAttempts,
 			RetryBaseInterval: time.Duration(cfg.EventOutboxRetryBaseMS) * time.Millisecond,
 			RetryMaxInterval:  time.Duration(cfg.EventOutboxRetryMaxMS) * time.Millisecond,
 			ProcessingTimeout: time.Duration(cfg.EventOutboxProcessingTimeoutSec) * time.Second,
 		})
+		if cfg.EventOutboxReplayDeadOnStart {
+			replayed, replayErr := outboxDispatcher.ReplayDead(context.Background(), cfg.EventOutboxReplayDeadBatch)
+			if replayErr != nil {
+				appLogger.Warn("replay dead outbox events failed", zap.Error(replayErr))
+			} else if replayed > 0 {
+				appLogger.Info("replayed dead outbox events on startup", zap.Int64("count", replayed))
+			}
+		}
 		outboxDispatcher.Start(context.Background())
 		defer outboxDispatcher.Stop()
 	}

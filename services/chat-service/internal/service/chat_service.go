@@ -206,6 +206,23 @@ func (s *ChatService) withEventTransaction(ctx context.Context, fn func(txCtx co
 }
 
 func (s *ChatService) CreateConversation(ctx context.Context, input CreateConversationInput) (*model.Conversation, error) {
+	input.SiteID = strings.TrimSpace(input.SiteID)
+	input.VisitorToken = strings.TrimSpace(input.VisitorToken)
+	if input.SiteID == "" {
+		return nil, fmt.Errorf("site_id is required")
+	}
+	if input.VisitorToken == "" {
+		return nil, fmt.Errorf("visitor_token is required")
+	}
+
+	existing, err := s.conversationRepo.GetLatestOpenBySiteVisitor(ctx, input.SiteID, input.VisitorToken)
+	if err == nil {
+		return existing, nil
+	}
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return nil, err
+	}
+
 	conversation := &model.Conversation{
 		SiteID:       input.SiteID,
 		VisitorToken: input.VisitorToken,

@@ -22,6 +22,7 @@ type OutboxWakeupSubscriber interface {
 type OutboxDispatcherConfig struct {
 	PollInterval      time.Duration
 	BatchSize         int
+	MaxAttempts       int
 	RetryBaseInterval time.Duration
 	RetryMaxInterval  time.Duration
 	ProcessingTimeout time.Duration
@@ -33,6 +34,9 @@ func (c OutboxDispatcherConfig) normalized() OutboxDispatcherConfig {
 	}
 	if c.BatchSize <= 0 {
 		c.BatchSize = 100
+	}
+	if c.MaxAttempts <= 0 {
+		c.MaxAttempts = 8
 	}
 	if c.RetryBaseInterval <= 0 {
 		c.RetryBaseInterval = 500 * time.Millisecond
@@ -163,6 +167,20 @@ func (d *OutboxDispatcher) Trigger() {
 	}
 }
 
+func (d *OutboxDispatcher) ReplayDead(ctx context.Context, limit int) (int64, error) {
+	if d == nil || d.repo == nil {
+		return 0, nil
+	}
+	rows, err := d.repo.ReplayDead(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+	if rows > 0 {
+		d.Trigger()
+	}
+	return rows, nil
+}
+
 func (d *OutboxDispatcher) dispatchOnce(ctx context.Context) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -185,6 +203,24 @@ func (d *OutboxDispatcher) dispatchOnce(ctx context.Context) {
 	for i := range items {
 		item := items[i]
 		if err := d.transport.PublishConversationEvent(ctx, item.ConversationID, []byte(item.Payload)); err != nil {
+			if item.Attempts >= d.cfg.MaxAttempts {
+				deadErr := d.repo.MarkDead(ctx, item.ID, trimError(err))
+				if deadErr != nil {
+					d.logger.Warn("mark outbox event dead failed",
+						zap.Error(deadErr),
+						zap.Uint64("event_id", item.ID),
+					)
+				}
+				d.logger.Warn("outbox event moved to dead letter",
+					zap.Error(err),
+					zap.Uint64("event_id", item.ID),
+					zap.Uint64("conversation_id", item.ConversationID),
+					zap.String("event_type", item.EventType),
+					zap.Int("attempts", item.Attempts),
+				)
+				continue
+			}
+
 			nextRetryAt := time.Now().Add(d.retryDelay(item.Attempts))
 			retryErr := d.repo.MarkForRetry(ctx, item.ID, nextRetryAt, trimError(err))
 			if retryErr != nil {
