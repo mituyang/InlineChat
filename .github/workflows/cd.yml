@@ -160,7 +160,7 @@ jobs:
             }' > dist/image-manifest.json
 
       - name: 上传镜像清单
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: image-manifest
           path: dist/image-manifest.json
