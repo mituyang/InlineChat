@@ -23,6 +23,7 @@
 - `infra/docker/docker-compose.yml`: 本地编排
 - `docs/production-roadmap.md`: 生产化改造路线图
 - `docs/cicd.md`: CI/CD 使用说明（门禁、发布、回滚）
+- `docs/branch-protection-checklist.md`: `main` 分支保护配置清单
 - `docs/observability.md`: 可观测性与告警接入说明
 - `.env.example`: 环境变量模板
 
@@ -134,6 +135,8 @@
 - CD 流水线：`.github/workflows/cd.yml`
   - `build-and-push-images` Job：`main` 合并后自动构建并推送 5 个服务镜像到 GHCR（`sha-<commit>` + `main`）
   - `release-or-rollback` Job：手动触发，支持 `deploy/rollback` 与环境选择，支持可选 Webhook 集成
+- 分支保护清单：`docs/branch-protection-checklist.md`
+  - 建议将 `required-gate` 设为 `main` 分支必选检查
 
 ## 监控与告警
 - 监控编排文件：`infra/docker/docker-compose.monitoring.yml`
@@ -146,6 +149,9 @@
   - Prometheus：`http://localhost:${PROMETHEUS_HOST_PORT:-9090}`
   - Alertmanager：`http://localhost:${ALERTMANAGER_HOST_PORT:-9093}`
   - Grafana：`http://localhost:${GRAFANA_HOST_PORT:-3000}`
+- Grafana 默认会自动加载总览面板：`InlineChat Overview`
+- 告警通知通道模板：`infra/monitoring/alertmanager.channels.example.yml`
+  - 启用方式：复制为 `infra/monitoring/alertmanager.yml` 并填写 webhook / smtp 配置后重启监控组件
 
 ## 生产化基线（已启用）
 - 全服务提供双探针：

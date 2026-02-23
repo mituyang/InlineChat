@@ -10,8 +10,11 @@
 - `infra/monitoring/prometheus.yml`：Prometheus 抓取配置
 - `infra/monitoring/alert_rules.yml`：告警规则
 - `infra/monitoring/blackbox.yml`：HTTP 探测模块
-- `infra/monitoring/alertmanager.yml`：告警路由基础配置
+- `infra/monitoring/alertmanager.yml`：告警路由基础配置（本地最小可用）
+- `infra/monitoring/alertmanager.channels.example.yml`：告警通知通道模板（按 severity 分路）
 - `infra/monitoring/grafana-datasource.yml`：Grafana 默认 Prometheus 数据源
+- `infra/monitoring/grafana-dashboards.yml`：Grafana dashboard provider
+- `infra/monitoring/dashboards/inlinechat-overview.json`：默认总览面板模板
 
 ## 启动方式
 基于现有 compose 叠加启动监控组件：
@@ -45,8 +48,32 @@ docker compose \
   - `InlineChatRealtimeService5xxRatioHigh`
 
 ## 告警通知建议
-当前 `alertmanager.yml` 只保留了最小路由（receiver=`default`）。  
-生产环境建议接入企业通知通道（Webhook、PagerDuty、飞书/钉钉机器人等）并按 `severity` 分级。
+当前 `alertmanager.yml` 保持本地最小配置。  
+若要接入企业通知通道（Webhook、Email、PagerDuty、飞书/钉钉机器人），按下面步骤启用模板：
+
+1. 复制模板文件：
+   - `cp infra/monitoring/alertmanager.channels.example.yml infra/monitoring/alertmanager.yml`
+2. 修改占位配置：
+   - `smtp_*`：SMTP 网关与鉴权
+   - `webhook_configs.url`：告警机器人或告警平台地址
+   - `email_configs.to`：oncall 邮件组
+3. 重启告警组件：
+   - `make monitoring-down && make monitoring-up`
+
+模板默认已支持：
+- `critical` 与 `warning` 按 `severity` 分路
+- `critical` 可同时走 webhook + email
+- 抑制规则（同一告警 `critical` 触发时抑制对应 `warning`）
+
+## Grafana 面板模板
+- Grafana 启动后会自动加载 `InlineChat Overview`（UID：`inlinechat-overview`）。
+- 面板覆盖：
+  - 各服务请求速率（RPS）
+  - 各服务 5xx 比例
+  - gateway P95 延迟
+  - 各服务 inflight 请求数
+  - `readyz` 成功率
+  - firing 告警统计与告警明细
 
 ## 下一步建议
 - 增加业务指标：

@@ -39,13 +39,12 @@
   - `DEPLOY_WEBHOOK_TOKEN`（可选）
 - 若未配置，会在 Job Summary 输出手动发布指引，不会静默失败。
 
-## 分支保护建议（GitHub Settings）
-在 `main` 分支配置：
-- `Require a pull request before merging`
-- `Require status checks to pass before merging`
-  - 必选 `required-gate`
-- `Require branches to be up to date before merging`
-- `Do not allow bypassing the above settings`
+## 分支保护清单（已补充）
+- 详细配置见：`docs/branch-protection-checklist.md`
+- 核心原则：
+  - 所有变更通过 PR 合并，不允许直接推送到 `main`
+  - 必选检查只保留稳定聚合门禁 `required-gate`
+  - 强制评审与对话解决，避免“带风险合并”
 
 ## 回滚约定
 - 回滚时使用 `release_action=rollback`，并明确 `image_tag`。

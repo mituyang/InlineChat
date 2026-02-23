@@ -1,0 +1,62 @@
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: smtp.example.com:587
+  smtp_from: alert@inlinechat.local
+  smtp_auth_username: alert@inlinechat.local
+  smtp_auth_password: change_me
+  smtp_require_tls: true
+
+route:
+  group_by:
+    - alertname
+    - job
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 2h
+  receiver: team-default
+  routes:
+    - receiver: team-critical-webhook
+      matchers:
+        - severity="critical"
+      continue: true
+    - receiver: team-warning-webhook
+      matchers:
+        - severity="warning"
+      continue: true
+    - receiver: team-critical-email
+      matchers:
+        - severity="critical"
+
+inhibit_rules:
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity="warning"
+    equal:
+      - alertname
+      - job
+      - instance
+
+receivers:
+  - name: team-default
+    webhook_configs:
+      - url: https://hooks.example.com/inlinechat/default
+        send_resolved: true
+        max_alerts: 0
+
+  - name: team-warning-webhook
+    webhook_configs:
+      - url: https://hooks.example.com/inlinechat/warning
+        send_resolved: true
+        max_alerts: 0
+
+  - name: team-critical-webhook
+    webhook_configs:
+      - url: https://hooks.example.com/inlinechat/critical
+        send_resolved: true
+        max_alerts: 0
+
+  - name: team-critical-email
+    email_configs:
+      - to: oncall@example.com
+        send_resolved: true
