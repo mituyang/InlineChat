@@ -7,16 +7,13 @@
 ## CI（已启用）
 - 工作流：`.github/workflows/ci.yml`
 - 关键检查：
-  - `quality-gate`：`make quality`
-  - `smoke-gate`：`make up && make smoke`
-  - `required-gate`：PR 汇总门禁（建议设置为分支保护必选）
-  - `integration-main`：`main` 合并后执行系统集成回归
+  - `test-gate`：`make test`
+  - 触发方式：`push main` 与手动触发（`workflow_dispatch`）
 
 ## Security（本次补充）
 - 工作流：`.github/workflows/security.yml`
 - 关键检查：
-  - `dependency-review`：PR 依赖变更风险审查（`moderate` 及以上直接失败）
-  - `govulncheck`：对全部 Go module 执行漏洞扫描（支持定时 + 手动触发）
+  - `govulncheck`：对全部 Go module 执行漏洞扫描（每月 + 手动触发）
 
 ## CD（本次新增）
 - 工作流：`.github/workflows/cd.yml`
@@ -48,9 +45,8 @@
 ## 分支保护清单（已补充）
 - 详细配置见：`docs/branch-protection-checklist.md`
 - 核心原则：
-  - 所有变更通过 PR 合并，不允许直接推送到 `main`
-  - 必选检查只保留稳定聚合门禁 `required-gate`
-  - 强制评审与对话解决，避免“带风险合并”
+  - 单人开发时仅保留“防误操作”规则（禁止 force-push、禁止删除 `main`）
+  - 如后续变为多人协作，再切回严格模式（PR 审批 + 必选检查）
 
 ## 协作治理（本次补充）
 - `CODEOWNERS`：`.github/CODEOWNERS`
@@ -60,7 +56,7 @@
 - Issue 模板：`.github/ISSUE_TEMPLATE/`
   - 分离 Bug 与 Feature 两类输入，提升问题收敛效率。
 - Dependabot：`.github/dependabot.yml`
-  - 每周自动扫描 `github-actions` 与所有 Go module 目录，并创建依赖升级 PR。
+  - 每月自动扫描 `github-actions` 与所有 Go module 目录，并创建依赖升级 PR。
 
 ## 回滚约定
 - 回滚时使用 `release_action=rollback`，并明确 `image_tag`。

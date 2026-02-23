@@ -4,26 +4,23 @@ on:
   push:
     branches:
       - main
-  pull_request:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   GO_VERSION: '1.25.x'
 
 jobs:
-  quality:
-    name: quality-gate
+  test:
+    name: test-gate
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 20
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -36,104 +33,5 @@ jobs:
           cache-dependency-path: |
             **/go.sum
 
-      - name: 执行质量门禁
-        run: make quality
-
-  smoke:
-    name: smoke-gate
-    runs-on: ubuntu-latest
-    needs: quality
-    timeout-minutes: 45
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 安装 Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-          cache-dependency-path: |
-            **/go.sum
-
-      - name: 准备环境变量
-        run: cp .env.example .env
-
-      - name: 启动服务
-        run: make up
-
-      - name: 执行冒烟测试
-        run: make smoke
-
-      - name: 打印容器状态
-        if: always()
-        run: make ps
-
-      - name: 打印关键服务日志
-        if: failure()
-        run: docker compose -f infra/docker/docker-compose.yml --env-file .env logs --tail=200 gateway-service chat-service auth-service admin-service realtime-service
-
-      - name: 停止服务
-        if: always()
-        run: make down
-
-  required:
-    name: required-gate
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && always() }}
-    needs:
-      - quality
-      - smoke
-    steps:
-      - name: 校验 PR 门禁结果
-        run: |
-          if [[ "${{ needs.quality.result }}" != "success" ]]; then
-            echo "quality-gate 未通过"
-            exit 1
-          fi
-          if [[ "${{ needs.smoke.result }}" != "success" ]]; then
-            echo "smoke-gate 未通过"
-            exit 1
-          fi
-          echo "required-gate 通过"
-
-  integration-main:
-    name: integration-main
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    needs:
-      - quality
-      - smoke
-    timeout-minutes: 55
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 安装 Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
-          cache-dependency-path: |
-            **/go.sum
-
-      - name: 准备环境变量
-        run: cp .env.example .env
-
-      - name: 启动服务
-        run: make up
-
-      - name: 执行系统集成测试
-        run: make integration
-
-      - name: 打印容器状态
-        if: always()
-        run: make ps
-
-      - name: 打印关键服务日志
-        if: failure()
-        run: docker compose -f infra/docker/docker-compose.yml --env-file .env logs --tail=200 gateway-service chat-service auth-service admin-service realtime-service mysql redis etcd
-
-      - name: 停止服务
-        if: always()
-        run: make down
+      - name: 执行基础回归
+        run: make test

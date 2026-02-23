@@ -132,22 +132,18 @@
   - `services/admin-service/internal/service/admin_service_test.go`
   - `services/chat-service/internal/service/chat_service_test.go`
 - CI 流水线：`.github/workflows/ci.yml`
-  - `quality-gate` Job：执行 `make quality`（`lint + test + test-race + test-cover`，覆盖 `services/*` 与 `packages/*`）
-  - `smoke-gate` Job：执行 `cp .env.example .env && make up && make smoke`，并在结束后自动 `make down`
-  - `required-gate` Job：仅在 PR 触发，汇总校验 `quality-gate + smoke-gate` 结果，建议作为分支保护必选检查项
-  - `integration-main` Job：仅在 `main` 分支 push 后触发，执行 `make integration` 进行合并后系统回归
+  - `test-gate` Job：执行 `make test`（单人开发轻量门禁）
 - 安全流水线：`.github/workflows/security.yml`
-  - `dependency-review` Job：PR 维度审查依赖变更风险（`moderate` 及以上失败）
-  - `govulncheck` Job：扫描所有 Go 模块已知漏洞（支持定时 + 手动）
+  - `govulncheck` Job：扫描所有 Go 模块已知漏洞（每月 + 手动）
 - CD 流水线：`.github/workflows/cd.yml`
   - `build-and-push-images` Job：`main` 合并后自动构建并推送 5 个服务镜像到 GHCR（`sha-<commit>` + `main`）
   - `release-or-rollback` Job：手动触发，支持 `deploy/rollback` 与环境选择，支持可选 Webhook 集成
 - 分支保护清单：`docs/branch-protection-checklist.md`
-  - 建议将 `required-gate` 设为 `main` 分支必选检查
+  - 单人开发模式：仅保留“禁止 force-push + 禁止删除 main”
 - 协作治理配置：
   - `CODEOWNERS`：限定核心目录责任人
   - `PR/Issue` 模板：统一评审与缺陷输入质量
-  - `dependabot.yml`：每周自动检查 Go 与 GitHub Actions 依赖更新
+  - `dependabot.yml`：每月自动检查 Go 与 GitHub Actions 依赖更新
 
 ## 监控与告警
 - 监控编排文件：`infra/docker/docker-compose.monitoring.yml`
