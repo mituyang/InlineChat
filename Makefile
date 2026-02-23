@@ -38,7 +38,7 @@ help:
 	@echo "  make test-cover     校验覆盖率门禁（有覆盖包平均值 + 最小包数）"
 	@echo "  make quality        执行完整质量门禁（lint + test + test-race + test-cover）"
 	@echo "  make e2e-ui         执行前端 Playwright E2E（需先安装 tests/e2e 依赖）"
-	@echo "  make verify-all     一键执行全量验收（自动 up/down + quality/smoke/integration/full-regression/e2e-ui）"
+	@echo "  make verify-all     CI 全量验收入口（本地默认禁用，可用 VERIFY_ALLOW_LOCAL=1 临时开启）"
 	@echo "  make smoke          运行端到端冒烟（登录/管理/会话/消息）"
 	@echo "  make integration    运行系统集成检查（smoke + etcd + mysql + websocket）"
 	@echo "  make full-regression 运行全功能回归（覆盖管理/认证/会话/转接/自动关闭/审计）"
@@ -182,6 +182,11 @@ e2e-ui:
 	npm --prefix $(E2E_DIR) run test
 
 verify-all: ensure-env
+	@if [ "$${CI:-}" != "true" ] && [ "$${VERIFY_ALLOW_LOCAL:-0}" != "1" ]; then \
+		echo "本地默认禁用 make verify-all（避免影响本地容器状态）"; \
+		echo "如需本地执行，请显式运行: VERIFY_ALLOW_LOCAL=1 make verify-all"; \
+		exit 1; \
+	fi
 	ENV_FILE=$(ENV_FILE) ./scripts/verify-all.sh
 
 smoke: ensure-env
