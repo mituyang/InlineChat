@@ -5,7 +5,7 @@ go 1.25
 require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/prometheus/client_golang v1.23.2
-	go.uber.org/zap v1.27.0
+	go.uber.org/zap v1.27.1
 )
 
 require (
