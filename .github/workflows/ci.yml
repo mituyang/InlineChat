@@ -52,6 +52,8 @@ jobs:
         env:
           VERIFY_AUTO_UPDOWN: "1"
           VERIFY_KEEP_ENV_ON_FAIL: "1"
+          VERIFY_AUTO_CLOSE_AFTER_SEC: "30"
+          VERIFY_AUTO_CLOSE_BUFFER_SEC: "5"
         run: make verify-all
 
       - name: 收集容器日志

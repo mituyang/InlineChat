@@ -8,6 +8,8 @@ ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env}"
 VERIFY_AUTO_UPDOWN="${VERIFY_AUTO_UPDOWN:-1}"
 VERIFY_KEEP_ENV_ON_FAIL="${VERIFY_KEEP_ENV_ON_FAIL:-0}"
 VERIFY_KEEP_ENV="${VERIFY_KEEP_ENV:-0}"
+VERIFY_AUTO_CLOSE_AFTER_SEC="${VERIFY_AUTO_CLOSE_AFTER_SEC:-30}"
+VERIFY_AUTO_CLOSE_BUFFER_SEC="${VERIFY_AUTO_CLOSE_BUFFER_SEC:-5}"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "缺少环境文件: $ENV_FILE"
@@ -55,11 +57,14 @@ run_step() {
   echo "[verify-all] ==> ${name}"
   (
     cd "$ROOT_DIR"
+    AUTO_CLOSE_AFTER_SEC="$VERIFY_AUTO_CLOSE_AFTER_SEC" \
+    FULL_REGRESSION_AUTO_CLOSE_BUFFER_SEC="$VERIFY_AUTO_CLOSE_BUFFER_SEC" \
     ENV_FILE="$ENV_FILE" "$@"
   )
 }
 
 if [ "$VERIFY_AUTO_UPDOWN" = "1" ]; then
+  echo "[verify-all] 自动关闭回归参数: AUTO_CLOSE_AFTER_SEC=${VERIFY_AUTO_CLOSE_AFTER_SEC}s, buffer=${VERIFY_AUTO_CLOSE_BUFFER_SEC}s"
   echo "[verify-all] 启动前清理旧环境"
   (
     cd "$ROOT_DIR"
@@ -69,7 +74,7 @@ if [ "$VERIFY_AUTO_UPDOWN" = "1" ]; then
   echo "[verify-all] 启动环境: make up"
   (
     cd "$ROOT_DIR"
-    ENV_FILE="$ENV_FILE" make up
+    AUTO_CLOSE_AFTER_SEC="$VERIFY_AUTO_CLOSE_AFTER_SEC" ENV_FILE="$ENV_FILE" make up
   )
 else
   echo "[verify-all] VERIFY_AUTO_UPDOWN!=1，跳过自动 up/down"
