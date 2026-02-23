@@ -18,7 +18,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: 检出代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: 安装 Go
         uses: actions/setup-go@v5
