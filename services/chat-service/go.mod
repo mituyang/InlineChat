@@ -4,7 +4,7 @@ go 1.25
 
 require (
 	github.com/gin-gonic/gin v1.10.1
-	github.com/redis/go-redis/v9 v9.7.0
+	github.com/redis/go-redis/v9 v9.18.0
 	go.uber.org/zap v1.27.0
 	google.golang.org/grpc v1.79.1
 	google.golang.org/protobuf v1.36.10
@@ -53,6 +53,7 @@ require (
 	go.etcd.io/etcd/api/v3 v3.6.8 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.6.8 // indirect
 	go.etcd.io/etcd/client/v3 v3.6.8 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	golang.org/x/arch v0.8.0 // indirect
