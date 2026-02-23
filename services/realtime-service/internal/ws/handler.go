@@ -36,6 +36,7 @@ type Handler struct {
 	authClient      authMeClient
 	jwtSecrets      [][]byte
 	jwtIssuer       string
+	allowAllOrigins bool
 	allowedOrigins  map[string]struct{}
 	chatCallTimeout time.Duration
 	logger          *zap.Logger
@@ -82,8 +83,14 @@ func NewHandler(
 	logger *zap.Logger,
 ) *Handler {
 	originMap := make(map[string]struct{}, len(allowedOrigins))
+	allowAllOrigins := false
 	for _, origin := range allowedOrigins {
-		if normalized := normalizeOrigin(origin); normalized != "" {
+		trimmed := strings.TrimSpace(origin)
+		if trimmed == "*" {
+			allowAllOrigins = true
+			continue
+		}
+		if normalized := normalizeOrigin(trimmed); normalized != "" {
 			originMap[normalized] = struct{}{}
 		}
 	}
@@ -96,6 +103,7 @@ func NewHandler(
 		authClient:      authClient,
 		jwtSecrets:      buildJWTSecrets(jwtSecret, jwtPreviousSecret),
 		jwtIssuer:       jwtIssuer,
+		allowAllOrigins: allowAllOrigins,
 		allowedOrigins:  originMap,
 		chatCallTimeout: chatCallTimeout,
 		logger:          logger,
@@ -263,6 +271,9 @@ func normalizeOrigin(raw string) string {
 }
 
 func (h *Handler) isOriginAllowed(origin string) bool {
+	if h.allowAllOrigins {
+		return true
+	}
 	if len(h.allowedOrigins) == 0 {
 		return false
 	}

@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/grpc/test/bufconn"
 
 	"inlinechat/services/realtime-service/internal/authclient"
 	"inlinechat/services/realtime-service/internal/chatclient"
@@ -136,7 +137,7 @@ func TestHandlerMessageSendDefaultVisitor(t *testing.T) {
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/1?visitor_token=vt_1"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
+	conn, _, err := ts.Dial(wsURL, wsDialHeader())
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
 	}
@@ -189,7 +190,7 @@ func TestHandlerMessageSendAgentWithToken(t *testing.T) {
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/2?access_token=" + url.QueryEscape(token)
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
+	conn, _, err := ts.Dial(wsURL, wsDialHeader())
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
 	}
@@ -232,7 +233,7 @@ func TestHandlerMessageSendAgentWithoutToken(t *testing.T) {
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/3?visitor_token=vt_1"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
+	conn, _, err := ts.Dial(wsURL, wsDialHeader())
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
 	}
@@ -279,7 +280,7 @@ func TestHandlerMessageSendCreateMessageFailedReturnsNack(t *testing.T) {
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/5?visitor_token=vt_1"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
+	conn, _, err := ts.Dial(wsURL, wsDialHeader())
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
 	}
@@ -319,7 +320,7 @@ func TestHandlerMessageSendTooLongReturnsNack(t *testing.T) {
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/8?visitor_token=vt_1"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
+	conn, _, err := ts.Dial(wsURL, wsDialHeader())
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
 	}
@@ -361,7 +362,7 @@ func TestHandlerRejectInvalidAccessToken(t *testing.T) {
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/4?access_token=bad"
-	_, resp, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
+	_, resp, err := ts.Dial(wsURL, wsDialHeader())
 	if err == nil {
 		t.Fatal("expected websocket handshake error")
 	}
@@ -383,7 +384,7 @@ func TestHandlerRejectAccessTokenInvalidatedByAuthService(t *testing.T) {
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/4?access_token=" + url.QueryEscape(token)
-	_, resp, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
+	_, resp, err := ts.Dial(wsURL, wsDialHeader())
 	if err == nil {
 		t.Fatal("expected websocket handshake error")
 	}
@@ -408,7 +409,7 @@ func TestHandlerRejectMissingVisitorToken(t *testing.T) {
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6"
-	_, resp, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
+	_, resp, err := ts.Dial(wsURL, wsDialHeader())
 	if err == nil {
 		t.Fatal("expected websocket handshake error")
 	}
@@ -424,13 +425,27 @@ func TestHandlerRejectDisallowedOrigin(t *testing.T) {
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6?visitor_token=vt_1"
-	_, resp, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeaderWithOrigin("http://evil.example.com"))
+	_, resp, err := ts.Dial(wsURL, wsDialHeaderWithOrigin("http://evil.example.com"))
 	if err == nil {
 		t.Fatal("expected websocket handshake error")
 	}
 	if resp == nil || resp.StatusCode != 403 {
 		t.Fatalf("expected 403 handshake response, got %+v err=%v", resp, err)
 	}
+}
+
+func TestHandlerAllowAllOriginsWithWildcard(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	ts := newWSTestServer(t, handler)
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6?visitor_token=vt_1"
+	conn, resp, err := ts.Dial(wsURL, wsDialHeaderWithOrigin("http://evil.example.com"))
+	if err != nil {
+		t.Fatalf("expected websocket handshake success, got resp=%+v err=%v", resp, err)
+	}
+	defer conn.Close()
 }
 
 func TestHandlerReplayMessagesAfterLastMessageID(t *testing.T) {
@@ -448,7 +463,7 @@ func TestHandlerReplayMessagesAfterLastMessageID(t *testing.T) {
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/1?visitor_token=vt_1&last_message_id=13"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
+	conn, _, err := ts.Dial(wsURL, wsDialHeader())
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
 	}
@@ -509,7 +524,7 @@ func TestHandlerReplayMessagesTruncatedSendsNextBeforeID(t *testing.T) {
 
 	ts := newWSTestServer(t, handler)
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/1?visitor_token=vt_1&last_message_id=1"
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, wsDialHeader())
+	conn, _, err := ts.Dial(wsURL, wsDialHeader())
 	if err != nil {
 		t.Fatalf("dial websocket failed: %v", err)
 	}
@@ -549,7 +564,8 @@ func TestHandlerReplayMessagesTruncatedSendsNextBeforeID(t *testing.T) {
 type wsTestServer struct {
 	URL      string
 	server   *http.Server
-	listener net.Listener
+	listener *bufconn.Listener
+	dialer   *websocket.Dialer
 }
 
 func newWSTestServer(t *testing.T, handler *Handler) *wsTestServer {
@@ -557,9 +573,10 @@ func newWSTestServer(t *testing.T, handler *Handler) *wsTestServer {
 	r := gin.New()
 	r.GET("/ws/:conversation_id", handler.Serve)
 
-	listener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen test server failed: %v", err)
+	listener := bufconn.Listen(1024 * 1024)
+	dialer := *websocket.DefaultDialer
+	dialer.NetDialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return listener.DialContext(ctx)
 	}
 	srv := &http.Server{
 		Handler: r,
@@ -569,12 +586,17 @@ func newWSTestServer(t *testing.T, handler *Handler) *wsTestServer {
 	}()
 
 	ts := &wsTestServer{
-		URL:      "http://" + listener.Addr().String(),
+		URL:      "http://bufconn",
 		server:   srv,
 		listener: listener,
+		dialer:   &dialer,
 	}
 	t.Cleanup(ts.Close)
 	return ts
+}
+
+func (s *wsTestServer) Dial(wsURL string, header http.Header) (*websocket.Conn, *http.Response, error) {
+	return s.dialer.Dial(wsURL, header)
 }
 
 func (s *wsTestServer) Close() {

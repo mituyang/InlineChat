@@ -14,13 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: '1.25.x'
+  GO_VERSION: "1.25.x"
+  NODE_VERSION: "20.x"
 
 jobs:
-  test:
-    name: test-gate
+  verify-all:
+    name: verify-all
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 90
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -33,5 +34,43 @@ jobs:
           cache-dependency-path: |
             **/go.sum
 
-      - name: 执行基础回归
-        run: make test
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: 准备环境变量
+        run: cp .env.example .env
+
+      - name: 安装 E2E 依赖
+        run: npm --prefix tests/e2e install
+
+      - name: 安装 Playwright Chromium
+        run: npx --prefix tests/e2e playwright install --with-deps chromium
+
+      - name: 执行全量验证
+        env:
+          VERIFY_AUTO_UPDOWN: "1"
+          VERIFY_KEEP_ENV_ON_FAIL: "1"
+        run: make verify-all
+
+      - name: 收集容器日志
+        if: ${{ failure() }}
+        run: |
+          mkdir -p artifacts
+          docker compose -f infra/docker/docker-compose.yml --env-file .env logs --no-color > artifacts/compose.log || true
+
+      - name: 上传失败产物
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: verify-all-artifacts
+          path: |
+            artifacts/compose.log
+            tests/e2e/playwright-report
+            tests/e2e/test-results
+          if-no-files-found: warn
+
+      - name: 清理环境
+        if: ${{ always() }}
+        run: make down || true

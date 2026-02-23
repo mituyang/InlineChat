@@ -11,12 +11,13 @@ GO_BUILD_OS ?= linux
 GO_BUILD_ARCH ?= $(shell go env GOARCH)
 GO_BUILD_OUTPUT := .bin/server
 GO_PROXY ?= https://proxy.golang.org,direct
+E2E_DIR := tests/e2e
 COVERAGE_THRESHOLD ?= 45
 COVERAGE_THRESHOLD_ALL ?= 12
 MIN_COVERED_PACKAGES ?= 10
 MIN_TOTAL_PACKAGES ?= 20
 
-.PHONY: help ensure-env config up up-fg down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover quality proto build-local image-build smoke integration full-regression mvp-release
+.PHONY: help ensure-env config up up-fg down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover quality e2e-ui verify-all proto build-local image-build smoke integration full-regression mvp-release
 
 help:
 	@echo "可用命令:"
@@ -36,6 +37,8 @@ help:
 	@echo "  make test-race      运行后端 Go race 测试"
 	@echo "  make test-cover     校验覆盖率门禁（有覆盖包平均值 + 最小包数）"
 	@echo "  make quality        执行完整质量门禁（lint + test + test-race + test-cover）"
+	@echo "  make e2e-ui         执行前端 Playwright E2E（需先安装 tests/e2e 依赖）"
+	@echo "  make verify-all     一键执行全量验收（自动 up/down + quality/smoke/integration/full-regression/e2e-ui）"
 	@echo "  make smoke          运行端到端冒烟（登录/管理/会话/消息）"
 	@echo "  make integration    运行系统集成检查（smoke + etcd + mysql + websocket）"
 	@echo "  make full-regression 运行全功能回归（覆盖管理/认证/会话/转接/自动关闭/审计）"
@@ -170,6 +173,16 @@ test-cover:
 	GO_PROXY=$(GO_PROXY) CACHE_DIR=$(CACHE_DIR) COVERAGE_THRESHOLD=$(COVERAGE_THRESHOLD) COVERAGE_THRESHOLD_ALL=$(COVERAGE_THRESHOLD_ALL) MIN_COVERED_PACKAGES=$(MIN_COVERED_PACKAGES) MIN_TOTAL_PACKAGES=$(MIN_TOTAL_PACKAGES) ./scripts/coverage-threshold.sh $(GO_TEST_MODULES)
 
 quality: lint test test-race test-cover
+
+e2e-ui:
+	@if [ ! -d "$(E2E_DIR)/node_modules" ]; then \
+		echo "缺少 $(E2E_DIR)/node_modules，请先执行: npm --prefix $(E2E_DIR) install"; \
+		exit 1; \
+	fi
+	npm --prefix $(E2E_DIR) run test
+
+verify-all: ensure-env
+	ENV_FILE=$(ENV_FILE) ./scripts/verify-all.sh
 
 smoke: ensure-env
 	ENV_FILE=$(ENV_FILE) ./scripts/smoke-e2e.sh

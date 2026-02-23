@@ -1,9 +1,11 @@
 name: CD
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
   workflow_dispatch:
     inputs:
       release_action:
@@ -35,7 +37,7 @@ permissions:
   packages: write
 
 concurrency:
-  group: cd-${{ github.workflow }}-${{ github.event.inputs.environment || github.ref }}
+  group: cd-${{ github.workflow }}-${{ github.event.inputs.environment || github.event.workflow_run.head_branch || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -44,15 +46,36 @@ env:
 jobs:
   build-images:
     name: build-and-push-images
-    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_action == 'deploy' && github.event.inputs.build_images == 'true') }}
+    if: ${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_action == 'deploy' && github.event.inputs.build_images == 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     outputs:
       image_tag: ${{ steps.meta.outputs.image_tag }}
       image_repo: ${{ steps.meta.outputs.image_repo }}
     steps:
+      - name: 计算构建源信息
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
+            source_sha="${{ github.event.workflow_run.head_sha }}"
+            source_ref="${{ github.event.workflow_run.head_sha }}"
+            source_branch="${{ github.event.workflow_run.head_branch }}"
+          else
+            source_sha="${GITHUB_SHA}"
+            source_ref="${GITHUB_SHA}"
+            source_branch="${GITHUB_REF_NAME}"
+          fi
+
+          echo "source_sha=${source_sha}" >> "$GITHUB_OUTPUT"
+          echo "source_ref=${source_ref}" >> "$GITHUB_OUTPUT"
+          echo "source_branch=${source_branch}" >> "$GITHUB_OUTPUT"
+
       - name: 检出代码
         uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.source.outputs.source_ref }}
 
       - name: 安装 Go
         uses: actions/setup-go@v5
@@ -72,6 +95,8 @@ jobs:
       - name: 计算镜像元数据
         id: meta
         shell: bash
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
         run: |
           set -euo pipefail
           repo_lower="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
@@ -80,10 +105,10 @@ jobs:
           if [[ -n "${input_tag}" ]]; then
             image_tag="${input_tag}"
           else
-            image_tag="sha-${GITHUB_SHA::12}"
+            image_tag="sha-${SOURCE_SHA::12}"
           fi
           alias_tag=""
-          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
             alias_tag="main"
           fi
 
@@ -135,6 +160,8 @@ jobs:
           IMAGE_REPO: ${{ steps.meta.outputs.image_repo }}
           IMAGE_TAG: ${{ steps.meta.outputs.image_tag }}
           ALIAS_TAG: ${{ steps.meta.outputs.alias_tag }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          SOURCE_BRANCH: ${{ steps.source.outputs.source_branch }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -142,8 +169,8 @@ jobs:
             --arg image_repo "${IMAGE_REPO}" \
             --arg image_tag "${IMAGE_TAG}" \
             --arg alias_tag "${ALIAS_TAG}" \
-            --arg commit_sha "${GITHUB_SHA}" \
-            --arg build_ref "${GITHUB_REF}" \
+            --arg commit_sha "${SOURCE_SHA}" \
+            --arg build_ref "${SOURCE_BRANCH}" \
             '{
               image_repo: $image_repo,
               image_tag: $image_tag,
@@ -174,6 +201,9 @@ jobs:
       - build-images
     timeout-minutes: 20
     environment: ${{ github.event.inputs.environment }}
+    env:
+      DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+      DEPLOY_WEBHOOK_TOKEN: ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}
     steps:
       - name: 登录 GHCR
         uses: docker/login-action@v3
@@ -235,11 +265,9 @@ jobs:
           done
 
       - name: 触发外部部署 Webhook（可选）
-        if: ${{ secrets.DEPLOY_WEBHOOK_URL != '' }}
+        if: env.DEPLOY_WEBHOOK_URL != ''
         shell: bash
         env:
-          DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
-          DEPLOY_WEBHOOK_TOKEN: ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}
           RELEASE_ACTION: ${{ steps.release-meta.outputs.release_action }}
           RELEASE_ENV: ${{ steps.release-meta.outputs.environment }}
           TARGET_TAG: ${{ steps.release-meta.outputs.target_tag }}
@@ -272,7 +300,7 @@ jobs:
           curl -fsS -X POST "${DEPLOY_WEBHOOK_URL}" "${headers[@]}" -d "${payload}"
 
       - name: 输出手动发布指引
-        if: ${{ secrets.DEPLOY_WEBHOOK_URL == '' }}
+        if: env.DEPLOY_WEBHOOK_URL == ''
         shell: bash
         env:
           RELEASE_ACTION: ${{ steps.release-meta.outputs.release_action }}

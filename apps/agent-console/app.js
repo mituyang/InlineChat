@@ -1618,7 +1618,7 @@ function handleMessageNack(payload) {
   }
   clearPending(clientMsgID);
   markMessageFailedByClientMsgID(clientMsgID);
-  setStatus(payload.error || "发送失败", true);
+  setStatus(extractErrorMessage(payload.error, "发送失败"), true);
 }
 
 function handleMessageStatusEvent(payload) {
@@ -2379,7 +2379,7 @@ function connectWebSocket() {
           handleConversationStatusEvent(data.payload || {});
           break;
         case "error":
-          setStatus(data.error || "WebSocket 消息异常", true);
+          setStatus(extractErrorMessage(data.error, "WebSocket 消息异常"), true);
           break;
         default:
           break;
@@ -2471,6 +2471,31 @@ function setStatus(text, isError = false) {
   els.statusLine.classList.toggle("error", Boolean(isError));
 }
 
+function extractErrorMessage(value, fallback = "") {
+  if (value == null) {
+    return fallback;
+  }
+  if (typeof value === "string") {
+    const text = value.trim();
+    return text || fallback;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  if (typeof value === "object") {
+    const obj = value;
+    const nested =
+      extractErrorMessage(obj.message, "") ||
+      extractErrorMessage(obj.error, "") ||
+      extractErrorMessage(obj.detail, "") ||
+      extractErrorMessage(obj.reason, "");
+    if (nested) {
+      return nested;
+    }
+  }
+  return fallback;
+}
+
 function isAbortError(error) {
   return Boolean(error && typeof error === "object" && error.name === "AbortError");
 }
@@ -2511,7 +2536,7 @@ async function apiRequest(path, options = {}) {
       redirectToLogin("登录态已过期，请重新登录");
     }
 
-    const message = data.error || data?.error?.message || `请求失败 (${response.status})`;
+    const message = extractErrorMessage(data?.error, extractErrorMessage(data?.message, `请求失败 (${response.status})`));
     throw new Error(message);
   }
 

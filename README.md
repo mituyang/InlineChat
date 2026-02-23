@@ -20,6 +20,7 @@
 - `apps/demo-site`: 业务网站示例前端源码（已嵌入客服）
 - `apps/widget-sdk/inlinechat-widget.js`: 嵌入式 SDK 脚本源码
 - `apps/*`: 前端单一源码目录（gateway 镜像构建时直接打包，无需同步双份目录）
+- `tests/e2e`: Playwright 前端主流程 E2E（Chromium，5 场景）
 - `infra/docker/docker-compose.yml`: 本地编排
 - `docs/production-roadmap.md`: 生产化改造路线图
 - `docs/cicd.md`: CI/CD 使用说明（门禁、发布、回滚）
@@ -122,9 +123,35 @@
 - `make smoke`: 运行端到端冒烟（健康检查、登录、管理接口、会话与消息）
 - `make integration`: 运行系统集成检查（`smoke + etcd + mysql + websocket`）
 - `make full-regression`: 运行全功能回归（管理、认证、会话、已读、认领、转接确认/拒绝、关闭、自动关闭、审计）
+- `make e2e-ui`: 运行前端 Playwright E2E（5 个主流程场景，Chromium）
+- `make verify-all`: 一键全量验证（`quality + smoke + integration + full-regression + e2e-ui`，默认自动 `up/down`）
 - `make mvp-release`: 执行 MVP 验收流水（`test + integration`）
 - `make fmt`: 统一 gofmt
 - `make proto`: 重新生成 gRPC 协议代码（chat/auth/admin/gateway/realtime）
+
+## 全量验证（verify-all）
+- 本地执行：
+  - `make verify-all`
+- `verify-all` 默认行为：
+  - 启动前自动 `make down`（容错清理）
+  - 自动 `make up`
+  - 依次执行 `quality -> smoke -> integration -> full-regression -> e2e-ui`
+  - 结束后自动 `make down`
+- 可用控制变量：
+  - `VERIFY_AUTO_UPDOWN=1|0`：是否自动管理环境（默认 `1`）
+  - `VERIFY_KEEP_ENV_ON_FAIL=1|0`：失败时保留现场（默认 `0`）
+  - `VERIFY_KEEP_ENV=1|0`：无论成功失败都保留环境（默认 `0`）
+- 前端 E2E 依赖（首次）：
+  - `npm --prefix tests/e2e install`
+  - `npx --prefix tests/e2e playwright install --with-deps chromium`
+- 前端 E2E 运行参数：
+  - `E2E_BASE_URL`（默认 `http://127.0.0.1:8200`）
+  - `E2E_SUPER_ADMIN_EMAIL`（默认回退 `.env` 的 `SUPER_ADMIN_EMAIL`）
+  - `E2E_SUPER_ADMIN_PASSWORD`（默认回退 `.env` 的 `SUPER_ADMIN_PASSWORD`）
+- 常见失败排查：
+  - `tests/e2e/node_modules` 缺失：先执行依赖安装
+  - Playwright 浏览器未安装：执行 `playwright install --with-deps chromium`
+  - 端口冲突：先执行 `make down` 再重跑
 
 ## 测试与 CI
 - 已补充核心业务单元测试：
@@ -132,11 +159,13 @@
   - `services/admin-service/internal/service/admin_service_test.go`
   - `services/chat-service/internal/service/chat_service_test.go`
 - CI 流水线：`.github/workflows/ci.yml`
-  - `test-gate` Job：执行 `make test`（单人开发轻量门禁）
+  - `verify-all` Job：每次 `push main` 执行 `make verify-all`（全量门禁）
+  - 失败时上传 Playwright 报告、测试结果与关键容器日志
 - 安全流水线：`.github/workflows/security.yml`
   - `govulncheck` Job：扫描所有 Go 模块已知漏洞（每月 + 手动）
 - CD 流水线：`.github/workflows/cd.yml`
-  - `build-and-push-images` Job：`main` 合并后自动构建并推送 5 个服务镜像到 GHCR（`sha-<commit>` + `main`）
+  - 自动构建触发改为监听 `CI` 成功（`workflow_run`），CI 失败时阻断镜像构建
+  - `build-and-push-images` Job：构建并推送 5 个服务镜像到 GHCR（`sha-<commit>`，`workflow_run` 场景附加 `main` 标签）
   - `release-or-rollback` Job：手动触发，支持 `deploy/rollback` 与环境选择，支持可选 Webhook 集成
 - 分支保护清单：`docs/branch-protection-checklist.md`
   - 单人开发模式：仅保留“禁止 force-push + 禁止删除 main”
