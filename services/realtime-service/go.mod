@@ -7,7 +7,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/redis/go-redis/v9 v9.7.0
-	go.uber.org/zap v1.27.0
+	go.uber.org/zap v1.27.1
 	google.golang.org/grpc v1.79.1
 	google.golang.org/protobuf v1.36.10
 	inlinechat/packages/discovery v0.0.0
