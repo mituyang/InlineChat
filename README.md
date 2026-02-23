@@ -28,7 +28,7 @@
 - `.github/CODEOWNERS`: 目录责任人配置
 - `.github/pull_request_template.md`: PR 标准模板
 - `.github/ISSUE_TEMPLATE/*`: Issue 标准模板
-- `.github/dependabot.yml`: 依赖自动升级策略
+- Dependabot：单人开发模式默认关闭（避免自动 PR 噪声）
 - `.env.example`: 环境变量模板
 
 前端资源加载规则：
@@ -143,7 +143,7 @@
 - 协作治理配置：
   - `CODEOWNERS`：限定核心目录责任人
   - `PR/Issue` 模板：统一评审与缺陷输入质量
-  - `dependabot.yml`：每月自动检查 Go 与 GitHub Actions 依赖更新
+  - 单人开发模式默认关闭 Dependabot 自动 PR（避免噪声）
 
 ## 监控与告警
 - 监控编排文件：`infra/docker/docker-compose.monitoring.yml`

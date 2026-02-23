@@ -16,7 +16,7 @@
 - 关键依赖条件从 `service_started` 升级为 `service_healthy`。
 - CI/CD 基线完善：当前采用单人轻量模式（`test-gate + CD`）。
 - 可观测性基线完善：Prometheus/Alertmanager/Grafana/Blackbox 叠加编排与默认告警规则。
-- 工程治理基线补齐：`CODEOWNERS`、PR/Issue 模板、Dependabot、Security workflow（`govulncheck` 每月扫描）。
+- 工程治理基线补齐：`CODEOWNERS`、PR/Issue 模板、Security workflow（`govulncheck` 每月扫描）。
 
 ## 下一阶段（高优先级）
 1. 安全与访问控制

@@ -1,7 +1,7 @@
 # InlineChat CI/CD 使用说明
 
 ## 目标
-- `CI` 负责 PR 门禁，阻止不满足质量标准的变更进入 `main`。
+- `CI` 负责基础回归，确保 `main` 直推模式下仍有最小质量检查。
 - `CD` 负责镜像构建、发布动作编排和回滚输入，保证版本可追踪、可回滚。
 
 ## CI（已启用）
@@ -55,8 +55,8 @@
   - 统一记录变更范围、风险、验证清单，降低评审信息缺失。
 - Issue 模板：`.github/ISSUE_TEMPLATE/`
   - 分离 Bug 与 Feature 两类输入，提升问题收敛效率。
-- Dependabot：`.github/dependabot.yml`
-  - 每月自动扫描 `github-actions` 与所有 Go module 目录，并创建依赖升级 PR。
+- Dependabot：
+  - 单人开发模式默认关闭自动依赖 PR（如需恢复，可重新添加 `.github/dependabot.yml`）。
 
 ## 回滚约定
 - 回滚时使用 `release_action=rollback`，并明确 `image_tag`。
