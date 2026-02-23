@@ -22,6 +22,8 @@
 - `apps/*`: 前端单一源码目录（gateway 镜像构建时直接打包，无需同步双份目录）
 - `infra/docker/docker-compose.yml`: 本地编排
 - `docs/production-roadmap.md`: 生产化改造路线图
+- `docs/cicd.md`: CI/CD 使用说明（门禁、发布、回滚）
+- `docs/observability.md`: 可观测性与告警接入说明
 - `.env.example`: 环境变量模板
 
 前端资源加载规则：
@@ -103,6 +105,9 @@
 - `make up`: 先本地编译、再构建镜像、最后后台启动全部服务
 - `make down`: 停止并删除容器
 - `make logs`: 跟随日志
+- `make monitoring-up`: 叠加启动监控组件（Prometheus/Alertmanager/Grafana/Blackbox）
+- `make monitoring-down`: 停止监控组件
+- `make monitoring-logs`: 查看监控组件日志
 - `make migrate`: 执行全部迁移
 - `make lint`: 执行格式与静态检查（`fmt-check + vet`，覆盖 `services/*` 与 `packages/*`）
 - `make test`: 运行后端模块测试（覆盖 `services/*` 与 `packages/*`）
@@ -126,6 +131,21 @@
   - `smoke-gate` Job：执行 `cp .env.example .env && make up && make smoke`，并在结束后自动 `make down`
   - `required-gate` Job：仅在 PR 触发，汇总校验 `quality-gate + smoke-gate` 结果，建议作为分支保护必选检查项
   - `integration-main` Job：仅在 `main` 分支 push 后触发，执行 `make integration` 进行合并后系统回归
+- CD 流水线：`.github/workflows/cd.yml`
+  - `build-and-push-images` Job：`main` 合并后自动构建并推送 5 个服务镜像到 GHCR（`sha-<commit>` + `main`）
+  - `release-or-rollback` Job：手动触发，支持 `deploy/rollback` 与环境选择，支持可选 Webhook 集成
+
+## 监控与告警
+- 监控编排文件：`infra/docker/docker-compose.monitoring.yml`
+- 监控配置目录：`infra/monitoring`
+- 启动方式（叠加基础服务）：
+  - `make monitoring-up`
+  - 或执行：
+    - `docker compose -f infra/docker/docker-compose.yml -f infra/docker/docker-compose.monitoring.yml --env-file .env up -d`
+- 默认访问地址：
+  - Prometheus：`http://localhost:${PROMETHEUS_HOST_PORT:-9090}`
+  - Alertmanager：`http://localhost:${ALERTMANAGER_HOST_PORT:-9093}`
+  - Grafana：`http://localhost:${GRAFANA_HOST_PORT:-3000}`
 
 ## 生产化基线（已启用）
 - 全服务提供双探针：

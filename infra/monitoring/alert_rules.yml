@@ -1,0 +1,127 @@
+groups:
+  - name: inlinechat-availability
+    rules:
+      - alert: InlineChatMetricsEndpointDown
+        expr: up{job=~"gateway-service|chat-service|auth-service|admin-service|realtime-service"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "服务 metrics 端点不可达"
+          description: "job={{ $labels.job }} 持续 2 分钟无法抓取 /metrics，请检查服务与网络。"
+
+      - alert: InlineChatReadyzProbeFailed
+        expr: probe_success{job="readyz-probe"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          category: readiness
+        annotations:
+          summary: "服务 readyz 失败"
+          description: "instance={{ $labels.instance }} 连续 2 分钟未通过 readyz 探测。"
+
+  - name: inlinechat-gateway
+    rules:
+      - alert: InlineChatGateway5xxRatioHigh
+        expr: |
+          (
+            sum(rate(inlinechat_gateway_service_http_requests_total{status=~"5..",route!="/metrics"}[5m]))
+            /
+            clamp_min(sum(rate(inlinechat_gateway_service_http_requests_total{route!="/metrics"}[5m])), 1)
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          category: api
+        annotations:
+          summary: "gateway-service 5xx 比例过高"
+          description: "过去 10 分钟 5xx 比例 > 5%，请检查上游依赖与错误日志。"
+
+      - alert: InlineChatGatewayP95LatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (
+              rate(inlinechat_gateway_service_http_request_duration_seconds_bucket{route!="/metrics"}[5m])
+            )
+          ) > 0.8
+        for: 10m
+        labels:
+          severity: warning
+          category: latency
+        annotations:
+          summary: "gateway-service P95 延迟过高"
+          description: "gateway-service 最近 10 分钟 P95 延迟 > 800ms。"
+
+      - alert: InlineChatGatewayInflightHigh
+        expr: inlinechat_gateway_service_http_inflight_requests > 200
+        for: 5m
+        labels:
+          severity: warning
+          category: throughput
+        annotations:
+          summary: "gateway-service 在途请求过高"
+          description: "inflight 请求连续 5 分钟 > 200，请检查限流和上游容量。"
+
+  - name: inlinechat-core-services
+    rules:
+      - alert: InlineChatChatService5xxRatioHigh
+        expr: |
+          (
+            sum(rate(inlinechat_chat_service_http_requests_total{status=~"5..",route!="/metrics"}[5m]))
+            /
+            clamp_min(sum(rate(inlinechat_chat_service_http_requests_total{route!="/metrics"}[5m])), 1)
+          ) > 0.03
+        for: 10m
+        labels:
+          severity: warning
+          category: api
+        annotations:
+          summary: "chat-service 5xx 比例过高"
+          description: "chat-service 最近 10 分钟 5xx 比例 > 3%。"
+
+      - alert: InlineChatAuthService5xxRatioHigh
+        expr: |
+          (
+            sum(rate(inlinechat_auth_service_http_requests_total{status=~"5..",route!="/metrics"}[5m]))
+            /
+            clamp_min(sum(rate(inlinechat_auth_service_http_requests_total{route!="/metrics"}[5m])), 1)
+          ) > 0.03
+        for: 10m
+        labels:
+          severity: warning
+          category: api
+        annotations:
+          summary: "auth-service 5xx 比例过高"
+          description: "auth-service 最近 10 分钟 5xx 比例 > 3%。"
+
+      - alert: InlineChatAdminService5xxRatioHigh
+        expr: |
+          (
+            sum(rate(inlinechat_admin_service_http_requests_total{status=~"5..",route!="/metrics"}[5m]))
+            /
+            clamp_min(sum(rate(inlinechat_admin_service_http_requests_total{route!="/metrics"}[5m])), 1)
+          ) > 0.03
+        for: 10m
+        labels:
+          severity: warning
+          category: api
+        annotations:
+          summary: "admin-service 5xx 比例过高"
+          description: "admin-service 最近 10 分钟 5xx 比例 > 3%。"
+
+      - alert: InlineChatRealtimeService5xxRatioHigh
+        expr: |
+          (
+            sum(rate(inlinechat_realtime_service_http_requests_total{status=~"5..",route!="/metrics"}[5m]))
+            /
+            clamp_min(sum(rate(inlinechat_realtime_service_http_requests_total{route!="/metrics"}[5m])), 1)
+          ) > 0.03
+        for: 10m
+        labels:
+          severity: warning
+          category: api
+        annotations:
+          summary: "realtime-service 5xx 比例过高"
+          description: "realtime-service 最近 10 分钟 5xx 比例 > 3%。"

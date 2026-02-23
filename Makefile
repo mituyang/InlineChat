@@ -1,6 +1,7 @@
 SHELL := /bin/bash
 
 COMPOSE_FILE := infra/docker/docker-compose.yml
+MONITORING_COMPOSE_FILE := infra/docker/docker-compose.monitoring.yml
 ENV_FILE ?= .env
 CACHE_DIR := $(CURDIR)/.cache
 GO_SERVICE_MODULES := services/chat-service services/realtime-service services/gateway-service services/auth-service services/admin-service
@@ -15,7 +16,7 @@ COVERAGE_THRESHOLD_ALL ?= 12
 MIN_COVERED_PACKAGES ?= 10
 MIN_TOTAL_PACKAGES ?= 20
 
-.PHONY: help ensure-env config up up-fg down restart logs ps migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover quality proto build-local image-build smoke integration full-regression mvp-release
+.PHONY: help ensure-env config up up-fg down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover quality proto build-local image-build smoke integration full-regression mvp-release
 
 help:
 	@echo "可用命令:"
@@ -25,6 +26,9 @@ help:
 	@echo "  make down           停止并删除容器"
 	@echo "  make logs           查看服务日志"
 	@echo "  make ps             查看服务状态"
+	@echo "  make monitoring-up  在现有服务上叠加启动 Prometheus/Alertmanager/Grafana"
+	@echo "  make monitoring-down 停止监控组件"
+	@echo "  make monitoring-logs 查看监控组件日志"
 	@echo "  make config         校验 docker compose 配置"
 	@echo "  make migrate        执行全部迁移任务"
 	@echo "  make lint           执行格式与静态检查（fmt-check + vet）"
@@ -84,6 +88,16 @@ logs: ensure-env
 
 ps: ensure-env
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) ps
+
+monitoring-up: ensure-env
+	docker compose -f $(COMPOSE_FILE) -f $(MONITORING_COMPOSE_FILE) --env-file $(ENV_FILE) up -d prometheus alertmanager grafana blackbox-exporter
+
+monitoring-down: ensure-env
+	docker compose -f $(COMPOSE_FILE) -f $(MONITORING_COMPOSE_FILE) --env-file $(ENV_FILE) stop prometheus alertmanager grafana blackbox-exporter
+	docker compose -f $(COMPOSE_FILE) -f $(MONITORING_COMPOSE_FILE) --env-file $(ENV_FILE) rm -f prometheus alertmanager grafana blackbox-exporter
+
+monitoring-logs: ensure-env
+	docker compose -f $(COMPOSE_FILE) -f $(MONITORING_COMPOSE_FILE) --env-file $(ENV_FILE) logs -f --tail=200 prometheus alertmanager grafana blackbox-exporter
 
 migrate: ensure-env migrate-chat migrate-auth migrate-admin
 	@echo "迁移已执行完成"

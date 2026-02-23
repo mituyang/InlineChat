@@ -1,0 +1,312 @@
+name: CD
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      release_action:
+        description: 发布动作
+        type: choice
+        options:
+          - deploy
+          - rollback
+        default: deploy
+      environment:
+        description: 发布环境
+        type: choice
+        options:
+          - staging
+          - production
+        default: staging
+      image_tag:
+        description: 镜像标签（rollback 必填；deploy 留空默认使用最新构建）
+        required: false
+        type: string
+      build_images:
+        description: deploy 时是否先构建并推送镜像
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: cd-${{ github.workflow }}-${{ github.event.inputs.environment || github.ref }}
+  cancel-in-progress: false
+
+env:
+  GO_VERSION: "1.25.x"
+
+jobs:
+  build-images:
+    name: build-and-push-images
+    if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.release_action == 'deploy' && github.event.inputs.build_images == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      image_repo: ${{ steps.meta.outputs.image_repo }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: |
+            **/go.sum
+
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 计算镜像元数据
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo_lower="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          image_repo="ghcr.io/${repo_lower}"
+          input_tag="${{ github.event.inputs.image_tag }}"
+          if [[ -n "${input_tag}" ]]; then
+            image_tag="${input_tag}"
+          else
+            image_tag="sha-${GITHUB_SHA::12}"
+          fi
+          alias_tag=""
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            alias_tag="main"
+          fi
+
+          echo "image_repo=${image_repo}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${image_tag}" >> "$GITHUB_OUTPUT"
+          echo "alias_tag=${alias_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: 构建服务二进制
+        run: make build-local
+
+      - name: 构建并推送服务镜像
+        shell: bash
+        env:
+          IMAGE_REPO: ${{ steps.meta.outputs.image_repo }}
+          IMAGE_TAG: ${{ steps.meta.outputs.image_tag }}
+          ALIAS_TAG: ${{ steps.meta.outputs.alias_tag }}
+        run: |
+          set -euo pipefail
+
+          services=(chat-service auth-service admin-service realtime-service gateway-service)
+          for service in "${services[@]}"; do
+            case "$service" in
+              gateway-service)
+                dockerfile="services/gateway-service/Dockerfile"
+                context="."
+                ;;
+              *)
+                dockerfile="services/${service}/Dockerfile"
+                context="services/${service}"
+                ;;
+            esac
+
+            image="${IMAGE_REPO}/${service}:${IMAGE_TAG}"
+            echo "==> build ${image}"
+            docker build -f "${dockerfile}" -t "${image}" "${context}"
+            echo "==> push ${image}"
+            docker push "${image}"
+
+            if [[ -n "${ALIAS_TAG}" ]]; then
+              alias_image="${IMAGE_REPO}/${service}:${ALIAS_TAG}"
+              docker tag "${image}" "${alias_image}"
+              docker push "${alias_image}"
+            fi
+          done
+
+      - name: 产出镜像清单
+        shell: bash
+        env:
+          IMAGE_REPO: ${{ steps.meta.outputs.image_repo }}
+          IMAGE_TAG: ${{ steps.meta.outputs.image_tag }}
+          ALIAS_TAG: ${{ steps.meta.outputs.alias_tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          jq -n \
+            --arg image_repo "${IMAGE_REPO}" \
+            --arg image_tag "${IMAGE_TAG}" \
+            --arg alias_tag "${ALIAS_TAG}" \
+            --arg commit_sha "${GITHUB_SHA}" \
+            --arg build_ref "${GITHUB_REF}" \
+            '{
+              image_repo: $image_repo,
+              image_tag: $image_tag,
+              alias_tag: $alias_tag,
+              commit_sha: $commit_sha,
+              build_ref: $build_ref,
+              services: [
+                "chat-service",
+                "auth-service",
+                "admin-service",
+                "realtime-service",
+                "gateway-service"
+              ]
+            }' > dist/image-manifest.json
+
+      - name: 上传镜像清单
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-manifest
+          path: dist/image-manifest.json
+          if-no-files-found: error
+
+  release:
+    name: release-or-rollback
+    if: ${{ github.event_name == 'workflow_dispatch' && always() }}
+    runs-on: ubuntu-latest
+    needs:
+      - build-images
+    timeout-minutes: 20
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: 登录 GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 解析发布参数
+        id: release-meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          action="${{ github.event.inputs.release_action }}"
+          env_name="${{ github.event.inputs.environment }}"
+          input_tag="${{ github.event.inputs.image_tag }}"
+          build_images="${{ github.event.inputs.build_images }}"
+          built_tag="${{ needs.build-images.outputs.image_tag }}"
+          build_result="${{ needs.build-images.result }}"
+
+          if [[ "${action}" == "deploy" && "${build_images}" == "true" && "${build_result}" != "success" ]]; then
+            echo "deploy 要求 build-images 成功，但当前结果为 ${build_result}"
+            exit 1
+          fi
+
+          if [[ "${action}" == "rollback" && -z "${input_tag}" ]]; then
+            echo "rollback 模式下 image_tag 必填"
+            exit 1
+          fi
+
+          if [[ -n "${input_tag}" ]]; then
+            target_tag="${input_tag}"
+          elif [[ -n "${built_tag}" ]]; then
+            target_tag="${built_tag}"
+          else
+            target_tag="sha-${GITHUB_SHA::12}"
+          fi
+
+          repo_lower="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          image_repo="ghcr.io/${repo_lower}"
+
+          echo "release_action=${action}" >> "$GITHUB_OUTPUT"
+          echo "environment=${env_name}" >> "$GITHUB_OUTPUT"
+          echo "target_tag=${target_tag}" >> "$GITHUB_OUTPUT"
+          echo "image_repo=${image_repo}" >> "$GITHUB_OUTPUT"
+
+      - name: 校验镜像标签可用
+        shell: bash
+        env:
+          IMAGE_REPO: ${{ steps.release-meta.outputs.image_repo }}
+          TARGET_TAG: ${{ steps.release-meta.outputs.target_tag }}
+        run: |
+          set -euo pipefail
+          services=(chat-service auth-service admin-service realtime-service gateway-service)
+          for service in "${services[@]}"; do
+            image="${IMAGE_REPO}/${service}:${TARGET_TAG}"
+            echo "验证镜像: ${image}"
+            docker manifest inspect "${image}" >/dev/null
+          done
+
+      - name: 触发外部部署 Webhook（可选）
+        if: ${{ secrets.DEPLOY_WEBHOOK_URL != '' }}
+        shell: bash
+        env:
+          DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+          DEPLOY_WEBHOOK_TOKEN: ${{ secrets.DEPLOY_WEBHOOK_TOKEN }}
+          RELEASE_ACTION: ${{ steps.release-meta.outputs.release_action }}
+          RELEASE_ENV: ${{ steps.release-meta.outputs.environment }}
+          TARGET_TAG: ${{ steps.release-meta.outputs.target_tag }}
+          IMAGE_REPO: ${{ steps.release-meta.outputs.image_repo }}
+        run: |
+          set -euo pipefail
+          payload="$(jq -n \
+            --arg action "${RELEASE_ACTION}" \
+            --arg environment "${RELEASE_ENV}" \
+            --arg image_tag "${TARGET_TAG}" \
+            --arg image_repo "${IMAGE_REPO}" \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg actor "${GITHUB_ACTOR}" \
+            --arg sha "${GITHUB_SHA}" \
+            '{
+              action: $action,
+              environment: $environment,
+              image_tag: $image_tag,
+              image_repo: $image_repo,
+              repository: $repository,
+              actor: $actor,
+              commit_sha: $sha
+            }')"
+
+          headers=(-H "Content-Type: application/json")
+          if [[ -n "${DEPLOY_WEBHOOK_TOKEN}" ]]; then
+            headers+=(-H "Authorization: Bearer ${DEPLOY_WEBHOOK_TOKEN}")
+          fi
+
+          curl -fsS -X POST "${DEPLOY_WEBHOOK_URL}" "${headers[@]}" -d "${payload}"
+
+      - name: 输出手动发布指引
+        if: ${{ secrets.DEPLOY_WEBHOOK_URL == '' }}
+        shell: bash
+        env:
+          RELEASE_ACTION: ${{ steps.release-meta.outputs.release_action }}
+          RELEASE_ENV: ${{ steps.release-meta.outputs.environment }}
+          TARGET_TAG: ${{ steps.release-meta.outputs.target_tag }}
+          IMAGE_REPO: ${{ steps.release-meta.outputs.image_repo }}
+        run: |
+          set -euo pipefail
+          {
+            echo "未配置 DEPLOY_WEBHOOK_URL，本次未自动触发部署。"
+            echo "动作: ${RELEASE_ACTION}"
+            echo "环境: ${RELEASE_ENV}"
+            echo "镜像标签: ${TARGET_TAG}"
+            echo "镜像仓库: ${IMAGE_REPO}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 输出发布摘要
+        shell: bash
+        env:
+          RELEASE_ACTION: ${{ steps.release-meta.outputs.release_action }}
+          RELEASE_ENV: ${{ steps.release-meta.outputs.environment }}
+          TARGET_TAG: ${{ steps.release-meta.outputs.target_tag }}
+          IMAGE_REPO: ${{ steps.release-meta.outputs.image_repo }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## CD 执行结果"
+            echo "- action: ${RELEASE_ACTION}"
+            echo "- environment: ${RELEASE_ENV}"
+            echo "- image_tag: ${TARGET_TAG}"
+            echo "- image_repo: ${IMAGE_REPO}"
+            echo "- chat-service: \`${IMAGE_REPO}/chat-service:${TARGET_TAG}\`"
+            echo "- auth-service: \`${IMAGE_REPO}/auth-service:${TARGET_TAG}\`"
+            echo "- admin-service: \`${IMAGE_REPO}/admin-service:${TARGET_TAG}\`"
+            echo "- realtime-service: \`${IMAGE_REPO}/realtime-service:${TARGET_TAG}\`"
+            echo "- gateway-service: \`${IMAGE_REPO}/gateway-service:${TARGET_TAG}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
