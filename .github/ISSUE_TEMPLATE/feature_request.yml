@@ -1,0 +1,36 @@
+name: Feature 需求
+description: 提交一个功能需求或工程化改进建议
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: background
+    attributes:
+      label: 背景与问题
+      description: 当前痛点或机会点是什么
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 方案建议
+      description: 建议的实现方式、范围与边界
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影响评估
+      description: 对业务、性能、安全、维护成本的影响
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 可以量化的完成标准
+      placeholder: |
+        - [ ] 指标 A 达到 ...
+        - [ ] 测试 B 通过 ...

@@ -12,6 +12,12 @@
   - `required-gate`：PR 汇总门禁（建议设置为分支保护必选）
   - `integration-main`：`main` 合并后执行系统集成回归
 
+## Security（本次补充）
+- 工作流：`.github/workflows/security.yml`
+- 关键检查：
+  - `dependency-review`：PR 依赖变更风险审查（`moderate` 及以上直接失败）
+  - `govulncheck`：对全部 Go module 执行漏洞扫描（支持定时 + 手动触发）
+
 ## CD（本次新增）
 - 工作流：`.github/workflows/cd.yml`
 
@@ -45,6 +51,16 @@
   - 所有变更通过 PR 合并，不允许直接推送到 `main`
   - 必选检查只保留稳定聚合门禁 `required-gate`
   - 强制评审与对话解决，避免“带风险合并”
+
+## 协作治理（本次补充）
+- `CODEOWNERS`：`.github/CODEOWNERS`
+  - 将 `services/`、`packages/`、`infra/`、`.github/`、`docs/` 绑定责任人，配合分支保护可启用 Code Owner 强审。
+- PR 模板：`.github/pull_request_template.md`
+  - 统一记录变更范围、风险、验证清单，降低评审信息缺失。
+- Issue 模板：`.github/ISSUE_TEMPLATE/`
+  - 分离 Bug 与 Feature 两类输入，提升问题收敛效率。
+- Dependabot：`.github/dependabot.yml`
+  - 每周自动扫描 `github-actions` 与所有 Go module 目录，并创建依赖升级 PR。
 
 ## 回滚约定
 - 回滚时使用 `release_action=rollback`，并明确 `image_tag`。

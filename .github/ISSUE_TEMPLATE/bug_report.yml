@@ -1,0 +1,54 @@
+name: Bug 报告
+description: 提交一个缺陷问题，帮助我们快速复现和修复
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题概述
+      description: 用 1-3 句话描述问题现象
+      placeholder: 例如：访客端发送消息后，客服端 10 秒后才收到
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 按顺序列出最小复现路径
+      placeholder: |
+        1. 打开 ...
+        2. 点击 ...
+        3. 观察到 ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志/报错信息
+      description: 请粘贴关键日志、截图或报错堆栈
+      render: shell
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本信息
+      description: commit hash / 分支 / 镜像 tag
+      placeholder: 例如 main@1c127fa

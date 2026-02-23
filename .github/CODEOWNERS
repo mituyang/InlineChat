@@ -1,0 +1,11 @@
+# 全局默认负责人
+* @mituyang
+
+# 服务端核心目录
+/services/ @mituyang
+/packages/ @mituyang
+/infra/ @mituyang
+
+# 流水线与工程治理
+/.github/ @mituyang
+/docs/ @mituyang
