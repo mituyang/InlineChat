@@ -111,6 +111,31 @@ func (r *fakeAgentRepository) GetByID(_ context.Context, id uint64) (*model.Agen
 	return nil, repository.ErrNotFound
 }
 
+type fakeSuperAdminRepository struct {
+	items []model.SuperAdmin
+}
+
+func (r *fakeSuperAdminRepository) GetByID(_ context.Context, id uint64) (*model.SuperAdmin, error) {
+	for i := range r.items {
+		if r.items[i].ID == id {
+			out := r.items[i]
+			return &out, nil
+		}
+	}
+	return nil, repository.ErrNotFound
+}
+
+func (r *fakeSuperAdminRepository) GetByEmail(_ context.Context, email string) (*model.SuperAdmin, error) {
+	normalized := strings.ToLower(strings.TrimSpace(email))
+	for i := range r.items {
+		if strings.ToLower(strings.TrimSpace(r.items[i].Email)) == normalized {
+			out := r.items[i]
+			return &out, nil
+		}
+	}
+	return nil, repository.ErrNotFound
+}
+
 type fakeAuditLogRepository struct {
 	items []model.AuditLog
 }
@@ -128,7 +153,15 @@ func (r *fakeAuditLogRepository) List(_ context.Context, _ repository.AuditLogFi
 }
 
 func newTestAdminService(siteRepo repository.SiteRepository, agentRepo repository.AgentRepository) *AdminService {
-	return New(siteRepo, agentRepo, &fakeAuditLogRepository{}, 10)
+	return newTestAdminServiceWithSuperAdminRepo(siteRepo, agentRepo, &fakeSuperAdminRepository{})
+}
+
+func newTestAdminServiceWithSuperAdminRepo(
+	siteRepo repository.SiteRepository,
+	agentRepo repository.AgentRepository,
+	superAdminRepo repository.SuperAdminRepository,
+) *AdminService {
+	return New(siteRepo, agentRepo, superAdminRepo, &fakeAuditLogRepository{}, 10)
 }
 
 func TestCreateAgentDefaultRoleAndHashPassword(t *testing.T) {
@@ -196,6 +229,27 @@ func TestCreateAgentMapDuplicateToConflict(t *testing.T) {
 	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 		AgentID:     "1001",
 		Email:       "agent@example.com",
+		Password:    "Agent#Strong2026!",
+		DisplayName: "客服A",
+		Role:        "agent",
+	})
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("expected ErrConflict, got %v", err)
+	}
+}
+
+func TestCreateAgentRejectSuperAdminEmailConflict(t *testing.T) {
+	agentRepo := &fakeAgentRepository{}
+	superAdminRepo := &fakeSuperAdminRepository{
+		items: []model.SuperAdmin{
+			{ID: 9001, Email: "super@example.com", Status: "active"},
+		},
+	}
+	svc := newTestAdminServiceWithSuperAdminRepo(&fakeSiteRepository{}, agentRepo, superAdminRepo)
+
+	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
+		AgentID:     "1001",
+		Email:       "super@example.com",
 		Password:    "Agent#Strong2026!",
 		DisplayName: "客服A",
 		Role:        "agent",
@@ -380,7 +434,7 @@ func TestUpdateSiteStatus(t *testing.T) {
 	}
 }
 
-func TestValidateAgentSession(t *testing.T) {
+func TestValidateAdminSessionForAgentRole(t *testing.T) {
 	agentRepo := &fakeAgentRepository{
 		items: []model.Agent{
 			{ID: 12, Email: "a@example.com", Role: "admin", Status: "active", TokenVersion: 2},
@@ -388,12 +442,12 @@ func TestValidateAgentSession(t *testing.T) {
 	}
 	svc := newTestAdminService(&fakeSiteRepository{}, agentRepo)
 
-	if err := svc.ValidateAgentSession(context.Background(), 12, 2); err != nil {
-		t.Fatalf("ValidateAgentSession failed: %v", err)
+	if err := svc.ValidateAdminSession(context.Background(), "admin", 12, 2); err != nil {
+		t.Fatalf("ValidateAdminSession failed: %v", err)
 	}
 }
 
-func TestValidateAgentSessionRejectStaleTokenVersion(t *testing.T) {
+func TestValidateAdminSessionRejectStaleTokenVersion(t *testing.T) {
 	agentRepo := &fakeAgentRepository{
 		items: []model.Agent{
 			{ID: 12, Email: "a@example.com", Role: "admin", Status: "active", TokenVersion: 3},
@@ -401,8 +455,22 @@ func TestValidateAgentSessionRejectStaleTokenVersion(t *testing.T) {
 	}
 	svc := newTestAdminService(&fakeSiteRepository{}, agentRepo)
 
-	err := svc.ValidateAgentSession(context.Background(), 12, 2)
+	err := svc.ValidateAdminSession(context.Background(), "admin", 12, 2)
 	if !errors.Is(err, ErrInvalidSession) {
 		t.Fatalf("expected ErrInvalidSession, got %v", err)
+	}
+}
+
+func TestValidateAdminSessionForSuperAdminRole(t *testing.T) {
+	agentRepo := &fakeAgentRepository{}
+	superAdminRepo := &fakeSuperAdminRepository{
+		items: []model.SuperAdmin{
+			{ID: 9001, Email: "super@example.com", Status: "active", TokenVersion: 2},
+		},
+	}
+	svc := newTestAdminServiceWithSuperAdminRepo(&fakeSiteRepository{}, agentRepo, superAdminRepo)
+
+	if err := svc.ValidateAdminSession(context.Background(), "super_admin", 9001, 2); err != nil {
+		t.Fatalf("ValidateAdminSession failed: %v", err)
 	}
 }

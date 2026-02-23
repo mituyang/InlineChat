@@ -85,10 +85,11 @@ func main() {
 
 	siteRepo := repository.NewSiteRepository(db, queryTimeout)
 	agentRepo := repository.NewAgentRepository(db, queryTimeout)
+	superAdminRepo := repository.NewSuperAdminRepository(db, queryTimeout)
 	auditRepo := repository.NewAuditLogRepository(db, queryTimeout)
-	adminSvc := service.New(siteRepo, agentRepo, auditRepo, cfg.BCryptCost)
+	adminSvc := service.New(siteRepo, agentRepo, superAdminRepo, auditRepo, cfg.BCryptCost)
 	h := handler.NewHTTPHandler(adminSvc)
-	authz := middleware.NewAuthz(cfg.JWTSecret, cfg.JWTPreviousSecret, cfg.JWTIssuer, agentRepo)
+	authz := middleware.NewAuthz(cfg.JWTSecret, cfg.JWTPreviousSecret, cfg.JWTIssuer, agentRepo, superAdminRepo)
 	metrics := httpmiddleware.NewHTTPMetrics("admin-service", nil)
 
 	r := gin.New()

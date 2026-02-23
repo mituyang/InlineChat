@@ -82,9 +82,11 @@ func main() {
 	sqlDB.SetConnMaxIdleTime(time.Duration(cfg.MySQLConnMaxIdleTimeSec) * time.Second)
 	queryTimeout := time.Duration(cfg.MySQLQueryTimeoutMS) * time.Millisecond
 
-	repo := repository.NewAgentRepository(db, queryTimeout)
+	agentRepo := repository.NewAgentRepository(db, queryTimeout)
+	superAdminRepo := repository.NewSuperAdminRepository(db, queryTimeout)
 	authSvc := service.New(
-		repo,
+		agentRepo,
+		superAdminRepo,
 		cfg.JWTSecret,
 		cfg.JWTPreviousSecret,
 		cfg.JWTIssuer,

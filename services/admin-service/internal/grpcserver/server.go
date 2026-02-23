@@ -300,7 +300,7 @@ func (s *AdminGatewayServer) requireAdmin(ctx context.Context, authorization str
 		return nil, status.Error(codes.PermissionDenied, "admin role required")
 	}
 	if s.adminService != nil {
-		if err := s.adminService.ValidateAgentSession(ctx, claims.AgentID, claims.TokenVersion); err != nil {
+		if err := s.adminService.ValidateAdminSession(ctx, claims.Role, claims.AgentID, claims.TokenVersion); err != nil {
 			if errors.Is(err, service.ErrInvalidSession) {
 				return nil, status.Error(codes.Unauthenticated, "invalid token")
 			}

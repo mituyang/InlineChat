@@ -76,31 +76,99 @@ func (r *fakeAgentRepository) GetByID(_ context.Context, id uint64) (*model.Agen
 	return nil, repository.ErrNotFound
 }
 
-func newTestAuthService(repo repository.AgentRepository, email string, password string, displayName string) *AuthService {
-	return New(repo, "test-secret", "", "test-issuer", time.Hour, 10, email, password, displayName)
+type fakeSuperAdminRepository struct {
+	items       map[string]*model.SuperAdmin
+	createCalls int
+	saveCalls   int
+	createErr   error
+	saveErr     error
+	getErr      error
+}
+
+func newFakeSuperAdminRepository() *fakeSuperAdminRepository {
+	return &fakeSuperAdminRepository{
+		items: make(map[string]*model.SuperAdmin),
+	}
+}
+
+func (r *fakeSuperAdminRepository) Create(_ context.Context, superAdmin *model.SuperAdmin) error {
+	if r.createErr != nil {
+		return r.createErr
+	}
+	r.createCalls++
+
+	copyItem := *superAdmin
+	r.items[strings.ToLower(copyItem.Email)] = &copyItem
+	return nil
+}
+
+func (r *fakeSuperAdminRepository) Save(_ context.Context, superAdmin *model.SuperAdmin) error {
+	if r.saveErr != nil {
+		return r.saveErr
+	}
+	r.saveCalls++
+
+	copyItem := *superAdmin
+	r.items[strings.ToLower(copyItem.Email)] = &copyItem
+	return nil
+}
+
+func (r *fakeSuperAdminRepository) GetByEmail(_ context.Context, email string) (*model.SuperAdmin, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+
+	item, ok := r.items[strings.ToLower(email)]
+	if !ok {
+		return nil, repository.ErrNotFound
+	}
+	copyItem := *item
+	return &copyItem, nil
+}
+
+func (r *fakeSuperAdminRepository) GetByID(_ context.Context, id uint64) (*model.SuperAdmin, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	for _, item := range r.items {
+		if item.ID != id {
+			continue
+		}
+		copyItem := *item
+		return &copyItem, nil
+	}
+	return nil, repository.ErrNotFound
+}
+
+func newTestAuthService(
+	agentRepo repository.AgentRepository,
+	superAdminRepo repository.SuperAdminRepository,
+	email string,
+	password string,
+	displayName string,
+) *AuthService {
+	return New(agentRepo, superAdminRepo, "test-secret", "", "test-issuer", time.Hour, 10, email, password, displayName)
 }
 
 func TestEnsureSuperAdminCreateWhenMissing(t *testing.T) {
-	repo := newFakeAgentRepository()
-	svc := newTestAuthService(repo, "super@example.com", "Sup3rAdmin#2026!", "超级管理员")
+	agentRepo := newFakeAgentRepository()
+	superAdminRepo := newFakeSuperAdminRepository()
+	svc := newTestAuthService(agentRepo, superAdminRepo, "super@example.com", "Sup3rAdmin#2026!", "超级管理员")
 
 	if err := svc.EnsureSuperAdmin(context.Background()); err != nil {
 		t.Fatalf("EnsureSuperAdmin failed: %v", err)
 	}
 
-	if repo.createCalls != 1 {
-		t.Fatalf("expected createCalls=1, got %d", repo.createCalls)
+	if superAdminRepo.createCalls != 1 {
+		t.Fatalf("expected createCalls=1, got %d", superAdminRepo.createCalls)
 	}
-	if repo.saveCalls != 0 {
-		t.Fatalf("expected saveCalls=0, got %d", repo.saveCalls)
+	if superAdminRepo.saveCalls != 0 {
+		t.Fatalf("expected saveCalls=0, got %d", superAdminRepo.saveCalls)
 	}
 
-	created, ok := repo.items["super@example.com"]
+	created, ok := superAdminRepo.items["super@example.com"]
 	if !ok {
 		t.Fatalf("super admin not created")
-	}
-	if created.Role != "super_admin" {
-		t.Fatalf("unexpected role: %s", created.Role)
 	}
 	if created.Status != "active" {
 		t.Fatalf("unexpected status: %s", created.Status)
@@ -117,35 +185,32 @@ func TestEnsureSuperAdminCreateWhenMissing(t *testing.T) {
 }
 
 func TestEnsureSuperAdminUpdateWhenDrifted(t *testing.T) {
-	repo := newFakeAgentRepository()
+	agentRepo := newFakeAgentRepository()
+	superAdminRepo := newFakeSuperAdminRepository()
 	oldHash, err := security.HashPassword("OldPassword123!", 10)
 	if err != nil {
 		t.Fatalf("hash password failed: %v", err)
 	}
-	repo.items["super@example.com"] = &model.Agent{
+	superAdminRepo.items["super@example.com"] = &model.SuperAdmin{
 		Email:        "super@example.com",
 		PasswordHash: oldHash,
 		DisplayName:  "旧名字",
-		Role:         "agent",
 		Status:       "inactive",
 	}
 
-	svc := newTestAuthService(repo, "super@example.com", "NewPassword123!", "新名字")
+	svc := newTestAuthService(agentRepo, superAdminRepo, "super@example.com", "NewPassword123!", "新名字")
 	if err := svc.EnsureSuperAdmin(context.Background()); err != nil {
 		t.Fatalf("EnsureSuperAdmin failed: %v", err)
 	}
 
-	if repo.createCalls != 0 {
-		t.Fatalf("expected createCalls=0, got %d", repo.createCalls)
+	if superAdminRepo.createCalls != 0 {
+		t.Fatalf("expected createCalls=0, got %d", superAdminRepo.createCalls)
 	}
-	if repo.saveCalls != 1 {
-		t.Fatalf("expected saveCalls=1, got %d", repo.saveCalls)
+	if superAdminRepo.saveCalls != 1 {
+		t.Fatalf("expected saveCalls=1, got %d", superAdminRepo.saveCalls)
 	}
 
-	updated := repo.items["super@example.com"]
-	if updated.Role != "super_admin" {
-		t.Fatalf("unexpected role: %s", updated.Role)
-	}
+	updated := superAdminRepo.items["super@example.com"]
 	if updated.Status != "active" {
 		t.Fatalf("unexpected status: %s", updated.Status)
 	}
@@ -158,38 +223,39 @@ func TestEnsureSuperAdminUpdateWhenDrifted(t *testing.T) {
 }
 
 func TestEnsureSuperAdminNoopWhenAlreadyAligned(t *testing.T) {
-	repo := newFakeAgentRepository()
+	agentRepo := newFakeAgentRepository()
+	superAdminRepo := newFakeSuperAdminRepository()
 	hash, err := security.HashPassword("SamePassword123!", 10)
 	if err != nil {
 		t.Fatalf("hash password failed: %v", err)
 	}
-	repo.items["super@example.com"] = &model.Agent{
+	superAdminRepo.items["super@example.com"] = &model.SuperAdmin{
 		Email:        "super@example.com",
 		PasswordHash: hash,
 		DisplayName:  "超级管理员",
-		Role:         "super_admin",
 		Status:       "active",
 		TokenVersion: 1,
 	}
 
-	svc := newTestAuthService(repo, "super@example.com", "SamePassword123!", "超级管理员")
+	svc := newTestAuthService(agentRepo, superAdminRepo, "super@example.com", "SamePassword123!", "超级管理员")
 	if err := svc.EnsureSuperAdmin(context.Background()); err != nil {
 		t.Fatalf("EnsureSuperAdmin failed: %v", err)
 	}
 
-	if repo.createCalls != 0 {
-		t.Fatalf("expected createCalls=0, got %d", repo.createCalls)
+	if superAdminRepo.createCalls != 0 {
+		t.Fatalf("expected createCalls=0, got %d", superAdminRepo.createCalls)
 	}
-	if repo.saveCalls != 0 {
-		t.Fatalf("expected saveCalls=0, got %d", repo.saveCalls)
+	if superAdminRepo.saveCalls != 0 {
+		t.Fatalf("expected saveCalls=0, got %d", superAdminRepo.saveCalls)
 	}
 }
 
 func TestEnsureSuperAdminPropagatesRepositoryError(t *testing.T) {
-	repo := newFakeAgentRepository()
-	repo.getErr = errors.New("db unavailable")
+	agentRepo := newFakeAgentRepository()
+	superAdminRepo := newFakeSuperAdminRepository()
+	superAdminRepo.getErr = errors.New("db unavailable")
 
-	svc := newTestAuthService(repo, "super@example.com", "SamePassword123!", "超级管理员")
+	svc := newTestAuthService(agentRepo, superAdminRepo, "super@example.com", "SamePassword123!", "超级管理员")
 	err := svc.EnsureSuperAdmin(context.Background())
 	if err == nil {
 		t.Fatalf("expected error, got nil")
@@ -200,8 +266,9 @@ func TestEnsureSuperAdminPropagatesRepositoryError(t *testing.T) {
 }
 
 func TestEnsureSuperAdminRejectWeakPassword(t *testing.T) {
-	repo := newFakeAgentRepository()
-	svc := newTestAuthService(repo, "super@example.com", "password12345!", "超级管理员")
+	agentRepo := newFakeAgentRepository()
+	superAdminRepo := newFakeSuperAdminRepository()
+	svc := newTestAuthService(agentRepo, superAdminRepo, "super@example.com", "password12345!", "超级管理员")
 
 	err := svc.EnsureSuperAdmin(context.Background())
 	if err == nil {
@@ -210,17 +277,41 @@ func TestEnsureSuperAdminRejectWeakPassword(t *testing.T) {
 	if !strings.Contains(err.Error(), "invalid SUPER_ADMIN_PASSWORD") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if repo.createCalls != 0 {
-		t.Fatalf("expected createCalls=0, got %d", repo.createCalls)
+	if superAdminRepo.createCalls != 0 {
+		t.Fatalf("expected createCalls=0, got %d", superAdminRepo.createCalls)
 	}
-	if repo.saveCalls != 0 {
-		t.Fatalf("expected saveCalls=0, got %d", repo.saveCalls)
+	if superAdminRepo.saveCalls != 0 {
+		t.Fatalf("expected saveCalls=0, got %d", superAdminRepo.saveCalls)
+	}
+}
+
+func TestEnsureSuperAdminRejectConflictWithAgentEmail(t *testing.T) {
+	agentRepo := newFakeAgentRepository()
+	superAdminRepo := newFakeSuperAdminRepository()
+	agentRepo.items["super@example.com"] = &model.Agent{
+		ID:           1001,
+		Email:        "super@example.com",
+		PasswordHash: "unused",
+		DisplayName:  "客服A",
+		Role:         "agent",
+		Status:       "active",
+		TokenVersion: 1,
+	}
+	svc := newTestAuthService(agentRepo, superAdminRepo, "super@example.com", "Sup3rAdmin#2026!", "超级管理员")
+
+	err := svc.EnsureSuperAdmin(context.Background())
+	if err == nil {
+		t.Fatalf("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "SUPER_ADMIN_EMAIL already exists in agents") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
 func TestValidateTokenChecksTokenVersion(t *testing.T) {
-	repo := newFakeAgentRepository()
-	repo.items["agent@example.com"] = &model.Agent{
+	agentRepo := newFakeAgentRepository()
+	superAdminRepo := newFakeSuperAdminRepository()
+	agentRepo.items["agent@example.com"] = &model.Agent{
 		ID:           1001,
 		Email:        "agent@example.com",
 		PasswordHash: "unused",
@@ -229,7 +320,7 @@ func TestValidateTokenChecksTokenVersion(t *testing.T) {
 		Status:       "active",
 		TokenVersion: 2,
 	}
-	svc := newTestAuthService(repo, "super@example.com", "Sup3rAdmin#2026!", "超级管理员")
+	svc := newTestAuthService(agentRepo, superAdminRepo, "super@example.com", "Sup3rAdmin#2026!", "超级管理员")
 
 	token, err := security.IssueToken([]byte("test-secret"), "test-issuer", time.Hour, 1001, "agent@example.com", "agent", 2)
 	if err != nil {
@@ -244,15 +335,16 @@ func TestValidateTokenChecksTokenVersion(t *testing.T) {
 		t.Fatalf("unexpected agent_id: %d", claims.AgentID)
 	}
 
-	repo.items["agent@example.com"].TokenVersion = 3
+	agentRepo.items["agent@example.com"].TokenVersion = 3
 	if _, err := svc.ValidateToken(context.Background(), token); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("expected ErrUnauthorized for token version mismatch, got: %v", err)
 	}
 }
 
 func TestValidateTokenChecksStatus(t *testing.T) {
-	repo := newFakeAgentRepository()
-	repo.items["agent@example.com"] = &model.Agent{
+	agentRepo := newFakeAgentRepository()
+	superAdminRepo := newFakeSuperAdminRepository()
+	agentRepo.items["agent@example.com"] = &model.Agent{
 		ID:           1002,
 		Email:        "agent@example.com",
 		PasswordHash: "unused",
@@ -261,7 +353,7 @@ func TestValidateTokenChecksStatus(t *testing.T) {
 		Status:       "inactive",
 		TokenVersion: 1,
 	}
-	svc := newTestAuthService(repo, "super@example.com", "Sup3rAdmin#2026!", "超级管理员")
+	svc := newTestAuthService(agentRepo, superAdminRepo, "super@example.com", "Sup3rAdmin#2026!", "超级管理员")
 
 	token, err := security.IssueToken([]byte("test-secret"), "test-issuer", time.Hour, 1002, "agent@example.com", "agent", 1)
 	if err != nil {
@@ -269,5 +361,33 @@ func TestValidateTokenChecksStatus(t *testing.T) {
 	}
 	if _, err := svc.ValidateToken(context.Background(), token); !errors.Is(err, ErrUnauthorized) {
 		t.Fatalf("expected ErrUnauthorized for inactive agent, got: %v", err)
+	}
+}
+
+func TestValidateTokenChecksSuperAdminTable(t *testing.T) {
+	agentRepo := newFakeAgentRepository()
+	superAdminRepo := newFakeSuperAdminRepository()
+	superAdminRepo.items["super@example.com"] = &model.SuperAdmin{
+		ID:           9001,
+		Email:        "super@example.com",
+		PasswordHash: "unused",
+		DisplayName:  "超级管理员",
+		Status:       "active",
+		TokenVersion: 2,
+	}
+	svc := newTestAuthService(agentRepo, superAdminRepo, "super@example.com", "Sup3rAdmin#2026!", "超级管理员")
+
+	token, err := security.IssueToken([]byte("test-secret"), "test-issuer", time.Hour, 9001, "super@example.com", "super_admin", 2)
+	if err != nil {
+		t.Fatalf("IssueToken failed: %v", err)
+	}
+
+	if _, err := svc.ValidateToken(context.Background(), token); err != nil {
+		t.Fatalf("ValidateToken failed: %v", err)
+	}
+
+	superAdminRepo.items["super@example.com"].TokenVersion = 3
+	if _, err := svc.ValidateToken(context.Background(), token); !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected ErrUnauthorized for stale token version, got: %v", err)
 	}
 }

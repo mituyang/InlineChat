@@ -10,8 +10,8 @@
 - `gateway-service`: 外部统一入口，WebSocket 走反向代理到 realtime，其余 API 通过 gRPC 调 chat/auth/admin，并注入请求追踪 ID。
 - `chat-service`: 会话与消息持久化（MySQL + GORM），并提供内部 gRPC 接口（给 gateway/realtime）。
 - `realtime-service`: WebSocket 连接管理，Redis Pub/Sub 广播，通过 gRPC 调用 chat-service 落库。
-- `auth-service`: 启动时根据环境变量确保超级管理员账号存在、登录签发 JWT、会话自检接口，并提供 gRPC 接口给 gateway。
-- `admin-service`: 站点管理、客服账号管理（JWT 管理员鉴权；创建客服账号仅允许 super_admin），并提供 gRPC 接口给 gateway。
+- `auth-service`: 启动时根据环境变量确保超级管理员账号存在（`super_admins` 表）、登录签发 JWT、会话自检接口，并提供 gRPC 接口给 gateway。
+- `admin-service`: 站点管理、客服账号管理（客服账号使用 `agents` 表；JWT 管理员鉴权；创建客服账号仅允许 super_admin），并提供 gRPC 接口给 gateway。
 - `etcd`: 服务注册与发现中心，gateway/realtime 通过它解析上游地址。
 
 ## 前端目录

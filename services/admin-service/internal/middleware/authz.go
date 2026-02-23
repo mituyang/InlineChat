@@ -11,16 +11,24 @@ import (
 )
 
 type Authz struct {
-	secrets   [][]byte
-	issuer    string
-	agentRepo repository.AgentRepository
+	secrets        [][]byte
+	issuer         string
+	agentRepo      repository.AgentRepository
+	superAdminRepo repository.SuperAdminRepository
 }
 
-func NewAuthz(secret string, previousSecret string, issuer string, agentRepo repository.AgentRepository) *Authz {
+func NewAuthz(
+	secret string,
+	previousSecret string,
+	issuer string,
+	agentRepo repository.AgentRepository,
+	superAdminRepo repository.SuperAdminRepository,
+) *Authz {
 	return &Authz{
-		secrets:   buildJWTSecrets(secret, previousSecret),
-		issuer:    issuer,
-		agentRepo: agentRepo,
+		secrets:        buildJWTSecrets(secret, previousSecret),
+		issuer:         issuer,
+		agentRepo:      agentRepo,
+		superAdminRepo: superAdminRepo,
 	}
 }
 
@@ -41,14 +49,9 @@ func (a *Authz) RequireAdmin() gin.HandlerFunc {
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "admin role required"})
 			return
 		}
-		if a.agentRepo != nil {
-			agent, findErr := a.agentRepo.GetByID(c.Request.Context(), claims.AgentID)
-			if findErr != nil ||
-				strings.ToLower(strings.TrimSpace(agent.Status)) != "active" ||
-				normalizeTokenVersion(agent.TokenVersion) != normalizeTokenVersion(claims.TokenVersion) {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
-				return
-			}
+		if !a.validateSessionByRole(c, claims) {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			return
 		}
 
 		c.Set("claims", claims)
@@ -85,4 +88,40 @@ func normalizeTokenVersion(v uint64) uint64 {
 		return 1
 	}
 	return v
+}
+
+func (a *Authz) validateSessionByRole(c *gin.Context, claims *security.Claims) bool {
+	if claims == nil {
+		return false
+	}
+
+	role := strings.ToLower(strings.TrimSpace(claims.Role))
+	switch role {
+	case "super_admin":
+		if a.superAdminRepo == nil {
+			return false
+		}
+		superAdmin, err := a.superAdminRepo.GetByID(c.Request.Context(), claims.AgentID)
+		if err != nil {
+			return false
+		}
+		if strings.ToLower(strings.TrimSpace(superAdmin.Status)) != "active" {
+			return false
+		}
+		return normalizeTokenVersion(superAdmin.TokenVersion) == normalizeTokenVersion(claims.TokenVersion)
+	case "admin", "agent":
+		if a.agentRepo == nil {
+			return false
+		}
+		agent, err := a.agentRepo.GetByID(c.Request.Context(), claims.AgentID)
+		if err != nil {
+			return false
+		}
+		if strings.ToLower(strings.TrimSpace(agent.Status)) != "active" {
+			return false
+		}
+		return normalizeTokenVersion(agent.TokenVersion) == normalizeTokenVersion(claims.TokenVersion)
+	default:
+		return false
+	}
 }

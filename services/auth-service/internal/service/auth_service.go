@@ -20,7 +20,8 @@ var (
 )
 
 type AuthService struct {
-	repo                  repository.AgentRepository
+	agentRepo             repository.AgentRepository
+	superAdminRepo        repository.SuperAdminRepository
 	jwtSecret             []byte
 	jwtVerifySecrets      [][]byte
 	jwtIssuer             string
@@ -42,7 +43,8 @@ type AuthResult struct {
 }
 
 func New(
-	repo repository.AgentRepository,
+	agentRepo repository.AgentRepository,
+	superAdminRepo repository.SuperAdminRepository,
 	jwtSecret string,
 	jwtPreviousSecret string,
 	jwtIssuer string,
@@ -53,7 +55,8 @@ func New(
 	superAdminDisplayName string,
 ) *AuthService {
 	return &AuthService{
-		repo:                  repo,
+		agentRepo:             agentRepo,
+		superAdminRepo:        superAdminRepo,
 		jwtSecret:             []byte(jwtSecret),
 		jwtVerifySecrets:      buildJWTVerifySecrets(jwtSecret, jwtPreviousSecret),
 		jwtIssuer:             jwtIssuer,
@@ -66,14 +69,60 @@ func New(
 }
 
 func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, error) {
-	agent, err := s.repo.GetByEmail(ctx, strings.ToLower(strings.TrimSpace(in.Email)))
+	email := strings.ToLower(strings.TrimSpace(in.Email))
+	if email == "" || strings.TrimSpace(in.Password) == "" {
+		return nil, ErrInvalidCredential
+	}
+
+	superAdmin, superErr := s.superAdminRepo.GetByEmail(ctx, email)
+	if superErr == nil {
+		if !isActiveStatus(superAdmin.Status) {
+			return nil, ErrUnauthorized
+		}
+		if err := security.ComparePassword(superAdmin.PasswordHash, in.Password); err != nil {
+			return nil, ErrInvalidCredential
+		}
+
+		tokenVersion := normalizeTokenVersion(superAdmin.TokenVersion)
+		token, err := security.IssueToken(
+			s.jwtSecret,
+			s.jwtIssuer,
+			s.jwtExpire,
+			superAdmin.ID,
+			superAdmin.Email,
+			"super_admin",
+			tokenVersion,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		return &AuthResult{
+			Token: token,
+			Agent: model.Agent{
+				ID:           superAdmin.ID,
+				Email:        superAdmin.Email,
+				DisplayName:  superAdmin.DisplayName,
+				Role:         "super_admin",
+				Status:       superAdmin.Status,
+				TokenVersion: tokenVersion,
+				CreatedAt:    superAdmin.CreatedAt,
+				UpdatedAt:    superAdmin.UpdatedAt,
+			},
+		}, nil
+	}
+	if !errors.Is(superErr, repository.ErrNotFound) {
+		return nil, superErr
+	}
+
+	agent, err := s.agentRepo.GetByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrInvalidCredential
 		}
 		return nil, err
 	}
-	if agent.Status != "active" {
+	if !isActiveStatus(agent.Status) {
 		return nil, ErrUnauthorized
 	}
 	if err := security.ComparePassword(agent.PasswordHash, in.Password); err != nil {
@@ -98,19 +147,40 @@ func (s *AuthService) ValidateToken(ctx context.Context, token string) (*securit
 	if err != nil {
 		return nil, ErrUnauthorized
 	}
-	agent, err := s.repo.GetByID(ctx, claims.AgentID)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
+
+	switch strings.ToLower(strings.TrimSpace(claims.Role)) {
+	case "super_admin":
+		superAdmin, getErr := s.superAdminRepo.GetByID(ctx, claims.AgentID)
+		if getErr != nil {
+			if errors.Is(getErr, repository.ErrNotFound) {
+				return nil, ErrUnauthorized
+			}
+			return nil, getErr
+		}
+		if !isActiveStatus(superAdmin.Status) {
 			return nil, ErrUnauthorized
 		}
-		return nil, err
-	}
-	if agent.Status != "active" {
+		if normalizeTokenVersion(claims.TokenVersion) != normalizeTokenVersion(superAdmin.TokenVersion) {
+			return nil, ErrUnauthorized
+		}
+	case "agent", "admin":
+		agent, getErr := s.agentRepo.GetByID(ctx, claims.AgentID)
+		if getErr != nil {
+			if errors.Is(getErr, repository.ErrNotFound) {
+				return nil, ErrUnauthorized
+			}
+			return nil, getErr
+		}
+		if !isActiveStatus(agent.Status) {
+			return nil, ErrUnauthorized
+		}
+		if normalizeTokenVersion(claims.TokenVersion) != normalizeTokenVersion(agent.TokenVersion) {
+			return nil, ErrUnauthorized
+		}
+	default:
 		return nil, ErrUnauthorized
 	}
-	if normalizeTokenVersion(claims.TokenVersion) != normalizeTokenVersion(agent.TokenVersion) {
-		return nil, ErrUnauthorized
-	}
+
 	return claims, nil
 }
 
@@ -135,57 +205,58 @@ func (s *AuthService) EnsureSuperAdmin(ctx context.Context) error {
 		return fmt.Errorf("invalid SUPER_ADMIN_PASSWORD: %w", err)
 	}
 
-	agent, err := s.repo.GetByEmail(ctx, s.superAdminEmail)
+	superAdmin, err := s.superAdminRepo.GetByEmail(ctx, s.superAdminEmail)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
+			if _, findAgentErr := s.agentRepo.GetByEmail(ctx, s.superAdminEmail); findAgentErr == nil {
+				return fmt.Errorf("SUPER_ADMIN_EMAIL already exists in agents")
+			} else if !errors.Is(findAgentErr, repository.ErrNotFound) {
+				return findAgentErr
+			}
+
 			hash, hashErr := security.HashPassword(s.superAdminPassword, s.bcryptCost)
 			if hashErr != nil {
 				return hashErr
 			}
 
-			created := &model.Agent{
+			created := &model.SuperAdmin{
 				Email:        s.superAdminEmail,
 				PasswordHash: hash,
 				DisplayName:  s.superAdminDisplayName,
-				Role:         "super_admin",
 				Status:       "active",
 				TokenVersion: 1,
 			}
-			return s.repo.Create(ctx, created)
+			return s.superAdminRepo.Create(ctx, created)
 		}
 		return err
 	}
 
 	needSave := false
-	if agent.DisplayName != s.superAdminDisplayName {
-		agent.DisplayName = s.superAdminDisplayName
+	if superAdmin.DisplayName != s.superAdminDisplayName {
+		superAdmin.DisplayName = s.superAdminDisplayName
 		needSave = true
 	}
-	if agent.Role != "super_admin" {
-		agent.Role = "super_admin"
+	if !isActiveStatus(superAdmin.Status) {
+		superAdmin.Status = "active"
 		needSave = true
 	}
-	if agent.Status != "active" {
-		agent.Status = "active"
+	if superAdmin.TokenVersion == 0 {
+		superAdmin.TokenVersion = 1
 		needSave = true
 	}
-	if agent.TokenVersion == 0 {
-		agent.TokenVersion = 1
-		needSave = true
-	}
-	if err := security.ComparePassword(agent.PasswordHash, s.superAdminPassword); err != nil {
+	if err := security.ComparePassword(superAdmin.PasswordHash, s.superAdminPassword); err != nil {
 		hash, hashErr := security.HashPassword(s.superAdminPassword, s.bcryptCost)
 		if hashErr != nil {
 			return hashErr
 		}
-		agent.PasswordHash = hash
+		superAdmin.PasswordHash = hash
 		needSave = true
 	}
 
 	if !needSave {
 		return nil
 	}
-	return s.repo.Save(ctx, agent)
+	return s.superAdminRepo.Save(ctx, superAdmin)
 }
 
 func normalizeTokenVersion(v uint64) uint64 {
@@ -193,4 +264,8 @@ func normalizeTokenVersion(v uint64) uint64 {
 		return 1
 	}
 	return v
+}
+
+func isActiveStatus(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), "active")
 }

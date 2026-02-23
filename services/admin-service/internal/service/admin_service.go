@@ -20,10 +20,11 @@ var ErrNotFound = errors.New("not found")
 var ErrInvalidSession = errors.New("invalid session")
 
 type AdminService struct {
-	siteRepo   repository.SiteRepository
-	agentRepo  repository.AgentRepository
-	auditRepo  repository.AuditLogRepository
-	bcryptCost int
+	siteRepo       repository.SiteRepository
+	agentRepo      repository.AgentRepository
+	superAdminRepo repository.SuperAdminRepository
+	auditRepo      repository.AuditLogRepository
+	bcryptCost     int
 }
 
 type CreateSiteInput struct {
@@ -79,8 +80,20 @@ type ListAuditLogsInput struct {
 	ResourceType string
 }
 
-func New(siteRepo repository.SiteRepository, agentRepo repository.AgentRepository, auditRepo repository.AuditLogRepository, bcryptCost int) *AdminService {
-	return &AdminService{siteRepo: siteRepo, agentRepo: agentRepo, auditRepo: auditRepo, bcryptCost: bcryptCost}
+func New(
+	siteRepo repository.SiteRepository,
+	agentRepo repository.AgentRepository,
+	superAdminRepo repository.SuperAdminRepository,
+	auditRepo repository.AuditLogRepository,
+	bcryptCost int,
+) *AdminService {
+	return &AdminService{
+		siteRepo:       siteRepo,
+		agentRepo:      agentRepo,
+		superAdminRepo: superAdminRepo,
+		auditRepo:      auditRepo,
+		bcryptCost:     bcryptCost,
+	}
 }
 
 func (s *AdminService) CreateSite(ctx context.Context, in CreateSiteInput) (*model.Site, error) {
@@ -241,6 +254,13 @@ func (s *AdminService) createAgent(ctx context.Context, in CreateAgentInput, act
 	if email == "" || displayName == "" {
 		return nil, fmt.Errorf("email and display_name are required")
 	}
+	if s.superAdminRepo != nil {
+		if _, getErr := s.superAdminRepo.GetByEmail(ctx, email); getErr == nil {
+			return nil, ErrConflict
+		} else if !errors.Is(getErr, repository.ErrNotFound) {
+			return nil, getErr
+		}
+	}
 	if err := security.ValidatePasswordPolicy(password); err != nil {
 		return nil, err
 	}
@@ -377,23 +397,47 @@ func (s *AdminService) ListAuditLogs(ctx context.Context, in ListAuditLogsInput)
 	return s.auditRepo.List(ctx, filter, limit, in.Offset)
 }
 
-func (s *AdminService) ValidateAgentSession(ctx context.Context, agentID uint64, tokenVersion uint64) error {
-	if agentID == 0 || normalizeTokenVersion(tokenVersion) == 0 {
+func (s *AdminService) ValidateAdminSession(ctx context.Context, role string, agentID uint64, tokenVersion uint64) error {
+	if strings.TrimSpace(role) == "" || agentID == 0 || normalizeTokenVersion(tokenVersion) == 0 {
 		return ErrInvalidSession
 	}
-	agent, err := s.agentRepo.GetByID(ctx, agentID)
-	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
+
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "super_admin":
+		if s.superAdminRepo == nil {
 			return ErrInvalidSession
 		}
-		return err
-	}
-	if strings.ToLower(strings.TrimSpace(agent.Status)) != "active" {
+		superAdmin, err := s.superAdminRepo.GetByID(ctx, agentID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrInvalidSession
+			}
+			return err
+		}
+		if strings.ToLower(strings.TrimSpace(superAdmin.Status)) != "active" {
+			return ErrInvalidSession
+		}
+		if normalizeTokenVersion(superAdmin.TokenVersion) != normalizeTokenVersion(tokenVersion) {
+			return ErrInvalidSession
+		}
+	case "admin", "agent":
+		agent, err := s.agentRepo.GetByID(ctx, agentID)
+		if err != nil {
+			if errors.Is(err, repository.ErrNotFound) {
+				return ErrInvalidSession
+			}
+			return err
+		}
+		if strings.ToLower(strings.TrimSpace(agent.Status)) != "active" {
+			return ErrInvalidSession
+		}
+		if normalizeTokenVersion(agent.TokenVersion) != normalizeTokenVersion(tokenVersion) {
+			return ErrInvalidSession
+		}
+	default:
 		return ErrInvalidSession
 	}
-	if normalizeTokenVersion(agent.TokenVersion) != normalizeTokenVersion(tokenVersion) {
-		return ErrInvalidSession
-	}
+
 	return nil
 }
 
