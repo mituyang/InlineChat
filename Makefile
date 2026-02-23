@@ -3,7 +3,9 @@ SHELL := /bin/bash
 COMPOSE_FILE := infra/docker/docker-compose.yml
 MONITORING_COMPOSE_FILE := infra/docker/docker-compose.monitoring.yml
 ENV_FILE ?= .env
-CACHE_DIR := $(CURDIR)/.cache
+CACHE_DIR ?= $(CURDIR)/.cache
+GO_BUILD_CACHE ?= $(CACHE_DIR)/go-build
+GO_MOD_CACHE ?= $(CACHE_DIR)/go-mod
 GO_SERVICE_MODULES := services/chat-service services/realtime-service services/gateway-service services/auth-service services/admin-service
 GO_SHARED_MODULES := packages/discovery packages/httpmiddleware
 GO_TEST_MODULES := $(GO_SERVICE_MODULES) $(GO_SHARED_MODULES)
@@ -57,15 +59,15 @@ config:
 	@echo "compose 配置校验通过"
 
 build-local:
-	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
+	@mkdir -p $(GO_BUILD_CACHE) $(GO_MOD_CACHE)
 	@for svc in $(GO_SERVICE_MODULES); do \
 		echo "==> go build $$svc ($(GO_BUILD_OS)/$(GO_BUILD_ARCH))"; \
 		( \
 			cd $$svc && \
 			mkdir -p .bin && \
 			GOPROXY=$(GO_PROXY) \
-			GOCACHE=$(CACHE_DIR)/go-build \
-			GOMODCACHE=$(CACHE_DIR)/go-mod \
+			GOCACHE=$(GO_BUILD_CACHE) \
+			GOMODCACHE=$(GO_MOD_CACHE) \
 			CGO_ENABLED=0 GOOS=$(GO_BUILD_OS) GOARCH=$(GO_BUILD_ARCH) \
 			go build -trimpath -o $(GO_BUILD_OUTPUT) ./cmd/server \
 		) || exit 1; \
@@ -129,14 +131,14 @@ fmt-check:
 	fi
 
 vet:
-	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
+	@mkdir -p $(GO_BUILD_CACHE) $(GO_MOD_CACHE)
 	@for svc in $(GO_TEST_MODULES); do \
 		echo "==> go vet $$svc"; \
 		( \
 			cd $$svc && \
 			GOPROXY=$(GO_PROXY) \
-			GOCACHE=$(CACHE_DIR)/go-build \
-			GOMODCACHE=$(CACHE_DIR)/go-mod \
+			GOCACHE=$(GO_BUILD_CACHE) \
+			GOMODCACHE=$(GO_MOD_CACHE) \
 			go vet ./... \
 		) || exit 1; \
 	done
@@ -144,33 +146,33 @@ vet:
 lint: fmt-check vet
 
 test:
-	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
+	@mkdir -p $(GO_BUILD_CACHE) $(GO_MOD_CACHE)
 	@for svc in $(GO_TEST_MODULES); do \
 		echo "==> go test $$svc"; \
 		( \
 			cd $$svc && \
 			GOPROXY=$(GO_PROXY) \
-			GOCACHE=$(CACHE_DIR)/go-build \
-			GOMODCACHE=$(CACHE_DIR)/go-mod \
+			GOCACHE=$(GO_BUILD_CACHE) \
+			GOMODCACHE=$(GO_MOD_CACHE) \
 			go test ./... \
 		) || exit 1; \
 	done
 
 test-race:
-	@mkdir -p $(CACHE_DIR)/go-build $(CACHE_DIR)/go-mod
+	@mkdir -p $(GO_BUILD_CACHE) $(GO_MOD_CACHE)
 	@for svc in $(GO_TEST_MODULES); do \
 		echo "==> go test -race $$svc"; \
 		( \
 			cd $$svc && \
 			GOPROXY=$(GO_PROXY) \
-			GOCACHE=$(CACHE_DIR)/go-build \
-			GOMODCACHE=$(CACHE_DIR)/go-mod \
+			GOCACHE=$(GO_BUILD_CACHE) \
+			GOMODCACHE=$(GO_MOD_CACHE) \
 			go test -race ./... \
 		) || exit 1; \
 	done
 
 test-cover:
-	GO_PROXY=$(GO_PROXY) CACHE_DIR=$(CACHE_DIR) COVERAGE_THRESHOLD=$(COVERAGE_THRESHOLD) COVERAGE_THRESHOLD_ALL=$(COVERAGE_THRESHOLD_ALL) MIN_COVERED_PACKAGES=$(MIN_COVERED_PACKAGES) MIN_TOTAL_PACKAGES=$(MIN_TOTAL_PACKAGES) ./scripts/coverage-threshold.sh $(GO_TEST_MODULES)
+	GO_PROXY=$(GO_PROXY) CACHE_DIR=$(CACHE_DIR) GO_BUILD_CACHE=$(GO_BUILD_CACHE) GO_MOD_CACHE=$(GO_MOD_CACHE) COVERAGE_THRESHOLD=$(COVERAGE_THRESHOLD) COVERAGE_THRESHOLD_ALL=$(COVERAGE_THRESHOLD_ALL) MIN_COVERED_PACKAGES=$(MIN_COVERED_PACKAGES) MIN_TOTAL_PACKAGES=$(MIN_TOTAL_PACKAGES) ./scripts/coverage-threshold.sh $(GO_TEST_MODULES)
 
 quality: lint test test-race test-cover
 

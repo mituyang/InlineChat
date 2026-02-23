@@ -5,6 +5,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/.env}"
 COMPOSE_FILE="$ROOT_DIR/infra/docker/docker-compose.yml"
+GO_BUILD_CACHE="${GO_BUILD_CACHE:-$ROOT_DIR/.cache/go-build}"
+GO_MOD_CACHE="${GO_MOD_CACHE:-$ROOT_DIR/.cache/go-mod}"
 
 if [ ! -f "$ENV_FILE" ]; then
   echo "缺少环境文件: $ENV_FILE"
@@ -63,7 +65,7 @@ echo "  etcd 注册校验通过"
 
 echo "[3/5] 校验 MySQL 迁移结果"
 mysql_check_sql="SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${MYSQL_DATABASE}' AND table_name IN ('conversations','messages','sites','agents');"
-mysql_table_count="$("${compose_cmd[@]}" exec -T mysql sh -lc "mysql -u\"$MYSQL_USER\" -p\"$MYSQL_PASSWORD\" -D\"$MYSQL_DATABASE\" -Nse \"$mysql_check_sql\"")"
+mysql_table_count="$("${compose_cmd[@]}" exec -T mysql sh -lc "MYSQL_PWD=\"$MYSQL_PASSWORD\" mysql -u\"$MYSQL_USER\" -D\"$MYSQL_DATABASE\" -Nse \"$mysql_check_sql\"")"
 if [ "$mysql_table_count" != "4" ]; then
   echo "  MySQL 表校验失败，期望 4，实际 ${mysql_table_count}"
   exit 1
@@ -75,8 +77,8 @@ echo "[4/5] 校验 Redis + WebSocket + gRPC 消息链路"
   cd "$ROOT_DIR/services/gateway-service"
   GATEWAY_URL="$GATEWAY_URL" \
   WS_CHECK_SITE_ID="$smoke_site_id" \
-  GOCACHE="$ROOT_DIR/.cache/go-build" \
-  GOMODCACHE="$ROOT_DIR/.cache/go-mod" \
+  GOCACHE="$GO_BUILD_CACHE" \
+  GOMODCACHE="$GO_MOD_CACHE" \
   go run ./cmd/ws-push-check
 )
 

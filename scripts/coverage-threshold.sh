@@ -4,8 +4,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 CACHE_DIR="${CACHE_DIR:-$ROOT_DIR/.cache}"
-GO_BUILD_CACHE="${CACHE_DIR}/go-build"
-GO_MOD_CACHE="${CACHE_DIR}/go-mod"
+GO_BUILD_CACHE="${GO_BUILD_CACHE:-${CACHE_DIR}/go-build}"
+GO_MOD_CACHE="${GO_MOD_CACHE:-${CACHE_DIR}/go-mod}"
 GO_PROXY="${GO_PROXY:-https://proxy.golang.org,direct}"
 COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-50}"
 COVERAGE_THRESHOLD_ALL="${COVERAGE_THRESHOLD_ALL:-12}"
