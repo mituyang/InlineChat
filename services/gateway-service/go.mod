@@ -5,7 +5,7 @@ go 1.25
 require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/redis/go-redis/v9 v9.18.0
-	go.uber.org/zap v1.27.0
+	go.uber.org/zap v1.27.1
 	golang.org/x/net v0.48.0
 	golang.org/x/time v0.14.0
 	google.golang.org/grpc v1.79.1
