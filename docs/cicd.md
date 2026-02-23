@@ -19,6 +19,7 @@
   - 安装 Playwright Chromium
   - 执行 `make verify-all`
 - `make verify-all` 覆盖：
+  - `env-lint`
   - `quality`
   - `smoke`
   - `integration`

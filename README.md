@@ -119,12 +119,13 @@
 - `make test`: 运行后端模块测试（覆盖 `services/*` 与 `packages/*`）
 - `make test-race`: 运行后端模块 race 测试（覆盖 `services/*` 与 `packages/*`）
 - `make test-cover`: 校验覆盖率门禁（全量包平均值 + 有覆盖包平均值 + 最小包数）
+- `make env-lint`: 校验 `.env` 与 `.env.example` 键一致性（防配置漂移）
 - `make quality`: 执行完整质量门禁（`lint + test + test-race + test-cover`）
 - `make smoke`: 运行端到端冒烟（健康检查、登录、管理接口、会话与消息）
 - `make integration`: 运行系统集成检查（`smoke + etcd + mysql + websocket`）
 - `make full-regression`: 运行全功能回归（管理、认证、会话、已读、认领、转接确认/拒绝、关闭、自动关闭、审计）
 - `make e2e-ui`: 运行前端 Playwright E2E（5 个主流程场景，Chromium）
-- `make verify-all`: 一键全量验证（`quality + smoke + integration + full-regression + e2e-ui`，默认自动 `up/down`）
+- `make verify-all`: 一键全量验证（`env-lint + quality + smoke + integration + full-regression + e2e-ui`，默认自动 `up/down`）
 - `make mvp-release`: 执行 MVP 验收流水（`test + integration`）
 - `make fmt`: 统一 gofmt
 - `make proto`: 重新生成 gRPC 协议代码（chat/auth/admin/gateway/realtime）
@@ -135,7 +136,7 @@
 - `verify-all` 默认行为：
   - 启动前自动 `make down`（容错清理）
   - 自动 `make up`
-  - 依次执行 `quality -> smoke -> integration -> full-regression -> e2e-ui`
+  - 依次执行 `env-lint -> quality -> smoke -> integration -> full-regression -> e2e-ui`
   - 结束后自动 `make down`
 - 可用控制变量：
   - `VERIFY_AUTO_UPDOWN=1|0`：是否自动管理环境（默认 `1`）

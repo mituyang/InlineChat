@@ -80,6 +80,7 @@ else
   echo "[verify-all] VERIFY_AUTO_UPDOWN!=1，跳过自动 up/down"
 fi
 
+run_step "env-lint" make env-lint
 run_step "quality" make quality
 run_step "smoke" make smoke
 run_step "integration" make integration

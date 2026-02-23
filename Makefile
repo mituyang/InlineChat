@@ -19,7 +19,7 @@ COVERAGE_THRESHOLD_ALL ?= 12
 MIN_COVERED_PACKAGES ?= 10
 MIN_TOTAL_PACKAGES ?= 20
 
-.PHONY: help ensure-env config up up-fg down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover quality e2e-ui verify-all proto build-local image-build smoke integration full-regression mvp-release
+.PHONY: help ensure-env config up up-fg down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover env-lint quality e2e-ui verify-all proto build-local image-build smoke integration full-regression mvp-release
 
 help:
 	@echo "可用命令:"
@@ -38,6 +38,7 @@ help:
 	@echo "  make test           运行后端 Go 测试"
 	@echo "  make test-race      运行后端 Go race 测试"
 	@echo "  make test-cover     校验覆盖率门禁（有覆盖包平均值 + 最小包数）"
+	@echo "  make env-lint       校验 .env 与 .env.example 配置键一致性"
 	@echo "  make quality        执行完整质量门禁（lint + test + test-race + test-cover）"
 	@echo "  make e2e-ui         执行前端 Playwright E2E（需先安装 tests/e2e 依赖）"
 	@echo "  make verify-all     CI 全量验收入口（本地默认禁用，可用 VERIFY_ALLOW_LOCAL=1 临时开启）"
@@ -173,6 +174,9 @@ test-race:
 
 test-cover:
 	GO_PROXY=$(GO_PROXY) CACHE_DIR=$(CACHE_DIR) GO_BUILD_CACHE=$(GO_BUILD_CACHE) GO_MOD_CACHE=$(GO_MOD_CACHE) COVERAGE_THRESHOLD=$(COVERAGE_THRESHOLD) COVERAGE_THRESHOLD_ALL=$(COVERAGE_THRESHOLD_ALL) MIN_COVERED_PACKAGES=$(MIN_COVERED_PACKAGES) MIN_TOTAL_PACKAGES=$(MIN_TOTAL_PACKAGES) ./scripts/coverage-threshold.sh $(GO_TEST_MODULES)
+
+env-lint:
+	ENV_FILE=$(ENV_FILE) EXAMPLE_ENV_FILE=$(CURDIR)/.env.example ./scripts/env-lint.sh
 
 quality: lint test test-race test-cover
 
