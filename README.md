@@ -122,8 +122,10 @@
   - `services/admin-service/internal/service/admin_service_test.go`
   - `services/chat-service/internal/service/chat_service_test.go`
 - CI 流水线：`.github/workflows/ci.yml`
-  - `test` Job：执行 `make lint && make test && make test-race && make test-cover`（覆盖 `services/*` 与 `packages/*`）
-  - `integration` Job：执行 `cp .env.example .env && make up && make integration`，并在结束后自动 `make down`
+  - `quality-gate` Job：执行 `make quality`（`lint + test + test-race + test-cover`，覆盖 `services/*` 与 `packages/*`）
+  - `smoke-gate` Job：执行 `cp .env.example .env && make up && make smoke`，并在结束后自动 `make down`
+  - `required-gate` Job：仅在 PR 触发，汇总校验 `quality-gate + smoke-gate` 结果，建议作为分支保护必选检查项
+  - `integration-main` Job：仅在 `main` 分支 push 后触发，执行 `make integration` 进行合并后系统回归
 
 ## 生产化基线（已启用）
 - 全服务提供双探针：
