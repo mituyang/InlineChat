@@ -9,7 +9,7 @@ require (
 	google.golang.org/grpc v1.79.1
 	google.golang.org/protobuf v1.36.10
 	gorm.io/driver/mysql v1.5.7
-	gorm.io/gorm v1.25.12
+	gorm.io/gorm v1.31.1
 	inlinechat/packages/discovery v0.0.0
 	inlinechat/packages/httpmiddleware v0.0.0
 )
