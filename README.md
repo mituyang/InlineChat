@@ -18,6 +18,7 @@
 - `apps/customer-console`: 访客调试页前端源码
 - `apps/widget-chat`: Widget 聊天窗（iframe）前端源码
 - `apps/demo-site`: 业务网站示例前端源码（已嵌入客服）
+- `apps/api-docs`: Swagger UI 接口文档前端源码
 - `apps/widget-sdk/inlinechat-widget.js`: 嵌入式 SDK 脚本源码
 - `apps/*`: 前端单一源码目录（gateway 镜像构建时直接打包，无需同步双份目录）
 - `tests/e2e`: Playwright 前端主流程 E2E（Chromium，5 场景）
@@ -73,6 +74,8 @@
 - 嵌入式 Widget 聊天页（iframe 页面）：`http://localhost:8200/app/widget/`
 - 嵌入脚本：`http://localhost:8200/sdk/inlinechat-widget.js`
 - 业务网站示例（已嵌入客服）：`http://localhost:8200/app/demo/`
+- 在线 API 文档（Swagger UI）：`http://localhost:8200/app/api-docs/`
+- OpenAPI 原文：`http://localhost:8200/docs/backend/openapi.yaml`
 - 说明：
   - 访客端支持匿名会话创建、消息发送、WebSocket 实时收消息、断线自动重连与轮询兜底。
   - 客服与超级管理员通过同一登录页鉴权，登录后按角色进入对应工作台。

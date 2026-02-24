@@ -20,6 +20,11 @@
 - 本目录聚焦后端服务：`gateway-service`、`chat-service`、`realtime-service`、`auth-service`、`admin-service`。
 - 前端 UI/交互实现细节不在本目录展开。
 
+## 在线查看
+- Swagger UI 页面：`/app/api-docs/`
+- 规范原文：`/docs/backend/openapi.yaml`
+- 文档索引原文：`/docs/backend/README.md`
+
 ## 维护约定
 - 路由/字段/状态流转变更时，必须同步更新对应文档。
 - 变更指引：

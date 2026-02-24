@@ -230,6 +230,9 @@ func main() {
 	r.GET("/app/demo", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/app/demo/")
 	})
+	r.GET("/app/api-docs", func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, "/app/api-docs/")
+	})
 
 	registerStaticRoute(r, appLogger, "/app/customer", []string{"./public/customer", "./apps/customer-console", "../../apps/customer-console"})
 	registerStaticRoute(r, appLogger, "/app/agent", []string{"./public/agent", "./apps/agent-console", "../../apps/agent-console"})
@@ -237,7 +240,9 @@ func main() {
 	registerStaticRoute(r, appLogger, "/app/widget", []string{"./public/widget", "./apps/widget-chat", "../../apps/widget-chat"})
 	registerStaticRoute(r, appLogger, "/app/admin", []string{"./public/admin", "./apps/admin-console", "../../apps/admin-console"})
 	registerStaticRoute(r, appLogger, "/app/demo", []string{"./public/demo", "./apps/demo-site", "../../apps/demo-site"})
+	registerStaticRoute(r, appLogger, "/app/api-docs", []string{"./public/api-docs", "./apps/api-docs", "../../apps/api-docs"})
 	registerStaticRoute(r, appLogger, "/sdk", []string{"./public/sdk", "./apps/widget-sdk", "../../apps/widget-sdk"})
+	registerStaticRoute(r, appLogger, "/docs/backend", []string{"./docs/backend", "../../docs/backend"})
 
 	httpHandler.RegisterRoutes(r)
 

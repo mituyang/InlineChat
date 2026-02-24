@@ -1,0 +1,124 @@
+:root {
+  --bg: #f4f7fb;
+  --text-main: #0f172a;
+  --text-sub: #5b6b80;
+  --line: #d7e1ec;
+  --brand: #0f766e;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: linear-gradient(180deg, #f4f7fb, #e9f0f8);
+  color: var(--text-main);
+  font-family: "PingFang SC", "Source Han Sans SC", "Noto Sans CJK SC", "Microsoft YaHei", sans-serif;
+}
+
+.page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 14px;
+  gap: 12px;
+}
+
+.topbar {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+  padding: 16px 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.eyebrow {
+  margin: 0;
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+}
+
+.topbar h1 {
+  margin: 5px 0 0;
+  font-size: clamp(22px, 2.5vw, 32px);
+  line-height: 1.1;
+}
+
+.sub {
+  margin: 8px 0 0;
+  color: var(--text-sub);
+  font-size: 13px;
+}
+
+code {
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+}
+
+.doc-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: #0f766e;
+  color: #fff;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.doc-link:hover {
+  background: #0b5d57;
+}
+
+.viewer-wrap {
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  overflow: hidden;
+  background: #fff;
+}
+
+#swagger-ui {
+  min-height: 0;
+}
+
+.load-error {
+  padding: 18px;
+}
+
+.load-error h2 {
+  margin: 0 0 10px;
+  font-size: 20px;
+}
+
+.load-error p {
+  margin: 0;
+  color: var(--text-sub);
+}
+
+.load-error a {
+  color: #0b63ce;
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .doc-link {
+    width: 100%;
+  }
+}

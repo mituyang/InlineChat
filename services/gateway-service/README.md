@@ -19,6 +19,7 @@
 - `Admin API`: `/api/admin/v1/admin/*`
 - `WebSocket`: `/ws/*`（代理到 `realtime-service`）
 - `前端静态资源`: `/app/*`、`/sdk/*`
+- `文档资源`: `/app/api-docs/*`、`/docs/backend/*`
 
 ## 依赖关系
 - 必需依赖：
