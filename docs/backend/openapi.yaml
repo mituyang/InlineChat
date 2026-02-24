@@ -1,0 +1,1242 @@
+openapi: 3.0.3
+info:
+  title: InlineChat Gateway API
+  version: 0.1.0
+  description: |
+    InlineChat 网关 HTTP API 草案。
+    当前仅覆盖 gateway-service 暴露的 Chat/Auth/Admin 路由（不含 WebSocket 协议细节）。
+servers:
+  - url: http://localhost:8200
+tags:
+  - name: Auth
+    description: 员工鉴权
+  - name: Chat
+    description: 会话与消息
+  - name: Admin
+    description: 站点与客服管理
+
+paths:
+  /api/auth/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: 员工登录
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthLoginRequest"
+      responses:
+        "200":
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthLoginResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/auth/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: 获取当前员工身份
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthMeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "504":
+          $ref: "#/components/responses/UpstreamTimeout"
+
+  /api/chat/v1/conversations:
+    post:
+      tags: [Chat]
+      summary: 创建匿名会话
+      description: 使用 `site_id + visitor_token` 创建或复用 open 会话。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateConversationRequest"
+      responses:
+        "201":
+          description: 创建成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationPublic"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "502":
+          $ref: "#/components/responses/UpstreamUnavailable"
+
+    get:
+      tags: [Chat]
+      summary: 会话列表（客服）
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [open, closed]
+        - in: query
+          name: site_id
+          schema:
+            type: string
+        - in: query
+          name: assigned_agent_id
+          schema:
+            type: integer
+            format: uint64
+            minimum: 1
+        - in: query
+          name: unassigned_only
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/chat/v1/conversations/{id}:
+    get:
+      tags: [Chat]
+      summary: 会话详情
+      description: |
+        支持两种调用模式：
+        - 客服模式：`Authorization: Bearer <token>`
+        - 访客模式：query 里提供 `visitor_token`
+      parameters:
+        - $ref: "#/components/parameters/ConversationID"
+        - in: query
+          name: visitor_token
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/chat/v1/conversations/{id}/messages:
+    post:
+      tags: [Chat]
+      summary: 发送消息
+      description: |
+        - `sender_type=visitor` 时需 `visitor_token`
+        - `sender_type=agent` 时以 Bearer 身份为准，`sender_id` 由服务端覆盖
+      parameters:
+        - $ref: "#/components/parameters/ConversationID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateMessageRequest"
+      responses:
+        "201":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Message"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/FailedPrecondition"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+    get:
+      tags: [Chat]
+      summary: 查询消息列表
+      description: 支持客服（Bearer）或访客（`visitor_token`）模式。
+      parameters:
+        - $ref: "#/components/parameters/ConversationID"
+        - $ref: "#/components/parameters/Limit"
+        - in: query
+          name: before_id
+          schema:
+            type: integer
+            format: uint64
+        - in: query
+          name: visitor_token
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MessageList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/chat/v1/conversations/{id}/read:
+    post:
+      tags: [Chat]
+      summary: 标记消息已读
+      description: 支持客服（Bearer）或访客（body 传 `visitor_token`）模式。
+      parameters:
+        - $ref: "#/components/parameters/ConversationID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MarkMessagesReadRequest"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UpdatedCountResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/chat/v1/conversations/{id}/claim:
+    post:
+      tags: [Chat]
+      summary: 认领会话
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ConversationID"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/FailedPrecondition"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/chat/v1/conversations/{id}/transfer:
+    post:
+      tags: [Chat]
+      summary: 发起转接
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ConversationID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TransferConversationRequest"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/FailedPrecondition"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/chat/v1/conversations/{id}/transfer/confirm:
+    post:
+      tags: [Chat]
+      summary: 确认转接
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ConversationID"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/FailedPrecondition"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/chat/v1/conversations/{id}/transfer/reject:
+    post:
+      tags: [Chat]
+      summary: 拒绝转接
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ConversationID"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/FailedPrecondition"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/chat/v1/conversations/{id}/close:
+    post:
+      tags: [Chat]
+      summary: 关闭会话
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/ConversationID"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConversationDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/FailedPrecondition"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/admin/v1/admin/sites:
+    post:
+      tags: [Admin]
+      summary: 创建站点
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSiteRequest"
+      responses:
+        "201":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+    get:
+      tags: [Admin]
+      summary: 查询站点列表
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SiteList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/admin/v1/admin/sites/{site_id}/status:
+    patch:
+      tags: [Admin]
+      summary: 更新站点状态
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: site_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSiteStatusRequest"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/admin/v1/admin/sites/{site_id}/rotate-widget-key:
+    post:
+      tags: [Admin]
+      summary: 轮换站点 widget_key
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: site_id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/admin/v1/admin/agents:
+    post:
+      tags: [Admin]
+      summary: 创建客服账号
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentRequest"
+      responses:
+        "201":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAgent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+    get:
+      tags: [Admin]
+      summary: 查询客服列表
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAgentList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/admin/v1/admin/agents/{id}/status:
+    patch:
+      tags: [Admin]
+      summary: 更新客服状态
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            format: uint64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAgentStatusRequest"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAgent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/admin/v1/admin/agents/{id}/reset-password:
+    post:
+      tags: [Admin]
+      summary: 重置客服密码
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            format: uint64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetAgentPasswordRequest"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAgent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/admin/v1/admin/agents/{id}/force-logout:
+    post:
+      tags: [Admin]
+      summary: 强制客服下线
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: integer
+            format: uint64
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminAgent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /api/admin/v1/admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: 查询审计日志
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Offset"
+        - in: query
+          name: actor_agent_id
+          schema:
+            type: integer
+            format: uint64
+        - in: query
+          name: action
+          schema:
+            type: string
+        - in: query
+          name: resource_type
+          schema:
+            type: string
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditLogList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    Limit:
+      in: query
+      name: limit
+      description: 默认 50，最大 200
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 200
+    Offset:
+      in: query
+      name: offset
+      description: 默认 0
+      schema:
+        type: integer
+        minimum: 0
+    ConversationID:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: integer
+        format: uint64
+
+  responses:
+    BadRequest:
+      description: 参数错误
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: 未认证
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: 无权限
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: 业务冲突
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    FailedPrecondition:
+      description: 前置条件不满足
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    RateLimited:
+      description: 触发限流
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UpstreamUnavailable:
+      description: 上游不可用
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UpstreamTimeout:
+      description: 上游超时
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: 内部错误
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    ErrorDetail:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorDetail"
+        request_id:
+          type: string
+
+    AuthLoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    AgentProfile:
+      type: object
+      required: [id, email, display_name, role, status, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: uint64
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AuthLoginResponse:
+      type: object
+      required: [token, agent]
+      properties:
+        token:
+          type: string
+        agent:
+          $ref: "#/components/schemas/AgentProfile"
+
+    AuthMeResponse:
+      type: object
+      required: [agent_id, email, role, exp]
+      properties:
+        agent_id:
+          type: integer
+          format: uint64
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+        exp:
+          type: integer
+          format: int64
+
+    CreateConversationRequest:
+      type: object
+      required: [site_id, visitor_token]
+      properties:
+        site_id:
+          type: string
+        visitor_token:
+          type: string
+
+    ConversationPublic:
+      type: object
+      required: [id, status, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: uint64
+        status:
+          type: string
+          enum: [open, closed]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ConversationDetail:
+      type: object
+      required: [id, site_id, status, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: uint64
+        site_id:
+          type: string
+        status:
+          type: string
+          enum: [open, closed]
+        assigned_agent_id:
+          type: integer
+          format: uint64
+        closed_at:
+          type: string
+          format: date-time
+        closed_by_agent_id:
+          type: integer
+          format: uint64
+        pending_transfer_to_agent_id:
+          type: integer
+          format: uint64
+        pending_transfer_from_agent_id:
+          type: integer
+          format: uint64
+        pending_transfer_requested_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ConversationList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConversationDetail"
+
+    CreateMessageRequest:
+      type: object
+      required: [sender_type, content, client_msg_id]
+      properties:
+        sender_type:
+          type: string
+          enum: [visitor, agent]
+        sender_id:
+          type: string
+        content:
+          type: string
+          maxLength: 2000
+        client_msg_id:
+          type: string
+        visitor_token:
+          type: string
+
+    Message:
+      type: object
+      required:
+        [
+          id,
+          conversation_id,
+          sender_type,
+          content,
+          client_msg_id,
+          status,
+          created_at,
+          updated_at,
+        ]
+      properties:
+        id:
+          type: integer
+          format: uint64
+        conversation_id:
+          type: integer
+          format: uint64
+        sender_type:
+          type: string
+        sender_id:
+          type: string
+        content:
+          type: string
+        client_msg_id:
+          type: string
+        status:
+          type: string
+          enum: [sent, delivered, read]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    MessageList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Message"
+
+    MarkMessagesReadRequest:
+      type: object
+      required: [last_read_message_id]
+      properties:
+        last_read_message_id:
+          type: integer
+          format: uint64
+        visitor_token:
+          type: string
+
+    UpdatedCountResponse:
+      type: object
+      required: [updated_count]
+      properties:
+        updated_count:
+          type: integer
+          format: uint64
+
+    TransferConversationRequest:
+      type: object
+      required: [to_agent_id]
+      properties:
+        to_agent_id:
+          type: integer
+          format: uint64
+          minimum: 1
+
+    CreateSiteRequest:
+      type: object
+      required: [site_id, name, domain]
+      properties:
+        site_id:
+          type: string
+          minLength: 4
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        domain:
+          type: string
+          minLength: 3
+          maxLength: 255
+
+    Site:
+      type: object
+      required: [id, site_id, name, domain, widget_key, status, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: uint64
+        site_id:
+          type: string
+        name:
+          type: string
+        domain:
+          type: string
+        widget_key:
+          type: string
+        status:
+          type: string
+          enum: [active, disabled]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SiteList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Site"
+
+    UpdateSiteStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [active, disabled]
+
+    CreateAgentRequest:
+      type: object
+      required: [agent_id, email, password, display_name]
+      properties:
+        agent_id:
+          type: string
+          pattern: "^[0-9]{4}$"
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 12
+          maxLength: 72
+        display_name:
+          type: string
+          minLength: 1
+          maxLength: 128
+        role:
+          type: string
+          enum: [agent]
+
+    AdminAgent:
+      type: object
+      required: [id, email, display_name, role, status, created_at, updated_at]
+      properties:
+        id:
+          type: integer
+          format: uint64
+        email:
+          type: string
+          format: email
+        display_name:
+          type: string
+        role:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AdminAgentList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AdminAgent"
+
+    UpdateAgentStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [active, inactive]
+
+    ResetAgentPasswordRequest:
+      type: object
+      required: [new_password]
+      properties:
+        new_password:
+          type: string
+          minLength: 12
+          maxLength: 72
+
+    AuditLog:
+      type: object
+      required:
+        [
+          id,
+          actor_agent_id,
+          actor_email,
+          actor_role,
+          action,
+          resource_type,
+          resource_id,
+          summary,
+          ip,
+          user_agent,
+          created_at,
+        ]
+      properties:
+        id:
+          type: integer
+          format: uint64
+        actor_agent_id:
+          type: integer
+          format: uint64
+        actor_email:
+          type: string
+        actor_role:
+          type: string
+        action:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+        summary:
+          type: string
+        ip:
+          type: string
+        user_agent:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    AuditLogList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditLog"

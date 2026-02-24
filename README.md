@@ -26,6 +26,14 @@
 - `docs/cicd.md`: CI/CD 使用说明（门禁、发布、回滚）
 - `docs/branch-protection-checklist.md`: `main` 分支保护配置清单
 - `docs/observability.md`: 可观测性与告警接入说明
+- `docs/backend/README.md`: 后端文档索引（服务说明、协议、错误码、Runbook）
+- `docs/backend/http-api.md`: 网关 HTTP API 约定
+- `docs/backend/ws-protocol.md`: WebSocket 协议约定
+- `docs/backend/openapi.yaml`: 网关 OpenAPI 草案（chat/auth/admin）
+- `docs/backend/grpc-contract.md`: gRPC 服务契约说明
+- `docs/backend/conversation-state-machine.md`: 会话与消息状态机
+- `docs/backend/error-codes.md`: 网关错误码映射
+- `docs/backend/runbook.md`: 后端运维排障手册
 - `.github/CODEOWNERS`: 目录责任人配置
 - `.github/pull_request_template.md`: PR 标准模板
 - `.github/ISSUE_TEMPLATE/*`: Issue 标准模板
