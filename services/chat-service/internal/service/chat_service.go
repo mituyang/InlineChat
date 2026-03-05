@@ -35,6 +35,7 @@ const (
 	conversationCreateLock = 5 * time.Second
 )
 
+// ChatService 聚合会话、消息和事件派发，是 chat-service 的核心业务层。
 type ChatService struct {
 	conversationRepo   repository.ConversationRepository
 	messageRepo        repository.MessageRepository
@@ -197,6 +198,7 @@ func (s *ChatService) eventOutboxEnabled() bool {
 	return s.txManager != nil && s.outboxRepo != nil
 }
 
+// withEventTransaction 在 Outbox 开启时保证业务写入与事件入箱原子提交。
 func (s *ChatService) withEventTransaction(ctx context.Context, fn func(txCtx context.Context) error) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -217,6 +219,7 @@ func (s *ChatService) withEventTransaction(ctx context.Context, fn func(txCtx co
 	return nil
 }
 
+// CreateConversation 在 (site_id, visitor_token) 维度上加锁，防止并发重复建会话。
 func (s *ChatService) CreateConversation(ctx context.Context, input CreateConversationInput) (*model.Conversation, error) {
 	input.SiteID = strings.TrimSpace(input.SiteID)
 	input.VisitorToken = strings.TrimSpace(input.VisitorToken)
@@ -306,6 +309,7 @@ func (s *ChatService) ListConversations(ctx context.Context, input ListConversat
 	})
 }
 
+// CreateMessage 对输入和权限做校验，并通过 client_msg_id 提供幂等写入能力。
 func (s *ChatService) CreateMessage(ctx context.Context, input CreateMessageInput) (*model.Message, error) {
 	if input.SenderType != "visitor" && input.SenderType != "agent" && input.SenderType != "system" {
 		return nil, fmt.Errorf("invalid sender_type")
@@ -361,6 +365,7 @@ func (s *ChatService) CreateMessage(ctx context.Context, input CreateMessageInpu
 			}
 		}
 
+		// 会话内重复 client_msg_id 直接复用已有消息，避免前端重试导致重复落库。
 		existing, err := s.messageRepo.GetByClientMsgID(txCtx, input.ConversationID, input.ClientMsgID)
 		if err == nil {
 			message = existing
@@ -432,6 +437,7 @@ func (s *ChatService) MarkMessageDelivered(ctx context.Context, conversationID u
 			return err
 		}
 
+		// delivered/read 的重复推进按幂等处理，避免并发重复更新报错。
 		switch message.Status {
 		case MessageStatusRead, MessageStatusDelivered:
 			result = MarkMessageDeliveredResult{Updated: false, Status: message.Status}
@@ -489,6 +495,7 @@ func (s *ChatService) MarkMessagesRead(ctx context.Context, input MarkMessagesRe
 			return err
 		}
 
+		// 谁上报已读，就推进“对侧发送者”的消息状态为 read。
 		targetSenderType := "visitor"
 		if actorType == "visitor" {
 			if strings.TrimSpace(input.VisitorToken) == "" {
@@ -911,6 +918,7 @@ func (s *ChatService) CloseConversation(ctx context.Context, input CloseConversa
 	err = s.withEventTransaction(ctx, func(txCtx context.Context) error {
 		var mutateErr error
 		conversation, mutateErr = s.conversationRepo.Mutate(txCtx, input.ConversationID, func(conversation *model.Conversation) (bool, error) {
+			// 已关闭会话重复关闭视为幂等成功，不再重复发布关闭事件。
 			if conversation.Status == "closed" {
 				return false, nil
 			}
@@ -971,6 +979,7 @@ func (s *ChatService) emitMessageCreated(ctx context.Context, message *model.Mes
 		return nil
 	}
 
+	// Outbox 模式下这里仅负责入箱，真正发布由 dispatcher 异步完成。
 	payload := map[string]any{
 		"type": "message.new",
 		"payload": map[string]any{
@@ -1091,6 +1100,7 @@ func (s *ChatService) enqueueOutboxEvent(ctx context.Context, conversationID uin
 	if err := s.outboxRepo.Create(ctx, event); err != nil {
 		return fmt.Errorf("create outbox event failed: %w", err)
 	}
+	// 只在事务上下文中打“需要通知”标记，提交后统一唤醒 dispatcher。
 	if ctx != nil {
 		if notifyState, ok := ctx.Value(outboxNotifyContextKey{}).(*outboxNotifyState); ok && notifyState != nil {
 			notifyState.shouldNotify = true

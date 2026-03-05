@@ -25,6 +25,7 @@ func NewRedisOutboxWakeupBus(client *redis.Client, timeout time.Duration) *Redis
 	}
 }
 
+// NotifyOutbox 发送轻量唤醒事件，触发 dispatcher 尽快扫出箱。
 func (b *RedisOutboxWakeupBus) NotifyOutbox(ctx context.Context) error {
 	if b == nil || b.client == nil {
 		return nil
@@ -43,6 +44,7 @@ func (b *RedisOutboxWakeupBus) NotifyOutbox(ctx context.Context) error {
 	return nil
 }
 
+// ConsumeOutboxWakeup 订阅唤醒通道并回调，常驻于 dispatcher 后台协程。
 func (b *RedisOutboxWakeupBus) ConsumeOutboxWakeup(ctx context.Context, onWakeup func()) error {
 	if b == nil || b.client == nil {
 		return nil

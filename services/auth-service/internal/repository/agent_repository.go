@@ -20,6 +20,7 @@ type AgentRepository interface {
 }
 
 type GormAgentRepository struct {
+	// defaultQueryTimeout 用于给未设置 deadline 的调用补超时，防止慢查询拖垮请求链路。
 	db                  *gorm.DB
 	defaultQueryTimeout time.Duration
 }
@@ -74,6 +75,7 @@ func resolveQueryTimeout(overrides ...time.Duration) time.Duration {
 	return 1500 * time.Millisecond
 }
 
+// dbWithContext 统一把 context 超时策略应用到 GORM 查询。
 func dbWithContext(db *gorm.DB, ctx context.Context, defaultQueryTimeout time.Duration) (*gorm.DB, context.CancelFunc) {
 	if ctx == nil {
 		ctx = context.Background()

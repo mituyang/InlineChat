@@ -26,6 +26,7 @@ type Clients struct {
 	adminConnManager *serviceConn
 }
 
+// New 基于固定地址创建 chat/auth/admin 三个 gRPC 客户端。
 func New(chatTarget string, authTarget string, adminTarget string, dialTimeout time.Duration) (*Clients, error) {
 	chatConn, err := dial(chatTarget, dialTimeout)
 	if err != nil {
@@ -55,6 +56,7 @@ func New(chatTarget string, authTarget string, adminTarget string, dialTimeout t
 	}, nil
 }
 
+// Close 按顺序关闭动态连接管理器与静态连接。
 func (c *Clients) Close() error {
 	var closeErr error
 
@@ -93,6 +95,7 @@ func (c *Clients) Close() error {
 	return closeErr
 }
 
+// dial 使用阻塞拨号确保启动阶段就暴露依赖不可用问题。
 func dial(target string, dialTimeout time.Duration) (*grpc.ClientConn, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 	defer cancel()

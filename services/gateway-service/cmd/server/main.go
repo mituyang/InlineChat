@@ -27,6 +27,7 @@ import (
 )
 
 func main() {
+	// 1) 加载配置与日志器，失败时直接退出，避免半初始化状态继续提供服务。
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config failed: %v\n", err)
@@ -42,6 +43,7 @@ func main() {
 		_ = appLogger.Sync()
 	}()
 
+	// 2) 初始化 etcd 解析器，网关的 gRPC 上游与 WS 上游都通过它做动态发现。
 	etcdDialTimeout := time.Duration(cfg.ETCDDialTimeoutSec) * time.Second
 	resolver, err := shareddiscovery.NewResolver(cfg.ETCDEndpoints, etcdDialTimeout, cfg.DiscoveryPrefix)
 	if err != nil {
@@ -70,6 +72,7 @@ func main() {
 		appLogger.Fatal("failed to resolve realtime-service http target from etcd", zap.Error(err), zap.String("service_name", cfg.RealtimeServiceName))
 	}
 
+	// 3) /ws 走动态反向代理，每次请求实时解析 realtime-service 的最新地址。
 	realtimeProxy, err := proxy.NewDynamicReverseProxy(func(ctx context.Context) (string, error) {
 		return resolver.Resolve(ctx, cfg.RealtimeServiceName, "http")
 	}, "", cfg.RequestIDHeader, appLogger)
@@ -108,6 +111,7 @@ func main() {
 	agentLimiter := ratelimit.New(cfg.AgentRateLimitPerMin, cfg.AgentRateLimitBurst, limitTTL, 120000)
 	adminLimiter := ratelimit.New(cfg.AdminRateLimitPerMin, cfg.AdminRateLimitBurst, limitTTL, 80000)
 
+	// 4) 限流默认本地计数；配置了 Redis 时切换为分布式计数（带熔断降级）。
 	var rateLimitRedis *redis.Client
 	if redisAddr := strings.TrimSpace(cfg.RateLimitRedisAddr); redisAddr != "" {
 		rateLimitRedis = redis.NewClient(&redis.Options{
@@ -151,6 +155,7 @@ func main() {
 		}()
 	}
 
+	// 5) 统一注册 HTTP API、静态资源和 WS 代理入口。
 	httpHandler := handler.NewHTTPHandler(clients, callTimeout)
 	httpHandler.SetRateLimiters(loginLimiter, visitorLimiter)
 	httpHandler.SetStaffRateLimiters(agentLimiter, adminLimiter)
@@ -246,6 +251,7 @@ func main() {
 
 	httpHandler.RegisterRoutes(r)
 
+	// /ws/* 不在网关落业务，直接转发到 realtime-service。
 	r.Any("/ws/*path", gin.WrapH(realtimeProxy))
 	r.NoRoute(middleware.NoRouteHandler())
 	r.NoMethod(middleware.NoMethodHandler())
@@ -287,6 +293,7 @@ func main() {
 }
 
 func registerStaticRoute(r *gin.Engine, appLogger *zap.Logger, route string, candidates []string) {
+	// 依次尝试候选目录，兼容容器内 public 目录与本地源码目录两种运行方式。
 	dir, err := resolveStaticDir(candidates...)
 	if err != nil {
 		appLogger.Warn("static route disabled due to missing directory", zap.String("route", route), zap.Error(err))

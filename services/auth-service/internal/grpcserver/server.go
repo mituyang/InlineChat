@@ -15,6 +15,7 @@ import (
 
 type AuthGatewayServer struct {
 	authv1.UnimplementedAuthGatewayServiceServer
+	// gRPC 层只做协议转换与错误码映射，业务逻辑收敛在 service。
 	authService *service.AuthService
 }
 
@@ -22,6 +23,7 @@ func New(authService *service.AuthService) *AuthGatewayServer {
 	return &AuthGatewayServer{authService: authService}
 }
 
+// Login 对外暴露统一鉴权入口，返回 JWT 与当前操作者信息。
 func (s *AuthGatewayServer) Login(ctx context.Context, req *authv1.LoginRequest) (*authv1.AuthResult, error) {
 	if strings.TrimSpace(req.GetEmail()) == "" || strings.TrimSpace(req.GetPassword()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "email and password are required")
@@ -38,6 +40,7 @@ func (s *AuthGatewayServer) Login(ctx context.Context, req *authv1.LoginRequest)
 	return toAuthResultPB(result), nil
 }
 
+// Me 用于 JWT 自检，供 gateway 和前端快速拿到身份声明。
 func (s *AuthGatewayServer) Me(ctx context.Context, req *authv1.MeRequest) (*authv1.MeResponse, error) {
 	token := parseBearerToken(req.GetAuthorization())
 	if token == "" {
@@ -62,6 +65,7 @@ func (s *AuthGatewayServer) Me(ctx context.Context, req *authv1.MeRequest) (*aut
 	}, nil
 }
 
+// mapError 把领域错误转换为稳定的 gRPC status code，避免上层感知底层细节。
 func mapError(err error) error {
 	switch err {
 	case service.ErrForbidden:
@@ -106,6 +110,7 @@ func toAgentPB(agent *model.Agent) *authv1.Agent {
 	}
 }
 
+// parseBearerToken 解析标准 Authorization: Bearer <token> 头。
 func parseBearerToken(header string) string {
 	parts := strings.SplitN(header, " ", 2)
 	if len(parts) != 2 {

@@ -30,6 +30,7 @@ func NewClient(conn *websocket.Conn) *Client {
 func (c *Client) ReadLoop(onMessage func([]byte) error, onClose func()) {
 	defer onClose()
 
+	// 读超时由 pong 续期；若对端长期无响应则自动断开。
 	_ = c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	c.conn.SetPongHandler(func(string) error {
 		return c.conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -60,6 +61,7 @@ func (c *Client) WriteLoop() {
 	for {
 		select {
 		case msg, ok := <-c.send:
+			// 单独的发送队列把业务处理与网络写入解耦，避免互相阻塞。
 			_ = c.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if !ok {
 				_ = c.conn.WriteMessage(websocket.CloseMessage, nil)
@@ -90,6 +92,7 @@ func (c *Client) TrySend(payload []byte) (ok bool) {
 		}
 	}()
 
+	// 非阻塞写入：队列满直接失败，由上层决定丢弃或关闭连接。
 	select {
 	case c.send <- payload:
 		return true

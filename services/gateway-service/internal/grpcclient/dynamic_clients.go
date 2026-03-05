@@ -35,6 +35,7 @@ type serviceConn struct {
 	lastResolvedAt time.Time
 }
 
+// NewDynamic 基于 etcd 发现为 chat/auth/admin 构建动态 gRPC 客户端。
 func NewDynamic(
 	resolver endpointResolver,
 	chatServiceName string,
@@ -117,6 +118,7 @@ func (s *serviceConn) currentConn() *grpc.ClientConn {
 	return s.conn
 }
 
+// connForCall 获取当前可用连接；若刷新失败则尽量复用旧连接兜底。
 func (s *serviceConn) connForCall(ctx context.Context) (*grpc.ClientConn, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -137,6 +139,7 @@ func (s *serviceConn) connForCall(ctx context.Context) (*grpc.ClientConn, error)
 	return conn, nil
 }
 
+// refresh 解析 endpoint 并在变化时重建连接，实现平滑换址。
 func (s *serviceConn) refresh(ctx context.Context, force bool) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -200,6 +203,7 @@ func (s *serviceConn) refresh(ctx context.Context, force bool) error {
 	return nil
 }
 
+// invokeWithRetry 执行一次 RPC，遇到可重试错误时刷新连接并重试一次。
 func invokeWithRetry[C any, R any](
 	ctx context.Context,
 	connManager *serviceConn,

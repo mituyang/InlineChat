@@ -15,6 +15,7 @@ import (
 
 type ChatGatewayServer struct {
 	chatv1.UnimplementedChatGatewayServiceServer
+	// gateway 接口面向外部 HTTP 网关，涵盖会话与消息全生命周期。
 	chatService *service.ChatService
 }
 
@@ -22,6 +23,7 @@ func NewGateway(chatService *service.ChatService) *ChatGatewayServer {
 	return &ChatGatewayServer{chatService: chatService}
 }
 
+// CreateConversation 按 site_id + visitor_token 创建/复用会话。
 func (s *ChatGatewayServer) CreateConversation(ctx context.Context, req *chatv1.CreateConversationRequest) (*chatv1.Conversation, error) {
 	if strings.TrimSpace(req.GetSiteId()) == "" {
 		return nil, status.Error(codes.InvalidArgument, "site_id is required")
@@ -92,6 +94,7 @@ func (s *ChatGatewayServer) ListConversations(ctx context.Context, req *chatv1.L
 	return resp, nil
 }
 
+// CreateMessage 统一访客/坐席消息写入入口，校验必填后交由 service 做权限判定。
 func (s *ChatGatewayServer) CreateMessage(ctx context.Context, req *chatv1.CreateMessageRequest) (*chatv1.Message, error) {
 	if req.GetConversationId() == 0 {
 		return nil, status.Error(codes.InvalidArgument, "conversation_id is required")
@@ -149,6 +152,7 @@ func (s *ChatGatewayServer) ListMessages(ctx context.Context, req *chatv1.ListMe
 	return resp, nil
 }
 
+// MarkMessagesRead 将“对侧消息”推进到 read，避免越权修改本侧消息。
 func (s *ChatGatewayServer) MarkMessagesRead(ctx context.Context, req *chatv1.MarkMessagesReadRequest) (*chatv1.MarkMessagesReadResponse, error) {
 	if req.GetConversationId() == 0 {
 		return nil, status.Error(codes.InvalidArgument, "conversation_id is required")

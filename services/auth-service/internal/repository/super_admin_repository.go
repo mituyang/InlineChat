@@ -18,6 +18,7 @@ type SuperAdminRepository interface {
 }
 
 type GormSuperAdminRepository struct {
+	// 与 agent repository 保持同一超时策略，便于统一容量治理。
 	db                  *gorm.DB
 	defaultQueryTimeout time.Duration
 }

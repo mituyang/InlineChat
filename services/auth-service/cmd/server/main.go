@@ -28,6 +28,7 @@ import (
 )
 
 func main() {
+	// 1) 启动初始阶段：加载配置与日志组件。
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config failed: %v\n", err)
@@ -43,6 +44,7 @@ func main() {
 		_ = appLogger.Sync()
 	}()
 
+	// 2) 将 gRPC 地址注册到 etcd，供 gateway / realtime 动态发现。
 	etcdDialTimeout := time.Duration(cfg.ETCDDialTimeoutSec) * time.Second
 	registerCtx, cancelRegister := context.WithTimeout(context.Background(), etcdDialTimeout)
 	registrar, err := shareddiscovery.Register(registerCtx, shareddiscovery.RegisterRequest{
@@ -68,6 +70,7 @@ func main() {
 		}
 	}()
 
+	// 3) 初始化 MySQL 连接池与 repository/service。
 	db, err := gorm.Open(mysql.Open(cfg.MySQLDSN), &gorm.Config{})
 	if err != nil {
 		appLogger.Fatal("failed to connect mysql", zap.Error(err))
@@ -96,6 +99,7 @@ func main() {
 		cfg.SuperAdminPassword,
 		cfg.SuperAdminDisplayName,
 	)
+	// 启动时保证超级管理员账号存在，避免首登不可用。
 	ensureCtx, cancelEnsure := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := authSvc.EnsureSuperAdmin(ensureCtx); err != nil {
 		cancelEnsure()
@@ -106,6 +110,7 @@ func main() {
 	h := handler.NewHTTPHandler(authSvc)
 	metrics := httpmiddleware.NewHTTPMetrics("auth-service", nil)
 
+	// 4) 组装 HTTP 路由：健康检查、指标、业务接口。
 	r := gin.New()
 	r.Use(
 		httpmiddleware.RequestContext(httpmiddleware.DefaultRequestIDHeader, appLogger),
@@ -137,6 +142,7 @@ func main() {
 	v1 := r.Group("/v1")
 	h.RegisterRoutes(v1)
 
+	// HTTP 对外网关流量使用，gRPC 供服务间调用。
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           r,
@@ -153,6 +159,7 @@ func main() {
 	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(grpcserver.LoggingInterceptor(appLogger)))
 	authv1.RegisterAuthGatewayServiceServer(grpcServer, grpcserver.New(authSvc))
 
+	// 5) 并行运行 HTTP/gRPC，任一异常或收到信号后统一优雅退出。
 	runCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

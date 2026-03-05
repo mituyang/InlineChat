@@ -11,6 +11,7 @@ import (
 )
 
 type HTTPHandler struct {
+	// HTTP 层承担输入校验和响应封装，复用 authService 完成认证逻辑。
 	authService *service.AuthService
 }
 
@@ -24,6 +25,7 @@ type loginRequest struct {
 }
 
 func (h *HTTPHandler) RegisterRoutes(rg *gin.RouterGroup) {
+	// 仅暴露最小认证面：登录 + token 自检。
 	rg.POST("/auth/login", h.login)
 	rg.GET("/auth/me", h.me)
 }
@@ -54,6 +56,7 @@ func (h *HTTPHandler) login(c *gin.Context) {
 	c.JSON(http.StatusOK, result)
 }
 
+// me 通过 bearer token 返回当前身份，供前端启动时恢复会话。
 func (h *HTTPHandler) me(c *gin.Context) {
 	token := parseBearerToken(c.GetHeader("Authorization"))
 	if token == "" {
@@ -75,6 +78,7 @@ func (h *HTTPHandler) me(c *gin.Context) {
 	})
 }
 
+// parseBearerToken 解析标准 Authorization: Bearer <token>。
 func parseBearerToken(header string) string {
 	parts := strings.SplitN(header, " ", 2)
 	if len(parts) != 2 {

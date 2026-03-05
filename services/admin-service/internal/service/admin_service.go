@@ -20,6 +20,7 @@ var ErrNotFound = errors.New("not found")
 var ErrInvalidSession = errors.New("invalid session")
 
 type AdminService struct {
+	// 站点、坐席、超管、审计四类数据统一由 admin-service 管控。
 	siteRepo       repository.SiteRepository
 	agentRepo      repository.AgentRepository
 	superAdminRepo repository.SuperAdminRepository
@@ -80,6 +81,7 @@ type ListAuditLogsInput struct {
 	ResourceType string
 }
 
+// New 构建后台管理域服务。
 func New(
 	siteRepo repository.SiteRepository,
 	agentRepo repository.AgentRepository,
@@ -96,10 +98,12 @@ func New(
 	}
 }
 
+// CreateSite 创建站点（不记录操作者审计信息的版本）。
 func (s *AdminService) CreateSite(ctx context.Context, in CreateSiteInput) (*model.Site, error) {
 	return s.createSite(ctx, in, ActorContext{})
 }
 
+// CreateSiteWithActor 在创建站点时记录操作者审计日志。
 func (s *AdminService) CreateSiteWithActor(ctx context.Context, in CreateSiteInput, actor ActorContext) (*model.Site, error) {
 	return s.createSite(ctx, in, actor)
 }
@@ -200,6 +204,7 @@ func (s *AdminService) UpdateSiteStatus(ctx context.Context, in UpdateSiteStatus
 	return site, nil
 }
 
+// RotateSiteWidgetKey 用于密钥泄露或定期轮换场景。
 func (s *AdminService) RotateSiteWidgetKey(ctx context.Context, in RotateSiteWidgetKeyInput, actor ActorContext) (*model.Site, error) {
 	siteID := strings.TrimSpace(in.SiteID)
 	if siteID == "" {
@@ -231,6 +236,7 @@ func (s *AdminService) CreateAgent(ctx context.Context, in CreateAgentInput) (*m
 	return s.createAgent(ctx, in, ActorContext{})
 }
 
+// CreateAgentWithActor 创建坐席并记录审计日志。
 func (s *AdminService) CreateAgentWithActor(ctx context.Context, in CreateAgentInput, actor ActorContext) (*model.Agent, error) {
 	return s.createAgent(ctx, in, actor)
 }
@@ -325,6 +331,7 @@ func (s *AdminService) UpdateAgentStatus(ctx context.Context, in UpdateAgentStat
 	return agent, nil
 }
 
+// ResetAgentPassword 会同步提高 token_version，强制历史 token 下线。
 func (s *AdminService) ResetAgentPassword(ctx context.Context, in ResetAgentPasswordInput, actor ActorContext) (*model.Agent, error) {
 	if in.AgentID == 0 {
 		return nil, fmt.Errorf("agent_id is required")
@@ -354,6 +361,7 @@ func (s *AdminService) ResetAgentPassword(ctx context.Context, in ResetAgentPass
 	return agent, nil
 }
 
+// ForceAgentLogout 不改密码，仅通过 token_version 让当前会话立即失效。
 func (s *AdminService) ForceAgentLogout(ctx context.Context, in ForceAgentLogoutInput, actor ActorContext) (*model.Agent, error) {
 	if in.AgentID == 0 {
 		return nil, fmt.Errorf("agent_id is required")
@@ -375,6 +383,7 @@ func (s *AdminService) ForceAgentLogout(ctx context.Context, in ForceAgentLogout
 	return agent, nil
 }
 
+// ListAuditLogs 提供后台审计查询，支持按操作者与资源维度过滤。
 func (s *AdminService) ListAuditLogs(ctx context.Context, in ListAuditLogsInput) ([]model.AuditLog, error) {
 	if s.auditRepo == nil {
 		return []model.AuditLog{}, nil
@@ -397,6 +406,7 @@ func (s *AdminService) ListAuditLogs(ctx context.Context, in ListAuditLogsInput)
 	return s.auditRepo.List(ctx, filter, limit, in.Offset)
 }
 
+// ValidateAdminSession 校验 token 中身份是否仍有效（状态+token_version）。
 func (s *AdminService) ValidateAdminSession(ctx context.Context, role string, agentID uint64, tokenVersion uint64) error {
 	if strings.TrimSpace(role) == "" || agentID == 0 || normalizeTokenVersion(tokenVersion) == 0 {
 		return ErrInvalidSession
@@ -449,6 +459,7 @@ func randomHex(prefix string, bytesLen int) (string, error) {
 	return prefix + "_" + hex.EncodeToString(buf), nil
 }
 
+// normalizeSiteID 约束站点标识格式，保证可读、可配置、可审计。
 func normalizeSiteID(raw string) (string, error) {
 	siteID := strings.TrimSpace(strings.ToLower(raw))
 	if siteID == "" {
@@ -468,6 +479,7 @@ func normalizeSiteID(raw string) (string, error) {
 	return siteID, nil
 }
 
+// normalizeAgentID 固定 4 位数字，便于坐席编号管理。
 func normalizeAgentID(raw string) (uint64, error) {
 	agentID := strings.TrimSpace(raw)
 	if agentID == "" {
@@ -532,6 +544,7 @@ func isDuplicateError(err error) bool {
 	return strings.Contains(msg, "duplicate") || strings.Contains(msg, "unique")
 }
 
+// writeAuditLog 失败不阻断主流程，管理动作优先完成。
 func (s *AdminService) writeAuditLog(ctx context.Context, actor ActorContext, action string, resourceType string, resourceID string, summary string) error {
 	if s.auditRepo == nil || strings.TrimSpace(action) == "" {
 		return nil

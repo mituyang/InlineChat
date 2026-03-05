@@ -30,6 +30,7 @@ const (
 
 var maxReplayMessages = 500
 
+// Handler 负责 WS 握手鉴权、消息收发和断线补拉。
 type Handler struct {
 	hub             *Hub
 	chatClient      messageClient
@@ -121,6 +122,7 @@ func (h *Handler) Serve(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid conversation_id"})
 		return
 	}
+	// last_message_id 用于断线补拉，缺省为 0（不回放）。
 	lastMessageIDRaw := strings.TrimSpace(c.Query("last_message_id"))
 	var lastMessageID uint64
 	if lastMessageIDRaw != "" {
@@ -154,6 +156,7 @@ func (h *Handler) Serve(c *gin.Context) {
 	h.hub.Register(conversationID, client, ClientMeta{Role: connCtx.Role})
 
 	go client.WriteLoop()
+	// 升级成功后先做历史补拉，再开始实时读循环，避免消息窗口丢失。
 	if err := h.replayMessages(c.Request.Context(), conversationIDUint, lastMessageID, client); err != nil {
 		h.logger.Warn("replay websocket messages failed",
 			zap.Error(err),
@@ -177,6 +180,7 @@ func (h *Handler) Serve(c *gin.Context) {
 func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64) (connectionContext, int, error) {
 	accessToken := strings.TrimSpace(c.Query("access_token"))
 	if accessToken != "" {
+		// 客服链路：JWT 本地验签 + auth-service Me 二次校验。
 		claims, err := security.ParseTokenAny(h.jwtSecrets, h.jwtIssuer, accessToken)
 		if err != nil {
 			h.logger.Warn("invalid ws access_token", zap.Error(err))
@@ -228,6 +232,7 @@ func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64
 	if visitorToken == "" {
 		return connectionContext{}, http.StatusUnauthorized, fmt.Errorf("visitor_token is required")
 	}
+	// 访客链路：要求 token 与会话绑定 token 一致。
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), h.chatCallTimeout)
 	defer cancel()
@@ -309,6 +314,7 @@ func (h *Handler) replayMessages(ctx context.Context, conversationID uint64, las
 	beforeID := uint64(0)
 	missed := make([]*chatclient.Message, 0, replayPageSize)
 	truncated := false
+	// 分页反查直到命中 last_message_id，或达到回放上限。
 	for len(missed) < maxReplayMessages {
 		callCtx, cancel := context.WithTimeout(ctx, h.chatCallTimeout)
 		items, err := h.chatClient.ListMessages(callCtx, conversationID, chatclient.ListMessagesInput{
@@ -473,6 +479,7 @@ func (h *Handler) onSendMessage(ctx context.Context, conversationID string, raw 
 	senderID := strings.TrimSpace(payload.SenderID)
 	switch senderType {
 	case "visitor":
+		// 访客连接仅允许 visitor 发送，并要求 visitor_token 与连接上下文一致。
 		if connCtx.Role != "visitor" {
 			h.sendNack(client, payload.ClientMsgID, "agent connection cannot send visitor message")
 			return nil
@@ -486,6 +493,7 @@ func (h *Handler) onSendMessage(ctx context.Context, conversationID string, raw 
 			return nil
 		}
 	case "agent":
+		// 客服连接强制使用连接上下文里的 agent_id，避免伪造 sender_id。
 		if connCtx.Role != "agent" {
 			h.sendNack(client, payload.ClientMsgID, "agent access_token is required")
 			return nil
@@ -511,6 +519,7 @@ func (h *Handler) onSendMessage(ctx context.Context, conversationID string, raw 
 		return nil
 	}
 
+	// WS 写入成功先返回 ack，真正广播由 chat->redis->realtime 链路异步完成。
 	ack := map[string]any{
 		"type": "message.ack",
 		"payload": map[string]any{

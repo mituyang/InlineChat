@@ -22,6 +22,7 @@ type AuditLogRepository interface {
 }
 
 type GormAuditLogRepository struct {
+	// 审计查询也受统一超时约束，避免大分页造成慢请求堆积。
 	db                  *gorm.DB
 	defaultQueryTimeout time.Duration
 }

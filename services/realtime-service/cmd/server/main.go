@@ -27,6 +27,7 @@ import (
 )
 
 func main() {
+	// 1) 基础初始化：配置与日志。
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config failed: %v\n", err)
@@ -42,6 +43,7 @@ func main() {
 		_ = appLogger.Sync()
 	}()
 
+	// 2) 连接 Redis，realtime 使用它做跨实例事件订阅分发。
 	redisClient := redis.NewClient(&redis.Options{
 		Addr:     cfg.RedisAddr,
 		Password: cfg.RedisPassword,
@@ -53,6 +55,7 @@ func main() {
 		appLogger.Fatal("redis unavailable", zap.Error(err))
 	}
 
+	// 3) 初始化 WS Hub 与上游 gRPC 客户端（chat/auth）。
 	hub := ws.NewHub()
 	dialTimeout := time.Duration(cfg.ChatGRPCDialTimeout) * time.Second
 	callTimeout := time.Duration(cfg.ChatGRPCCallTimeout) * time.Second
@@ -104,6 +107,7 @@ func main() {
 		appLogger,
 	)
 
+	// 4) 将 realtime 的 HTTP 入口注册到 etcd，供 gateway 的 /ws 代理动态发现。
 	registerCtx, cancelRegister := context.WithTimeout(context.Background(), etcdDialTimeout)
 	registrar, err := shareddiscovery.Register(registerCtx, shareddiscovery.RegisterRequest{
 		Prefix:       cfg.DiscoveryPrefix,
@@ -138,6 +142,7 @@ func main() {
 	consumeCtx, stopConsume := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopConsume()
 	go func() {
+		// 订阅 Redis 事件并向同会话 WS 连接广播，同时推进 delivered 状态。
 		retryDelay := time.Second
 		for {
 			err := publisher.Consume(consumeCtx, func(conversationID string, payload []byte) {
@@ -255,6 +260,7 @@ func main() {
 	})
 	r.GET("/metrics", httpmiddleware.MetricsHandler(nil))
 
+	// realtime-service 的 WS 单入口：所有角色都走 /ws/:conversation_id。
 	r.GET("/ws/:conversation_id", wsHandler.Serve)
 
 	srv := &http.Server{

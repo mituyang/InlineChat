@@ -31,6 +31,7 @@ import (
 )
 
 func main() {
+	// 1) 基础初始化：配置 + 日志。
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config failed: %v\n", err)
@@ -46,6 +47,7 @@ func main() {
 		_ = appLogger.Sync()
 	}()
 
+	// 2) 将 chat gRPC 地址注册到 etcd，供 gateway/realtime 动态发现。
 	etcdDialTimeout := time.Duration(cfg.ETCDDialTimeoutSec) * time.Second
 	registerCtx, cancelRegister := context.WithTimeout(context.Background(), etcdDialTimeout)
 	registrar, err := shareddiscovery.Register(registerCtx, shareddiscovery.RegisterRequest{
@@ -71,6 +73,7 @@ func main() {
 		}
 	}()
 
+	// 3) 建立 MySQL/Redis 连接并初始化 repository 层。
 	db, err := gorm.Open(mysql.Open(cfg.MySQLDSN), &gorm.Config{})
 	if err != nil {
 		appLogger.Fatal("failed to connect mysql", zap.Error(err))
@@ -107,6 +110,7 @@ func main() {
 	autoCloseAfter := time.Duration(cfg.AutoCloseAfterSec) * time.Second
 	chatSvc := service.New(conversationRepo, messageRepo, appLogger, messagePublisher, autoCloseAfter)
 	chatSvc.SetConversationLocker(locker.NewRedisConversationLocker(redisClient, "", 0))
+	// Outbox 开启时，事件与业务写入同事务落库，再异步派发到 Redis。
 	if cfg.EventOutboxEnabled {
 		chatSvc.EnableEventOutbox(txManager, outboxRepo)
 		chatSvc.SetOutboxNotifier(outboxWakeupBus)
@@ -118,6 +122,7 @@ func main() {
 
 	var outboxDispatcher *service.OutboxDispatcher
 	if cfg.EventOutboxEnabled {
+		// Dispatcher 负责扫描 pending outbox、发布事件、失败重试与死信处理。
 		outboxDispatcher = service.NewOutboxDispatcher(outboxRepo, messagePublisher, outboxWakeupBus, appLogger, service.OutboxDispatcherConfig{
 			PollInterval:      time.Duration(cfg.EventOutboxPollIntervalMS) * time.Millisecond,
 			BatchSize:         cfg.EventOutboxBatchSize,
@@ -184,6 +189,7 @@ func main() {
 	v1 := r.Group("/v1")
 	h.RegisterRoutes(v1)
 
+	// chat-service 同时暴露 HTTP（健康检查、轻量会话 API）和 gRPC（内部调用）。
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           r,

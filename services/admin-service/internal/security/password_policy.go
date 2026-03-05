@@ -21,6 +21,7 @@ var weakPasswordBlacklist = map[string]struct{}{
 	"changeme":       {},
 }
 
+// ValidatePasswordPolicy 定义后台统一口令策略，避免弱口令进入系统。
 func ValidatePasswordPolicy(raw string) error {
 	if strings.TrimSpace(raw) == "" {
 		return fmt.Errorf("password is required")

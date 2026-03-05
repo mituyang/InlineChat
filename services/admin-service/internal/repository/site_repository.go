@@ -21,6 +21,7 @@ type SiteRepository interface {
 }
 
 type GormSiteRepository struct {
+	// defaultQueryTimeout 用于兜底查询超时，避免无期限占用连接池。
 	db                  *gorm.DB
 	defaultQueryTimeout time.Duration
 }

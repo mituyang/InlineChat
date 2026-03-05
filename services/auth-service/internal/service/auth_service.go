@@ -20,6 +20,7 @@ var (
 )
 
 type AuthService struct {
+	// agent/super_admin 走不同表，登录与校验时按角色分流。
 	agentRepo             repository.AgentRepository
 	superAdminRepo        repository.SuperAdminRepository
 	jwtSecret             []byte
@@ -42,6 +43,7 @@ type AuthResult struct {
 	Agent model.Agent `json:"agent"`
 }
 
+// New 构建认证服务，并预处理密钥轮转与超级管理员配置。
 func New(
 	agentRepo repository.AgentRepository,
 	superAdminRepo repository.SuperAdminRepository,
@@ -68,6 +70,7 @@ func New(
 	}
 }
 
+// Login 先尝试 super_admin，再回退普通 agent，确保同邮箱优先超级管理员身份。
 func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, error) {
 	email := strings.ToLower(strings.TrimSpace(in.Email))
 	if email == "" || strings.TrimSpace(in.Password) == "" {
@@ -138,10 +141,12 @@ func (s *AuthService) Login(ctx context.Context, in LoginInput) (*AuthResult, er
 	return &AuthResult{Token: token, Agent: *agent}, nil
 }
 
+// ParseToken 只做签名/issuer 解析，不检查账号状态与 token_version。
 func (s *AuthService) ParseToken(token string) (*security.Claims, error) {
 	return security.ParseTokenAny(s.jwtVerifySecrets, s.jwtIssuer, token)
 }
 
+// ValidateToken 在 ParseToken 基础上补齐会话态校验（状态 + token_version）。
 func (s *AuthService) ValidateToken(ctx context.Context, token string) (*security.Claims, error) {
 	claims, err := s.ParseToken(token)
 	if err != nil {
@@ -184,6 +189,7 @@ func (s *AuthService) ValidateToken(ctx context.Context, token string) (*securit
 	return claims, nil
 }
 
+// buildJWTVerifySecrets 支持主密钥+上一个密钥并行验签，便于平滑轮转。
 func buildJWTVerifySecrets(primary string, previous string) [][]byte {
 	out := make([][]byte, 0, 2)
 	primaryText := strings.TrimSpace(primary)
@@ -197,6 +203,7 @@ func buildJWTVerifySecrets(primary string, previous string) [][]byte {
 	return out
 }
 
+// EnsureSuperAdmin 幂等地创建/修正超级管理员账号，保证环境变量即期望状态。
 func (s *AuthService) EnsureSuperAdmin(ctx context.Context) error {
 	if s.superAdminEmail == "" || s.superAdminPassword == "" || s.superAdminDisplayName == "" {
 		return fmt.Errorf("super admin env is required")
@@ -266,6 +273,7 @@ func normalizeTokenVersion(v uint64) uint64 {
 	return v
 }
 
+// isActiveStatus 统一状态语义，避免大小写导致行为分叉。
 func isActiveStatus(status string) bool {
 	return strings.EqualFold(strings.TrimSpace(status), "active")
 }

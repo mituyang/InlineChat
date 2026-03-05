@@ -30,6 +30,7 @@ type Config struct {
 	ServiceAdvertiseGRPCEndpoint string
 }
 
+// Load 从环境变量加载配置并做启动前校验，避免运行期才暴露缺参问题。
 func Load() (Config, error) {
 	cfg := Config{
 		HTTPPort:                     getEnv("HTTP_PORT", "8204"),

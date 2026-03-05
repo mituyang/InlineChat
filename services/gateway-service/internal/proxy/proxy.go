@@ -24,6 +24,7 @@ func NewReverseProxy(targetRawURL string, stripPrefix string, requestIDHeader st
 	rp := httputil.NewSingleHostReverseProxy(target)
 	originalDirector := rp.Director
 	rp.Director = func(req *http.Request) {
+		// 保留原始请求上下文信息，便于上游做审计和链路追踪。
 		originalHost := req.Host
 		originalProto := forwardedProto(req)
 		authHeader := req.Header.Get("Authorization")
@@ -31,6 +32,7 @@ func NewReverseProxy(targetRawURL string, stripPrefix string, requestIDHeader st
 
 		originalDirector(req)
 
+		// 将网关路由路径重写为上游服务期望的路径。
 		trimmed := strings.TrimPrefix(req.URL.Path, stripPrefix)
 		if trimmed == "" {
 			trimmed = "/"
@@ -48,6 +50,7 @@ func NewReverseProxy(targetRawURL string, stripPrefix string, requestIDHeader st
 		if requestID != "" && requestIDHeader != "" {
 			req.Header.Set(requestIDHeader, requestID)
 		}
+		// 显式透传转发头，避免上游丢失原始访问入口信息。
 		if originalHost != "" {
 			req.Header.Set("X-Forwarded-Host", originalHost)
 		}
@@ -74,6 +77,7 @@ func NewDynamicReverseProxy(resolveTarget TargetResolver, stripPrefix string, re
 		return nil, fmt.Errorf("resolveTarget is required")
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		// 每次请求都重新解析目标地址，适配实例漂移和故障切换。
 		resolveCtx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
 		target, err := resolveTarget(resolveCtx)
 		cancel()

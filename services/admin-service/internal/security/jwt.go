@@ -18,6 +18,7 @@ func ParseToken(secret []byte, issuer string, token string) (*Claims, error) {
 	return ParseTokenAny([][]byte{secret}, issuer, token)
 }
 
+// ParseTokenAny 支持多密钥验签，便于 JWT 密钥轮转。
 func ParseTokenAny(secrets [][]byte, issuer string, token string) (*Claims, error) {
 	var lastErr error
 	for _, secret := range secrets {
@@ -36,6 +37,7 @@ func ParseTokenAny(secrets [][]byte, issuer string, token string) (*Claims, erro
 	return nil, fmt.Errorf("invalid token")
 }
 
+// parseTokenWithSecret 执行单密钥验签并校验 issuer。
 func parseTokenWithSecret(secret []byte, issuer string, token string) (*Claims, error) {
 	parsed, err := jwt.ParseWithClaims(token, &Claims{}, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {

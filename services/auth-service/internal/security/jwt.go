@@ -15,6 +15,7 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+// IssueToken 签发 HS256 JWT，携带角色与 token_version 以支持强制下线。
 func IssueToken(secret []byte, issuer string, expire time.Duration, agentID uint64, email string, role string, tokenVersion uint64) (string, error) {
 	now := time.Now()
 	claims := Claims{
@@ -37,6 +38,7 @@ func ParseToken(secret []byte, issuer string, token string) (*Claims, error) {
 	return ParseTokenAny([][]byte{secret}, issuer, token)
 }
 
+// ParseTokenAny 允许使用多密钥验签，用于 JWT 密钥平滑轮转。
 func ParseTokenAny(secrets [][]byte, issuer string, token string) (*Claims, error) {
 	var lastErr error
 	for _, secret := range secrets {
@@ -55,6 +57,7 @@ func ParseTokenAny(secrets [][]byte, issuer string, token string) (*Claims, erro
 	return nil, fmt.Errorf("invalid token")
 }
 
+// parseTokenWithSecret 执行单密钥验签并校验 issuer。
 func parseTokenWithSecret(secret []byte, issuer string, token string) (*Claims, error) {
 	parsed, err := jwt.ParseWithClaims(token, &Claims{}, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {

@@ -48,6 +48,7 @@ type EventOutboxRepository interface {
 
 type txContextKey struct{}
 
+// withTx 将 gorm 事务句柄放入 context，便于仓储层无侵入复用当前事务。
 func withTx(ctx context.Context, tx *gorm.DB) context.Context {
 	return context.WithValue(ctx, txContextKey{}, tx)
 }
@@ -67,6 +68,7 @@ func resolveQueryTimeout(overrides ...time.Duration) time.Duration {
 	return 1500 * time.Millisecond
 }
 
+// dbWithContext 统一处理三件事：query timeout、事务透传、context 绑定。
 func dbWithContext(db *gorm.DB, ctx context.Context, defaultQueryTimeout time.Duration) (*gorm.DB, context.CancelFunc) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -101,6 +103,7 @@ func NewTransactionManager(db *gorm.DB, defaultQueryTimeout ...time.Duration) *G
 func (m *GormTransactionManager) WithTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
 	db, cancel := dbWithContext(m.db, ctx, m.defaultQueryTimeout)
 	defer cancel()
+	// 通过 withTx 把 tx 放入 context，后续 repository 自动命中同一事务。
 	return db.Transaction(func(tx *gorm.DB) error {
 		return fn(withTx(ctx, tx))
 	})

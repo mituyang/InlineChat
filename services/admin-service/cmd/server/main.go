@@ -29,6 +29,7 @@ import (
 )
 
 func main() {
+	// 1) 启动阶段：加载配置与日志。
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "load config failed: %v\n", err)
@@ -44,6 +45,7 @@ func main() {
 		_ = appLogger.Sync()
 	}()
 
+	// 2) 把 admin gRPC 地址注册到 etcd，供 gateway 动态发现。
 	etcdDialTimeout := time.Duration(cfg.ETCDDialTimeoutSec) * time.Second
 	registerCtx, cancelRegister := context.WithTimeout(context.Background(), etcdDialTimeout)
 	registrar, err := shareddiscovery.Register(registerCtx, shareddiscovery.RegisterRequest{
@@ -69,6 +71,7 @@ func main() {
 		}
 	}()
 
+	// 3) 初始化数据库、仓储和核心业务服务。
 	db, err := gorm.Open(mysql.Open(cfg.MySQLDSN), &gorm.Config{})
 	if err != nil {
 		appLogger.Fatal("failed to connect mysql", zap.Error(err))
@@ -92,6 +95,7 @@ func main() {
 	authz := middleware.NewAuthz(cfg.JWTSecret, cfg.JWTPreviousSecret, cfg.JWTIssuer, agentRepo, superAdminRepo)
 	metrics := httpmiddleware.NewHTTPMetrics("admin-service", nil)
 
+	// 4) 组装 HTTP 路由：健康检查 + 管理后台 API。
 	r := gin.New()
 	r.Use(
 		httpmiddleware.RequestContext(httpmiddleware.DefaultRequestIDHeader, appLogger),
@@ -124,6 +128,7 @@ func main() {
 	adminV1.Use(authz.RequireAdmin())
 	h.RegisterRoutes(adminV1)
 
+	// HTTP 提供后台调用，gRPC 提供服务间调用。
 	httpServer := &http.Server{
 		Addr:              ":" + cfg.HTTPPort,
 		Handler:           r,
@@ -140,6 +145,7 @@ func main() {
 	grpcServer := grpc.NewServer(grpc.UnaryInterceptor(grpcserver.LoggingInterceptor(appLogger)))
 	adminv1.RegisterAdminGatewayServiceServer(grpcServer, grpcserver.New(adminSvc, cfg.JWTSecret, cfg.JWTPreviousSecret, cfg.JWTIssuer))
 
+	// 5) 并行运行双协议服务，统一处理异常和优雅退出。
 	runCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 

@@ -53,6 +53,7 @@ type MarkMessageDeliveredResult struct {
 	Status  string
 }
 
+// New 建立到 chat-service 的 gRPC 连接。
 func New(target string, dialTimeout time.Duration) (*Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 	defer cancel()
@@ -107,6 +108,7 @@ func (c *Client) CreateMessage(ctx context.Context, conversationID uint64, reqBo
 	}, nil
 }
 
+// MarkMessageDelivered 用于 realtime 确认消息已投递到客户端后回写状态。
 func (c *Client) MarkMessageDelivered(ctx context.Context, conversationID uint64, messageID uint64) (*MarkMessageDeliveredResult, error) {
 	resp, err := c.rpc.MarkMessageDelivered(ctx, &chatv1.MarkMessageDeliveredRequest{
 		ConversationId: conversationID,
@@ -122,6 +124,7 @@ func (c *Client) MarkMessageDelivered(ctx context.Context, conversationID uint64
 	}, nil
 }
 
+// GetConversation 拉取会话归属信息，用于 WS 连接鉴权。
 func (c *Client) GetConversation(ctx context.Context, conversationID uint64) (*Conversation, error) {
 	resp, err := c.gateway.GetConversation(ctx, &chatv1.GetConversationRequest{Id: conversationID})
 	if err != nil {
@@ -135,6 +138,7 @@ func (c *Client) GetConversation(ctx context.Context, conversationID uint64) (*C
 	}, nil
 }
 
+// ListMessages 用于 WS 重连回放历史消息。
 func (c *Client) ListMessages(ctx context.Context, conversationID uint64, in ListMessagesInput) ([]*Message, error) {
 	resp, err := c.gateway.ListMessages(ctx, &chatv1.ListMessagesRequest{
 		ConversationId: conversationID,

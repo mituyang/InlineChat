@@ -10,6 +10,7 @@ type endpointResolver interface {
 	Resolve(ctx context.Context, serviceName string, protocol string) (string, error)
 }
 
+// ResolveWithRetry 在限定总超时内重复解析，缓冲服务启动抖动。
 func ResolveWithRetry(resolver endpointResolver, serviceName string, protocol string, timeout time.Duration) (string, error) {
 	return resolveWithRetryWithPolicy(resolver, serviceName, protocol, timeout, 2*time.Second, 500*time.Millisecond)
 }

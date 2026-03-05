@@ -16,6 +16,7 @@ func LoggingInterceptor(logger *zap.Logger) grpc.UnaryServerInterceptor {
 		info *grpc.UnaryServerInfo,
 		handler grpc.UnaryHandler,
 	) (any, error) {
+		// 统一记录 gRPC 调用耗时与状态码，便于定位慢调用/失败请求。
 		start := time.Now()
 		resp, err := handler(ctx, req)
 		cost := time.Since(start)

@@ -14,10 +14,12 @@ type Resolver struct {
 	client *clientv3.Client
 	prefix string
 
+	// rrState 记录各服务的轮询位置，实现客户端侧简单负载均衡。
 	mu      sync.Mutex
 	rrState map[string]int
 }
 
+// NewResolver 初始化 etcd 客户端，用于服务发现读取。
 func NewResolver(endpoints []string, dialTimeout time.Duration, prefix string) (*Resolver, error) {
 	normalized := normalizeEndpoints(endpoints)
 	if len(normalized) == 0 {
@@ -49,6 +51,7 @@ func (r *Resolver) Close() error {
 	return r.client.Close()
 }
 
+// Resolve 按 service/protocol 查找可用实例；多实例时按轮询返回。
 func (r *Resolver) Resolve(ctx context.Context, serviceName string, protocol string) (string, error) {
 	serviceName = strings.TrimSpace(serviceName)
 	protocol = strings.TrimSpace(protocol)

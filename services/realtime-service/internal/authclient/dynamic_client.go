@@ -30,6 +30,7 @@ type DynamicClient struct {
 	lastResolvedAt time.Time
 }
 
+// NewDynamic 构建带服务发现能力的 auth gRPC 客户端。
 func NewDynamic(resolver endpointResolver, serviceName string, protocol string, dialTimeout time.Duration) (*DynamicClient, error) {
 	if resolver == nil {
 		return nil, fmt.Errorf("resolver is required")
@@ -80,6 +81,7 @@ func (d *DynamicClient) Close() error {
 	return current.Close()
 }
 
+// Me 优先使用当前连接，请求失败且可重试时自动刷新 endpoint 后重试一次。
 func (d *DynamicClient) Me(ctx context.Context, authorization string) (*MeResult, error) {
 	client, err := d.clientForCall(ctx)
 	if err != nil {
@@ -130,6 +132,7 @@ func (d *DynamicClient) currentClient() *Client {
 	return d.client
 }
 
+// refresh 解析最新 endpoint 并在变化时重建连接。
 func (d *DynamicClient) refresh(ctx context.Context, force bool) error {
 	if ctx == nil {
 		ctx = context.Background()

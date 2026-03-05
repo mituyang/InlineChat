@@ -30,6 +30,7 @@ type Config struct {
 	ServiceAdvertiseHTTPEndpoint string
 }
 
+// Load 从环境变量加载配置并做启动前校验，确保实时链路参数完整。
 func Load() (Config, error) {
 	cfg := Config{
 		HTTPPort:                     getEnv("HTTP_PORT", "8203"),

@@ -50,6 +50,7 @@ func (c OutboxDispatcherConfig) normalized() OutboxDispatcherConfig {
 	return c
 }
 
+// OutboxDispatcher 负责把 event_outbox 中的 pending 事件可靠地发布到消息总线。
 type OutboxDispatcher struct {
 	repo       repository.EventOutboxRepository
 	transport  OutboxEventTransport
@@ -89,12 +90,14 @@ func (d *OutboxDispatcher) Start(ctx context.Context) {
 	runCtx, cancel := context.WithCancel(ctx)
 	d.cancel = cancel
 	d.wg.Add(1)
+	// 主循环：周期扫描 pending 事件并执行发布。
 	go func() {
 		defer d.wg.Done()
 		d.loop(runCtx)
 	}()
 	if d.subscriber != nil {
 		d.wg.Add(1)
+		// 订阅唤醒通道：新事件入箱后可立即触发一次 dispatch。
 		go func() {
 			defer d.wg.Done()
 			d.consumeWakeup(runCtx)
@@ -161,6 +164,7 @@ func (d *OutboxDispatcher) Trigger() {
 	if d == nil || d.wakeCh == nil {
 		return
 	}
+	// wakeCh 只需保留一次唤醒信号，避免高频消息导致无意义堆积。
 	select {
 	case d.wakeCh <- struct{}{}:
 	default:
@@ -186,6 +190,7 @@ func (d *OutboxDispatcher) dispatchOnce(ctx context.Context) {
 		ctx = context.Background()
 	}
 
+	// 先回收超时的 processing 事件，避免 worker 异常退出造成永久卡死。
 	staleBefore := time.Now().Add(-d.cfg.ProcessingTimeout)
 	if _, err := d.repo.RequeueStaleProcessing(ctx, staleBefore); err != nil {
 		d.logger.Warn("requeue stale outbox events failed", zap.Error(err))
@@ -203,6 +208,7 @@ func (d *OutboxDispatcher) dispatchOnce(ctx context.Context) {
 	for i := range items {
 		item := items[i]
 		if err := d.transport.PublishConversationEvent(ctx, item.ConversationID, []byte(item.Payload)); err != nil {
+			// 超过最大尝试次数后转死信，防止失败事件无限重试。
 			if item.Attempts >= d.cfg.MaxAttempts {
 				deadErr := d.repo.MarkDead(ctx, item.ID, trimError(err))
 				if deadErr != nil {
@@ -221,6 +227,7 @@ func (d *OutboxDispatcher) dispatchOnce(ctx context.Context) {
 				continue
 			}
 
+			// 发布失败但未超上限，按指数退避更新 next_retry_at。
 			nextRetryAt := time.Now().Add(d.retryDelay(item.Attempts))
 			retryErr := d.repo.MarkForRetry(ctx, item.ID, nextRetryAt, trimError(err))
 			if retryErr != nil {
@@ -238,6 +245,7 @@ func (d *OutboxDispatcher) dispatchOnce(ctx context.Context) {
 			continue
 		}
 
+		// 发布成功后标记 published，形成“至少一次投递 + 幂等消费”语义基础。
 		if err := d.repo.MarkPublished(ctx, item.ID, time.Now()); err != nil {
 			d.logger.Warn("mark outbox event published failed",
 				zap.Error(err),

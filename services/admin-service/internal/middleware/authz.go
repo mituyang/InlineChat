@@ -11,6 +11,7 @@ import (
 )
 
 type Authz struct {
+	// secrets 支持 JWT 密钥轮转期间并行验签。
 	secrets        [][]byte
 	issuer         string
 	agentRepo      repository.AgentRepository
@@ -33,6 +34,7 @@ func NewAuthz(
 }
 
 func (a *Authz) RequireAdmin() gin.HandlerFunc {
+	// 中间件职责：身份认证 + 角色准入 + 会话状态校验。
 	return func(c *gin.Context) {
 		token := parseBearerToken(c.GetHeader("Authorization"))
 		if token == "" {
@@ -91,6 +93,7 @@ func normalizeTokenVersion(v uint64) uint64 {
 }
 
 func (a *Authz) validateSessionByRole(c *gin.Context, claims *security.Claims) bool {
+	// 通过数据库状态兜底，防止已禁用账号继续使用旧 token。
 	if claims == nil {
 		return false
 	}

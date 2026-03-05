@@ -17,6 +17,7 @@ import (
 
 type AdminGatewayServer struct {
 	adminv1.UnimplementedAdminGatewayServiceServer
+	// gRPC 层负责协议转换与鉴权门面，业务校验下沉到 adminService。
 	adminService *service.AdminService
 	jwtSecrets   [][]byte
 	jwtIssuer    string
@@ -30,6 +31,7 @@ func New(adminService *service.AdminService, jwtSecret string, jwtPreviousSecret
 	}
 }
 
+// CreateSite 仅允许管理员调用，创建站点并返回 widget_key。
 func (s *AdminGatewayServer) CreateSite(ctx context.Context, req *adminv1.CreateSiteRequest) (*adminv1.Site, error) {
 	claims, err := s.requireAdmin(ctx, req.GetAuthorization())
 	if err != nil {
@@ -51,6 +53,7 @@ func (s *AdminGatewayServer) CreateSite(ctx context.Context, req *adminv1.Create
 	return toSitePB(site), nil
 }
 
+// UpdateSiteStatus 仅 super_admin 可执行，控制站点接入启停。
 func (s *AdminGatewayServer) UpdateSiteStatus(ctx context.Context, req *adminv1.UpdateSiteStatusRequest) (*adminv1.Site, error) {
 	claims, err := s.requireAdmin(ctx, req.GetAuthorization())
 	if err != nil {
@@ -286,6 +289,7 @@ func (s *AdminGatewayServer) ListAuditLogs(ctx context.Context, req *adminv1.Lis
 	return resp, nil
 }
 
+// requireAdmin 校验 bearer token、角色、以及数据库中的会话有效性。
 func (s *AdminGatewayServer) requireAdmin(ctx context.Context, authorization string) (*security.Claims, error) {
 	token := parseBearerToken(authorization)
 	if token == "" {
@@ -310,6 +314,7 @@ func (s *AdminGatewayServer) requireAdmin(ctx context.Context, authorization str
 	return claims, nil
 }
 
+// parseBearerToken 解析标准 Authorization: Bearer <token>。
 func parseBearerToken(header string) string {
 	parts := strings.SplitN(header, " ", 2)
 	if len(parts) != 2 {
@@ -321,6 +326,7 @@ func parseBearerToken(header string) string {
 	return strings.TrimSpace(parts[1])
 }
 
+// buildJWTSecrets 支持主/旧密钥并行验签，避免密钥轮转窗口期故障。
 func buildJWTSecrets(primary string, previous string) [][]byte {
 	out := make([][]byte, 0, 2)
 	primaryText := strings.TrimSpace(primary)
@@ -334,6 +340,7 @@ func buildJWTSecrets(primary string, previous string) [][]byte {
 	return out
 }
 
+// mapError 将领域错误映射到稳定 gRPC code，方便上游按状态处理。
 func mapError(err error) error {
 	switch err {
 	case service.ErrConflict:

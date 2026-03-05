@@ -22,6 +22,7 @@ type MeResult struct {
 	Exp     int64
 }
 
+// New 建立到 auth-service 的 gRPC 连接。
 func New(target string, dialTimeout time.Duration) (*Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 	defer cancel()
@@ -49,6 +50,7 @@ func (c *Client) Close() error {
 	return c.conn.Close()
 }
 
+// Me 调用 auth-service 校验 token 并返回身份声明。
 func (c *Client) Me(ctx context.Context, authorization string) (*MeResult, error) {
 	resp, err := c.rpc.Me(ctx, &authv1.MeRequest{Authorization: authorization})
 	if err != nil {

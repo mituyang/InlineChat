@@ -12,6 +12,7 @@ import (
 )
 
 type Registrar struct {
+	// Registrar 维护 etcd 租约与 keepalive 生命周期。
 	client      *clientv3.Client
 	leaseID     clientv3.LeaseID
 	key         string
@@ -32,6 +33,7 @@ type RegisterRequest struct {
 	Logger       *zap.Logger
 }
 
+// Register 把服务实例写入 etcd，并通过 keepalive 保持租约存活。
 func Register(ctx context.Context, req RegisterRequest) (*Registrar, error) {
 	if req.TTLSeconds <= 0 {
 		return nil, fmt.Errorf("ttl must be greater than 0")
@@ -110,6 +112,7 @@ func Register(ctx context.Context, req RegisterRequest) (*Registrar, error) {
 	return reg, nil
 }
 
+// Close 主动删除注册键并回收租约，通常在进程退出时调用。
 func (r *Registrar) Close(ctx context.Context) error {
 	if r == nil {
 		return nil

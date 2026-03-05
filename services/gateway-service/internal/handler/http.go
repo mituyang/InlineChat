@@ -11,6 +11,7 @@ import (
 
 const maxMessageContentChars = 2000
 
+// HTTPHandler 负责承接网关入口请求，并分发到 chat/auth/admin 三类上游。
 type HTTPHandler struct {
 	clients        *grpcclient.Clients
 	callTimeout    time.Duration
@@ -41,6 +42,7 @@ func (h *HTTPHandler) SetStaffRateLimiters(agentLimiter *ratelimit.Limiter, admi
 }
 
 func (h *HTTPHandler) RegisterRoutes(r *gin.Engine) {
+	// 路由按业务域拆分，便于后续按服务边界继续扩展。
 	h.registerChatRoutes(r)
 	h.registerAuthRoutes(r)
 	h.registerAdminRoutes(r)

@@ -20,6 +20,7 @@ type autoCloseTimerEntry struct {
 }
 
 type autoCloseScheduler struct {
+	// 每个会话最多只有一个定时器，避免重复自动关单。
 	mu     sync.Mutex
 	timers map[uint64]autoCloseTimerEntry
 	onDue  func(conversationID uint64, dueAt time.Time)
@@ -32,6 +33,7 @@ func newAutoCloseScheduler(onDue func(conversationID uint64, dueAt time.Time)) *
 	}
 }
 
+// Schedule 为会话安排自动关闭时间；若已有计划则覆盖为最新 deadline。
 func (s *autoCloseScheduler) Schedule(conversationID uint64, dueAt time.Time) {
 	if conversationID == 0 || s == nil {
 		return
@@ -62,6 +64,7 @@ func (s *autoCloseScheduler) Schedule(conversationID uint64, dueAt time.Time) {
 	s.mu.Unlock()
 }
 
+// Cancel 在访客恢复发言等场景撤销自动关闭计划。
 func (s *autoCloseScheduler) Cancel(conversationID uint64) {
 	if conversationID == 0 || s == nil {
 		return
@@ -103,6 +106,7 @@ func (s *autoCloseScheduler) fire(conversationID uint64, dueAt time.Time) {
 	}
 }
 
+// StartAutoCloseScheduler 启动时扫描历史 open 会话并恢复自动关单计划。
 func (s *ChatService) StartAutoCloseScheduler(ctx context.Context) error {
 	if s.autoCloseScheduler == nil {
 		return nil
@@ -180,6 +184,7 @@ func (s *ChatService) onMessageCreatedForAutoClose(message *model.Message) {
 	}
 }
 
+// autoCloseConversationByTimeout 在事务内二次确认状态，避免误关单。
 func (s *ChatService) autoCloseConversationByTimeout(ctx context.Context, conversationID uint64) error {
 	if conversationID == 0 {
 		return nil

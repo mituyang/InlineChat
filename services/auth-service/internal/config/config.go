@@ -35,6 +35,7 @@ type Config struct {
 	ServiceAdvertiseGRPCEndpoint string
 }
 
+// Load 从环境变量加载配置并做启动前校验，确保服务失败早暴露。
 func Load() (Config, error) {
 	expire, err := time.ParseDuration(getEnv("JWT_EXPIRE", "12h"))
 	if err != nil {

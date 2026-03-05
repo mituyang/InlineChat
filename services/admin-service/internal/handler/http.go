@@ -14,6 +14,7 @@ import (
 )
 
 type HTTPHandler struct {
+	// HTTP Handler 负责参数解析、鉴权上下文读取与 JSON 响应格式统一。
 	adminService *service.AdminService
 }
 
@@ -48,6 +49,7 @@ type resetAgentPasswordRequest struct {
 }
 
 func (h *HTTPHandler) RegisterRoutes(rg *gin.RouterGroup) {
+	// 管理后台能力：站点管理、坐席管理、审计查询。
 	rg.POST("/sites", h.createSite)
 	rg.GET("/sites", h.listSites)
 	rg.PATCH("/sites/:site_id/status", h.updateSiteStatus)
@@ -318,6 +320,7 @@ func (h *HTTPHandler) listAuditLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": payload})
 }
 
+// requireSuperAdminClaims 用于高危接口（改状态、改密码、强制下线）做角色兜底。
 func requireSuperAdminClaims(c *gin.Context) (*security.Claims, bool) {
 	claimsAny, ok := c.Get("claims")
 	if !ok {
@@ -374,6 +377,7 @@ func auditLogToJSON(item model.AuditLog) gin.H {
 	}
 }
 
+// parsePaging 统一分页参数约束，避免各接口重复实现。
 func parsePaging(c *gin.Context) (int, int, bool) {
 	limit := 50
 	offset := 0
