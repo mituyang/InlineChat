@@ -33,11 +33,15 @@ const fileSuperAdminEmail = readEnvFileValue(envFile, "SUPER_ADMIN_EMAIL");
 const fileSuperAdminPassword = readEnvFileValue(envFile, "SUPER_ADMIN_PASSWORD");
 
 const gatewayPort = (process.env.GATEWAY_HTTP_PORT || fileGatewayPort || "").trim() || "8200";
+const baseURL = (process.env.E2E_BASE_URL || "").trim() || `http://127.0.0.1:${gatewayPort}`;
+const parsedBaseURL = new URL(baseURL);
 
 export const e2eEnv = {
   rootDir,
   envFile,
-  baseURL: (process.env.E2E_BASE_URL || "").trim() || `http://127.0.0.1:${gatewayPort}`,
+  baseURL,
+  baseOrigin: parsedBaseURL.origin,
+  baseHost: parsedBaseURL.host,
   superAdminEmail: (process.env.E2E_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL || fileSuperAdminEmail || "").trim(),
   superAdminPassword:
     (process.env.E2E_SUPER_ADMIN_PASSWORD || process.env.SUPER_ADMIN_PASSWORD || fileSuperAdminPassword || "").trim(),

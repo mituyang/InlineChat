@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-import { createAgentWithRetry, loginAsSuperAdmin } from "../helpers/api";
+import { createAgentWithRetry, createSite, loginAsSuperAdmin } from "../helpers/api";
 import { buildScenarioSeed } from "../helpers/data";
 import { e2eEnv, requireSuperAdminCredentials } from "../helpers/env";
 import { loginFromStaffPage } from "../helpers/ui";
@@ -10,6 +10,7 @@ test("staff-login：按角色跳转到对应控制台", async ({ page, request }
 
   const seed = buildScenarioSeed("staff-login");
   const superToken = await loginAsSuperAdmin(request);
+  await createSite(request, superToken, seed.site);
   const agent = await createAgentWithRetry(request, superToken, seed.agent);
 
   await loginFromStaffPage(page, e2eEnv.superAdminEmail, e2eEnv.superAdminPassword);

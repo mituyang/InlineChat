@@ -5,6 +5,7 @@ import { e2eEnv } from "./env";
 type RequestOptions = {
   token?: string;
   data?: unknown;
+  headers?: Record<string, string>;
 };
 
 export type SitePayload = {
@@ -18,6 +19,7 @@ export type AgentPayload = {
   email: string;
   password: string;
   displayName: string;
+  siteID: string;
 };
 
 function isConflictError(error: unknown): boolean {
@@ -68,6 +70,9 @@ async function requestJSON(
 
   if (options.token) {
     headers.Authorization = `Bearer ${options.token}`;
+  }
+  if (options.headers) {
+    Object.assign(headers, options.headers);
   }
 
   const response = await request.fetch(path, {
@@ -130,6 +135,7 @@ export async function createAgent(request: APIRequestContext, token: string, pay
       password: payload.password,
       display_name: payload.displayName,
       role: "agent",
+      site_id: payload.siteID,
     },
   });
 }
@@ -183,10 +189,48 @@ export async function pickAvailableAgentID(
   throw new Error("没有可用的 4 位坐席 ID（1000-9999 已被占满）");
 }
 
-export async function createConversation(request: APIRequestContext, siteID: string, visitorToken: string): Promise<any> {
+function extractWidgetSession(html: string): string {
+  const match = String(html || "").match(/window\.__INLINECHAT_WIDGET_SESSION__=("([^"\\]|\\.)*")/);
+  if (!match?.[1]) {
+    return "";
+  }
+  try {
+    return String(JSON.parse(match[1]) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+export async function fetchWidgetSession(request: APIRequestContext, site: SitePayload): Promise<string> {
+  const path = `/app/widget/?site_id=${encodeURIComponent(site.siteID)}&parent_origin=${encodeURIComponent(e2eEnv.baseOrigin)}`;
+  const response = await request.fetch(path, {
+    method: "GET",
+    headers: {
+      Referer: `${e2eEnv.baseOrigin}/tests/e2e`,
+      Origin: e2eEnv.baseOrigin,
+    },
+  });
+
+  const html = await response.text();
+  if (!response.ok()) {
+    throw new Error(`[GET ${path}] ${response.status()} ${html.trim() || "获取 widget session 失败"}`);
+  }
+
+  const session = extractWidgetSession(html);
+  if (!session) {
+    throw new Error(`[GET ${path}] 200 未找到 widget session`);
+  }
+  return session;
+}
+
+export async function createConversation(request: APIRequestContext, site: SitePayload, visitorToken: string): Promise<any> {
+  const widgetSession = await fetchWidgetSession(request, site);
   return requestJSON(request, "POST", "/api/chat/v1/conversations", {
+    headers: {
+      "X-InlineChat-Widget-Session": widgetSession,
+    },
     data: {
-      site_id: siteID,
+      site_id: site.siteID,
       visitor_token: visitorToken,
     },
   });

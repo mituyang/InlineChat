@@ -1,3 +1,5 @@
+import { e2eEnv } from "./env";
+
 let seq = 0;
 
 export type SiteSeed = {
@@ -11,6 +13,7 @@ export type AgentSeed = {
   email: string;
   password: string;
   displayName: string;
+  siteID: string;
 };
 
 export type ScenarioSeed = {
@@ -49,7 +52,7 @@ export function buildScenarioSeed(prefix: string): ScenarioSeed {
 
   const siteID = `site_${suffix}`.slice(0, 64);
   const siteName = `E2E Site ${suffix}`;
-  const siteDomain = `${suffix}.e2e.local`.toLowerCase();
+  const siteDomain = e2eEnv.baseHost.toLowerCase();
 
   const agentID = buildAgentID(now + localSeq + rand);
   const agentPassword = `Agent#${String(now % 100000).padStart(5, "0")}Aa!`;
@@ -71,6 +74,7 @@ export function buildScenarioSeed(prefix: string): ScenarioSeed {
       email,
       password: agentPassword,
       displayName,
+      siteID,
     },
     visitorToken,
   };

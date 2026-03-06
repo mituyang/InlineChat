@@ -8,6 +8,7 @@ const ACK_TIMEOUT_MS = 5000;
 const state = {
   siteId: "",
   visitorToken: "",
+  widgetSession: "",
   conversationId: "",
   conversationStatus: "",
   ws: null,
@@ -101,6 +102,15 @@ function withVisitorToken(path) {
   }
   const sep = base.includes("?") ? "&" : "?";
   return `${base}${sep}visitor_token=${encodeURIComponent(token)}${hash}`;
+}
+
+function widgetSessionHeaders() {
+  if (!state.widgetSession) {
+    return {};
+  }
+  return {
+    "X-InlineChat-Widget-Session": state.widgetSession,
+  };
 }
 
 function extractErrorMessage(value, fallback) {
@@ -231,6 +241,7 @@ async function startSession(forceNew) {
   state.siteId = siteId;
   localStorage.setItem(STORAGE_KEYS.siteId, siteId);
   state.visitorToken = loadVisitorToken();
+  state.widgetSession = "";
   els.visitorTokenInput.value = state.visitorToken;
   closeWebSocket();
   stopPolling();
@@ -263,8 +274,10 @@ async function startSession(forceNew) {
     }
 
     if (!conversationId) {
+      state.widgetSession = await fetchWidgetSession(siteId);
       const created = await apiRequest("/api/chat/v1/conversations", {
         method: "POST",
+        headers: widgetSessionHeaders(),
         body: {
           site_id: siteId,
           visitor_token: state.visitorToken,
@@ -300,6 +313,39 @@ async function startSession(forceNew) {
   } catch (error) {
     setStatus(error.message || "进入会话失败", true);
   }
+}
+
+function extractWidgetSession(html) {
+  const match = String(html || "").match(/window\.__INLINECHAT_WIDGET_SESSION__=("([^"\\]|\\.)*")/);
+  if (!match || !match[1]) {
+    return "";
+  }
+  try {
+    return String(JSON.parse(match[1]) || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+async function fetchWidgetSession(siteId) {
+  const parentOrigin = window.location.origin;
+  const resp = await fetch(
+    `/app/widget/?site_id=${encodeURIComponent(siteId)}&parent_origin=${encodeURIComponent(parentOrigin)}`,
+    {
+      headers: {
+        Accept: "text/html,application/xhtml+xml",
+      },
+    }
+  );
+  const html = await resp.text();
+  if (!resp.ok) {
+    throw new Error(html.trim() || `获取 widget session 失败 (${resp.status})`);
+  }
+  const session = extractWidgetSession(html);
+  if (!session) {
+    throw new Error("获取 widget session 失败");
+  }
+  return session;
 }
 
 async function sendMessage() {

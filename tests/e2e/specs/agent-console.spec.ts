@@ -20,7 +20,7 @@ test("agent-console：认领、回复并关闭会话", async ({ page, request })
   await createSite(request, superToken, seed.site);
   const agent = await createAgentWithRetry(request, superToken, seed.agent);
 
-  const conversation = await createConversation(request, seed.site.siteID, seed.visitorToken);
+  const conversation = await createConversation(request, seed.site, seed.visitorToken);
   const conversationID = String(conversation.id);
   await sendVisitorMessage(
     request,
