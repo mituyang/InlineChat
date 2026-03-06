@@ -43,6 +43,7 @@ type Message struct {
 
 type Conversation struct {
 	ID              uint64
+	SiteID          string
 	VisitorToken    string
 	AssignedAgentID uint64
 	Status          string
@@ -111,6 +112,7 @@ func (c *Client) GetConversation(ctx context.Context, conversationID uint64) (*C
 	}
 	return &Conversation{
 		ID:              resp.GetId(),
+		SiteID:          resp.GetSiteId(),
 		VisitorToken:    resp.GetVisitorToken(),
 		AssignedAgentID: resp.GetAssignedAgentId(),
 		Status:          resp.GetStatus(),

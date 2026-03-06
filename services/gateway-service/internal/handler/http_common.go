@@ -221,6 +221,35 @@ func (h *HTTPHandler) fetchConversation(c *gin.Context, conversationID uint64) (
 	return h.clients.Chat.GetConversation(ctx, &chatv1.GetConversationRequest{Id: conversationID})
 }
 
+func (h *HTTPHandler) fetchSiteBySiteID(c *gin.Context, siteID string) (*adminv1.Site, error) {
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+	return h.clients.Admin.GetSiteBySiteID(ctx, &adminv1.GetSiteBySiteIDRequest{SiteId: siteID})
+}
+
+func (h *HTTPHandler) requireActiveConversationSite(c *gin.Context, conversation *chatv1.Conversation) error {
+	siteID := strings.TrimSpace(conversation.GetSiteId())
+	if siteID == "" {
+		abortConflict(c, "site is unavailable")
+		return status.Error(codes.FailedPrecondition, "site is unavailable")
+	}
+
+	site, err := h.fetchSiteBySiteID(c, siteID)
+	if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+			abortConflict(c, "site is unavailable")
+			return status.Error(codes.FailedPrecondition, "site is unavailable")
+		}
+		handleGRPCError(c, err)
+		return err
+	}
+	if strings.TrimSpace(strings.ToLower(site.GetStatus())) != "active" {
+		abortConflict(c, "site is not active")
+		return status.Error(codes.FailedPrecondition, "site is not active")
+	}
+	return nil
+}
+
 func (h *HTTPHandler) requireConversationForVisitor(c *gin.Context, conversationID uint64, visitorToken string) (*chatv1.Conversation, error) {
 	conversation, err := h.fetchConversation(c, conversationID)
 	if err != nil {
@@ -230,6 +259,9 @@ func (h *HTTPHandler) requireConversationForVisitor(c *gin.Context, conversation
 	if conversation.GetVisitorToken() != visitorToken {
 		abortForbidden(c, "forbidden")
 		return nil, status.Error(codes.PermissionDenied, "forbidden")
+	}
+	if err := h.requireActiveConversationSite(c, conversation); err != nil {
+		return nil, err
 	}
 	return conversation, nil
 }
@@ -245,6 +277,9 @@ func (h *HTTPHandler) requireConversationForAgent(c *gin.Context, conversationID
 			abortForbidden(c, "forbidden")
 			return nil, status.Error(codes.PermissionDenied, "forbidden")
 		}
+	}
+	if err := h.requireActiveConversationSite(c, conversation); err != nil {
+		return nil, err
 	}
 	return conversation, nil
 }

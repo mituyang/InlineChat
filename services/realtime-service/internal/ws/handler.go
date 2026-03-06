@@ -18,6 +18,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"inlinechat/services/realtime-service/internal/adminclient"
 	"inlinechat/services/realtime-service/internal/authclient"
 	"inlinechat/services/realtime-service/internal/chatclient"
 	"inlinechat/services/realtime-service/internal/security"
@@ -35,6 +36,7 @@ type Handler struct {
 	hub             *Hub
 	chatClient      messageClient
 	authClient      authMeClient
+	siteClient      siteLookupClient
 	jwtSecrets      [][]byte
 	jwtIssuer       string
 	allowAllOrigins bool
@@ -59,6 +61,7 @@ type sendMessagePayload struct {
 type connectionContext struct {
 	Role         string
 	AgentID      uint64
+	SiteID       string
 	VisitorToken string
 }
 
@@ -72,10 +75,15 @@ type authMeClient interface {
 	Me(ctx context.Context, authorization string) (*authclient.MeResult, error)
 }
 
+type siteLookupClient interface {
+	GetSiteBySiteID(ctx context.Context, siteID string) (*adminclient.Site, error)
+}
+
 func NewHandler(
 	hub *Hub,
 	chatClient messageClient,
 	authClient authMeClient,
+	siteClient siteLookupClient,
 	allowedOrigins []string,
 	chatCallTimeout time.Duration,
 	jwtSecret string,
@@ -102,6 +110,7 @@ func NewHandler(
 		hub:             hub,
 		chatClient:      chatClient,
 		authClient:      authClient,
+		siteClient:      siteClient,
 		jwtSecrets:      buildJWTSecrets(jwtSecret, jwtPreviousSecret),
 		jwtIssuer:       jwtIssuer,
 		allowAllOrigins: allowAllOrigins,
@@ -179,6 +188,7 @@ func (h *Handler) Serve(c *gin.Context) {
 
 func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64) (connectionContext, int, error) {
 	accessToken := strings.TrimSpace(c.Query("access_token"))
+	connCtx := connectionContext{}
 	if accessToken != "" {
 		// 客服链路：JWT 本地验签 + auth-service Me 二次校验。
 		claims, err := security.ParseTokenAny(h.jwtSecrets, h.jwtIssuer, accessToken)
@@ -222,17 +232,21 @@ func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64
 			return connectionContext{}, http.StatusUnauthorized, fmt.Errorf("invalid access_token")
 		}
 
-		return connectionContext{
+		connCtx = connectionContext{
 			Role:    "agent",
 			AgentID: me.AgentID,
-		}, 0, nil
+		}
+	} else {
+		visitorToken := strings.TrimSpace(c.Query("visitor_token"))
+		if visitorToken == "" {
+			return connectionContext{}, http.StatusUnauthorized, fmt.Errorf("visitor_token is required")
+		}
+		// 访客链路：要求 token 与会话绑定 token 一致。
+		connCtx = connectionContext{
+			Role:         "visitor",
+			VisitorToken: visitorToken,
+		}
 	}
-
-	visitorToken := strings.TrimSpace(c.Query("visitor_token"))
-	if visitorToken == "" {
-		return connectionContext{}, http.StatusUnauthorized, fmt.Errorf("visitor_token is required")
-	}
-	// 访客链路：要求 token 与会话绑定 token 一致。
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), h.chatCallTimeout)
 	defer cancel()
@@ -251,13 +265,20 @@ func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64
 		}
 		return connectionContext{}, http.StatusBadGateway, fmt.Errorf("upstream unavailable")
 	}
-	if strings.TrimSpace(conversation.VisitorToken) == "" || conversation.VisitorToken != visitorToken {
+	if connCtx.Role == "visitor" && (strings.TrimSpace(conversation.VisitorToken) == "" || conversation.VisitorToken != connCtx.VisitorToken) {
 		return connectionContext{}, http.StatusForbidden, fmt.Errorf("invalid visitor_token")
 	}
-	return connectionContext{
-		Role:         "visitor",
-		VisitorToken: visitorToken,
-	}, 0, nil
+
+	siteID := strings.TrimSpace(conversation.SiteID)
+	if siteID == "" {
+		return connectionContext{}, http.StatusConflict, fmt.Errorf("site is unavailable")
+	}
+	if code, err := h.validateConversationSite(ctx, siteID); err != nil {
+		return connectionContext{}, code, err
+	}
+
+	connCtx.SiteID = siteID
+	return connCtx, 0, nil
 }
 
 func normalizeOrigin(raw string) string {
@@ -471,6 +492,16 @@ func (h *Handler) onSendMessage(ctx context.Context, conversationID string, raw 
 		h.sendNack(client, payload.ClientMsgID, "invalid conversation_id")
 		return nil
 	}
+	if connCtx.SiteID == "" {
+		h.sendNack(client, payload.ClientMsgID, "site is unavailable")
+		return nil
+	}
+	validateCtx, validateCancel := context.WithTimeout(ctx, h.chatCallTimeout)
+	defer validateCancel()
+	if _, err := h.validateConversationSite(validateCtx, connCtx.SiteID); err != nil {
+		h.sendNack(client, payload.ClientMsgID, err.Error())
+		return nil
+	}
 
 	senderType := strings.ToLower(strings.TrimSpace(payload.SenderType))
 	if senderType == "" {
@@ -534,6 +565,35 @@ func (h *Handler) onSendMessage(ctx context.Context, conversationID string, raw 
 	}
 
 	return nil
+}
+
+func (h *Handler) validateConversationSite(ctx context.Context, siteID string) (int, error) {
+	if h.siteClient == nil {
+		return 0, nil
+	}
+	siteID = strings.TrimSpace(siteID)
+	if siteID == "" {
+		return http.StatusConflict, fmt.Errorf("site is unavailable")
+	}
+
+	site, err := h.siteClient.GetSiteBySiteID(ctx, siteID)
+	if err != nil {
+		if st, ok := status.FromError(err); ok {
+			switch st.Code() {
+			case codes.NotFound:
+				return http.StatusConflict, fmt.Errorf("site is unavailable")
+			case codes.DeadlineExceeded:
+				return http.StatusGatewayTimeout, fmt.Errorf("upstream timeout")
+			default:
+				return http.StatusBadGateway, fmt.Errorf("upstream unavailable")
+			}
+		}
+		return http.StatusBadGateway, fmt.Errorf("upstream unavailable")
+	}
+	if strings.TrimSpace(strings.ToLower(site.Status)) != "active" {
+		return http.StatusConflict, fmt.Errorf("site is not active")
+	}
+	return 0, nil
 }
 
 func (h *Handler) sendNack(client *Client, clientMsgID string, reason string) {

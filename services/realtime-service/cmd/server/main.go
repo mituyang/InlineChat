@@ -17,6 +17,7 @@ import (
 
 	shareddiscovery "inlinechat/packages/discovery"
 	httpmiddleware "inlinechat/packages/httpmiddleware"
+	"inlinechat/services/realtime-service/internal/adminclient"
 	"inlinechat/services/realtime-service/internal/authclient"
 	"inlinechat/services/realtime-service/internal/chatclient"
 	"inlinechat/services/realtime-service/internal/config"
@@ -54,7 +55,7 @@ func main() {
 		appLogger.Fatal("redis unavailable", zap.Error(err))
 	}
 
-	// 3) 初始化 WS Hub 与上游 gRPC 客户端（chat/auth）。
+	// 3) 初始化 WS Hub 与上游 gRPC 客户端（chat/auth/admin）。
 	hub := ws.NewHub()
 	dialTimeout := time.Duration(cfg.ChatGRPCDialTimeout) * time.Second
 	callTimeout := time.Duration(cfg.ChatGRPCCallTimeout) * time.Second
@@ -76,6 +77,9 @@ func main() {
 	if _, err := shareddiscovery.ResolveWithRetry(resolver, cfg.AuthServiceName, "grpc", 30*time.Second); err != nil {
 		appLogger.Fatal("failed to resolve auth grpc target from etcd", zap.Error(err), zap.String("service_name", cfg.AuthServiceName))
 	}
+	if _, err := shareddiscovery.ResolveWithRetry(resolver, cfg.AdminServiceName, "grpc", 30*time.Second); err != nil {
+		appLogger.Fatal("failed to resolve admin grpc target from etcd", zap.Error(err), zap.String("service_name", cfg.AdminServiceName))
+	}
 	chatClient, err := chatclient.NewDynamic(resolver, cfg.ChatServiceName, "grpc", dialTimeout)
 	if err != nil {
 		appLogger.Fatal("failed to connect chat grpc", zap.Error(err), zap.String("service_name", cfg.ChatServiceName))
@@ -94,10 +98,20 @@ func main() {
 			appLogger.Warn("close auth grpc client failed", zap.Error(err))
 		}
 	}()
+	adminClient, err := adminclient.NewDynamic(resolver, cfg.AdminServiceName, "grpc", dialTimeout)
+	if err != nil {
+		appLogger.Fatal("failed to connect admin grpc", zap.Error(err), zap.String("service_name", cfg.AdminServiceName))
+	}
+	defer func() {
+		if err := adminClient.Close(); err != nil {
+			appLogger.Warn("close admin grpc client failed", zap.Error(err))
+		}
+	}()
 	wsHandler := ws.NewHandler(
 		hub,
 		chatClient,
 		authClient,
+		adminClient,
 		cfg.AllowedOrigins,
 		callTimeout,
 		cfg.JWTSecret,
@@ -134,6 +148,7 @@ func main() {
 	appLogger.Info("resolved and registered discovery endpoints",
 		zap.String("chat_grpc_target", chatClient.Target()),
 		zap.String("auth_grpc_target", authClient.Target()),
+		zap.String("admin_grpc_target", adminClient.Target()),
 		zap.String("realtime_http_advertise", cfg.ServiceAdvertiseHTTPEndpoint),
 		zap.String("service_name", cfg.ServiceName),
 	)
@@ -208,6 +223,12 @@ func main() {
 			failures["auth_grpc"] = err.Error()
 		} else if strings.TrimSpace(target) == "" {
 			failures["auth_grpc"] = "empty target"
+		}
+		target, err = resolver.Resolve(checkCtx, cfg.AdminServiceName, "grpc")
+		if err != nil {
+			failures["admin_grpc"] = err.Error()
+		} else if strings.TrimSpace(target) == "" {
+			failures["admin_grpc"] = "empty target"
 		}
 
 		if len(failures) > 0 {

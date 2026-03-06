@@ -25,6 +25,7 @@ type Config struct {
 	DiscoveryPrefix              string
 	ChatServiceName              string
 	AuthServiceName              string
+	AdminServiceName             string
 	ServiceName                  string
 	ServiceInstanceID            string
 	ServiceAdvertiseHTTPEndpoint string
@@ -50,6 +51,7 @@ func Load() (Config, error) {
 		DiscoveryPrefix:              getEnv("DISCOVERY_PREFIX", "/inlinechat/services"),
 		ChatServiceName:              getEnv("CHAT_SERVICE_NAME", "chat-service"),
 		AuthServiceName:              getEnv("AUTH_SERVICE_NAME", "auth-service"),
+		AdminServiceName:             getEnv("ADMIN_SERVICE_NAME", "admin-service"),
 		ServiceName:                  getEnv("SERVICE_NAME", "realtime-service"),
 		ServiceInstanceID:            strings.TrimSpace(os.Getenv("SERVICE_INSTANCE_ID")),
 		ServiceAdvertiseHTTPEndpoint: os.Getenv("SERVICE_ADVERTISE_HTTP_ENDPOINT"),
@@ -81,6 +83,9 @@ func Load() (Config, error) {
 	}
 	if cfg.AuthServiceName == "" {
 		return Config{}, fmt.Errorf("AUTH_SERVICE_NAME is required")
+	}
+	if cfg.AdminServiceName == "" {
+		return Config{}, fmt.Errorf("ADMIN_SERVICE_NAME is required")
 	}
 	if cfg.ServiceName == "" {
 		return Config{}, fmt.Errorf("SERVICE_NAME is required")

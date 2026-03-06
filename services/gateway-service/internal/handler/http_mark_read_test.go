@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	adminv1 "inlinechat/services/gateway-service/internal/gen/adminv1"
 	authv1 "inlinechat/services/gateway-service/internal/gen/authv1"
 	chatv1 "inlinechat/services/gateway-service/internal/gen/chatv1"
 	"inlinechat/services/gateway-service/internal/grpcclient"
@@ -58,7 +59,7 @@ func TestMarkMessagesReadAgentPath(t *testing.T) {
 	h := NewHTTPHandler(&grpcclient.Clients{
 		Chat: &chatReadClientStub{
 			getConversationFn: func(_ context.Context, in *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
-				return &chatv1.Conversation{Id: in.GetId(), AssignedAgentId: 7}, nil
+				return &chatv1.Conversation{Id: in.GetId(), SiteId: "site_demo", AssignedAgentId: 7}, nil
 			},
 			markMessagesReadFn: func(_ context.Context, in *chatv1.MarkMessagesReadRequest, _ ...grpc.CallOption) (*chatv1.MarkMessagesReadResponse, error) {
 				gotReq = in
@@ -70,6 +71,7 @@ func TestMarkMessagesReadAgentPath(t *testing.T) {
 				return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
 			},
 		},
+		Admin: newActiveSiteAdminStub(),
 	}, time.Second)
 
 	r := gin.New()
@@ -103,12 +105,16 @@ func TestMarkMessagesReadVisitorPath(t *testing.T) {
 	var gotReq *chatv1.MarkMessagesReadRequest
 	h := NewHTTPHandler(&grpcclient.Clients{
 		Chat: &chatReadClientStub{
+			getConversationFn: func(_ context.Context, in *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
+				return &chatv1.Conversation{Id: in.GetId(), SiteId: "site_demo", VisitorToken: "vt_abc", Status: "open"}, nil
+			},
 			markMessagesReadFn: func(_ context.Context, in *chatv1.MarkMessagesReadRequest, _ ...grpc.CallOption) (*chatv1.MarkMessagesReadResponse, error) {
 				gotReq = in
 				return &chatv1.MarkMessagesReadResponse{UpdatedCount: 1}, nil
 			},
 		},
-		Auth: &authMeClientStub{},
+		Auth:  &authMeClientStub{},
+		Admin: newActiveSiteAdminStub(),
 	}, time.Second)
 
 	r := gin.New()
@@ -150,7 +156,7 @@ func TestMarkMessagesReadAgentRequiresAssignedConversation(t *testing.T) {
 	h := NewHTTPHandler(&grpcclient.Clients{
 		Chat: &chatReadClientStub{
 			getConversationFn: func(_ context.Context, in *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
-				return &chatv1.Conversation{Id: in.GetId(), AssignedAgentId: 9}, nil
+				return &chatv1.Conversation{Id: in.GetId(), SiteId: "site_demo", AssignedAgentId: 9}, nil
 			},
 			markMessagesReadFn: func(_ context.Context, in *chatv1.MarkMessagesReadRequest, _ ...grpc.CallOption) (*chatv1.MarkMessagesReadResponse, error) {
 				called = true
@@ -162,6 +168,7 @@ func TestMarkMessagesReadAgentRequiresAssignedConversation(t *testing.T) {
 				return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
 			},
 		},
+		Admin: newActiveSiteAdminStub(),
 	}, time.Second)
 
 	r := gin.New()
@@ -225,5 +232,45 @@ func TestMarkMessagesReadAgentAuthFailed(t *testing.T) {
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("expected status %d, got %d body=%s", http.StatusUnauthorized, rr.Code, rr.Body.String())
+	}
+}
+
+func TestMarkMessagesReadVisitorRejectsUnavailableSite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	called := false
+	h := NewHTTPHandler(&grpcclient.Clients{
+		Chat: &chatReadClientStub{
+			getConversationFn: func(_ context.Context, in *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
+				return &chatv1.Conversation{Id: in.GetId(), SiteId: "site_missing", VisitorToken: "vt_abc", Status: "open"}, nil
+			},
+			markMessagesReadFn: func(_ context.Context, _ *chatv1.MarkMessagesReadRequest, _ ...grpc.CallOption) (*chatv1.MarkMessagesReadResponse, error) {
+				called = true
+				return &chatv1.MarkMessagesReadResponse{UpdatedCount: 1}, nil
+			},
+		},
+		Auth: &authMeClientStub{},
+		Admin: &adminClientStub{
+			getSiteBySiteIDFn: func(_ context.Context, _ *adminv1.GetSiteBySiteIDRequest, _ ...grpc.CallOption) (*adminv1.Site, error) {
+				return nil, status.Error(codes.NotFound, "site not found")
+			},
+		},
+	}, time.Second)
+
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	body := []byte(`{"last_read_message_id":10,"visitor_token":"vt_abc"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/v1/conversations/9/read", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusConflict, rr.Code, rr.Body.String())
+	}
+	if called {
+		t.Fatal("MarkMessagesRead should not be called when site is unavailable")
 	}
 }

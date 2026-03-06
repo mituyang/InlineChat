@@ -19,6 +19,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 
+	"inlinechat/services/realtime-service/internal/adminclient"
 	"inlinechat/services/realtime-service/internal/authclient"
 	"inlinechat/services/realtime-service/internal/chatclient"
 )
@@ -48,6 +49,12 @@ type fakeAuthClient struct {
 	authorizations []string
 }
 
+type fakeSiteClient struct {
+	mu             sync.Mutex
+	getSiteByIDFn  func(ctx context.Context, siteID string) (*adminclient.Site, error)
+	requestedSites []string
+}
+
 func (f *fakeAuthClient) Me(_ context.Context, authorization string) (*authclient.MeResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -63,6 +70,20 @@ func (f *fakeAuthClient) Me(_ context.Context, authorization string) (*authclien
 	}
 	cp := *f.meResp
 	return &cp, nil
+}
+
+func (f *fakeSiteClient) GetSiteBySiteID(ctx context.Context, siteID string) (*adminclient.Site, error) {
+	f.mu.Lock()
+	f.requestedSites = append(f.requestedSites, siteID)
+	fn := f.getSiteByIDFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, siteID)
+	}
+	return &adminclient.Site{
+		SiteID: siteID,
+		Status: "active",
+	}, nil
 }
 
 func (f *fakeChatClient) CreateMessage(_ context.Context, conversationID uint64, req chatclient.CreateMessageRequest) (*chatclient.Message, error) {
@@ -89,6 +110,7 @@ func (f *fakeChatClient) GetConversation(_ context.Context, conversationID uint6
 	}
 	return &chatclient.Conversation{
 		ID:           conversationID,
+		SiteID:       "site_demo",
 		VisitorToken: "vt_1",
 		Status:       "open",
 	}, nil
@@ -132,7 +154,7 @@ func TestHandlerMessageSendDefaultVisitor(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{resp: &chatclient.Message{ID: 11, ConversationID: 1, Status: "sent"}}
-	handler := NewHandler(NewHub(), fakeClient, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, nil, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
 
@@ -185,7 +207,7 @@ func TestHandlerMessageSendAgentWithToken(t *testing.T) {
 
 	fakeClient := &fakeChatClient{resp: &chatclient.Message{ID: 22, ConversationID: 2, Status: "sent"}}
 	fakeAuth := &fakeAuthClient{meResp: &authclient.MeResult{AgentID: 7, Role: "agent"}}
-	handler := NewHandler(NewHub(), fakeClient, fakeAuth, []string{testAllowedOrigin}, time.Second, secret, "", issuer, zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, fakeAuth, nil, []string{testAllowedOrigin}, time.Second, secret, "", issuer, zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
 
@@ -228,7 +250,7 @@ func TestHandlerMessageSendAgentWithoutToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{}
-	handler := NewHandler(NewHub(), fakeClient, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, nil, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
 
@@ -275,7 +297,7 @@ func TestHandlerMessageSendCreateMessageFailedReturnsNack(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{err: context.DeadlineExceeded}
-	handler := NewHandler(NewHub(), fakeClient, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, nil, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
 
@@ -315,7 +337,7 @@ func TestHandlerMessageSendTooLongReturnsNack(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	fakeClient := &fakeChatClient{}
-	handler := NewHandler(NewHub(), fakeClient, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, nil, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
 
@@ -358,7 +380,7 @@ func TestHandlerMessageSendTooLongReturnsNack(t *testing.T) {
 func TestHandlerRejectInvalidAccessToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/4?access_token=bad"
@@ -380,7 +402,7 @@ func TestHandlerRejectAccessTokenInvalidatedByAuthService(t *testing.T) {
 	fakeAuth := &fakeAuthClient{
 		meErr: status.Error(codes.Unauthenticated, "invalid token"),
 	}
-	handler := NewHandler(NewHub(), &fakeChatClient{}, fakeAuth, []string{testAllowedOrigin}, time.Second, secret, "", issuer, zap.NewNop())
+	handler := NewHandler(NewHub(), &fakeChatClient{}, fakeAuth, nil, []string{testAllowedOrigin}, time.Second, secret, "", issuer, zap.NewNop())
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/4?access_token=" + url.QueryEscape(token)
@@ -405,7 +427,7 @@ func TestHandlerRejectAccessTokenInvalidatedByAuthService(t *testing.T) {
 func TestHandlerRejectMissingVisitorToken(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6"
@@ -418,10 +440,31 @@ func TestHandlerRejectMissingVisitorToken(t *testing.T) {
 	}
 }
 
+func TestHandlerRejectUnavailableSiteDuringHandshake(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	fakeSite := &fakeSiteClient{
+		getSiteByIDFn: func(_ context.Context, _ string) (*adminclient.Site, error) {
+			return nil, status.Error(codes.NotFound, "site not found")
+		},
+	}
+	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, fakeSite, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	ts := newWSTestServer(t, handler)
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6?visitor_token=vt_1"
+	_, resp, err := ts.Dial(wsURL, wsDialHeader())
+	if err == nil {
+		t.Fatal("expected websocket handshake error")
+	}
+	if resp == nil || resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 handshake response, got %+v err=%v", resp, err)
+	}
+}
+
 func TestHandlerRejectDisallowedOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6?visitor_token=vt_1"
@@ -437,7 +480,7 @@ func TestHandlerRejectDisallowedOrigin(t *testing.T) {
 func TestHandlerAllowAllOriginsWithWildcard(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
-	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, nil, []string{"*"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 	ts := newWSTestServer(t, handler)
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6?visitor_token=vt_1"
@@ -446,6 +489,62 @@ func TestHandlerAllowAllOriginsWithWildcard(t *testing.T) {
 		t.Fatalf("expected websocket handshake success, got resp=%+v err=%v", resp, err)
 	}
 	defer conn.Close()
+}
+
+func TestHandlerMessageSendNackWhenSiteBecomesUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	callCount := 0
+	fakeSite := &fakeSiteClient{
+		getSiteByIDFn: func(_ context.Context, _ string) (*adminclient.Site, error) {
+			callCount++
+			if callCount == 1 {
+				return &adminclient.Site{SiteID: "site_demo", Status: "active"}, nil
+			}
+			return nil, status.Error(codes.NotFound, "site not found")
+		},
+	}
+	fakeClient := &fakeChatClient{}
+	handler := NewHandler(NewHub(), fakeClient, nil, fakeSite, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	ts := newWSTestServer(t, handler)
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/1?visitor_token=vt_1"
+	conn, _, err := ts.Dial(wsURL, wsDialHeader())
+	if err != nil {
+		t.Fatalf("dial websocket failed: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{
+		"type": "message.send",
+		"payload": map[string]any{
+			"content":       "hello",
+			"client_msg_id": "site-down-1",
+			"visitor_token": "vt_1",
+		},
+	}); err != nil {
+		t.Fatalf("write ws message failed: %v", err)
+	}
+
+	_, raw, err := readWSMessage(t, conn)
+	if err != nil {
+		t.Fatalf("read ws message failed: %v", err)
+	}
+
+	var env map[string]any
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatalf("unmarshal nack envelope failed: %v", err)
+	}
+	if env["type"] != "message.nack" {
+		t.Fatalf("expected message.nack, got %v", env)
+	}
+	payload, _ := env["payload"].(map[string]any)
+	if payload == nil || payload["error"] != "site is unavailable" {
+		t.Fatalf("unexpected nack payload: %v", env)
+	}
+	if _, ok := fakeClient.lastCall(); ok {
+		t.Fatal("CreateMessage should not be called when site becomes unavailable")
+	}
 }
 
 func TestHandlerReplayMessagesAfterLastMessageID(t *testing.T) {
@@ -458,7 +557,7 @@ func TestHandlerReplayMessagesAfterLastMessageID(t *testing.T) {
 			{ID: 13, ConversationID: 1, SenderType: "agent", Content: "m13", ClientMsgID: "c13", Status: "sent"},
 		},
 	}
-	handler := NewHandler(NewHub(), fakeClient, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, nil, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
 
@@ -520,7 +619,7 @@ func TestHandlerReplayMessagesTruncatedSendsNextBeforeID(t *testing.T) {
 			{ID: 12, ConversationID: 1, SenderType: "agent", Content: "m12", ClientMsgID: "c12", Status: "sent"},
 		},
 	}
-	handler := NewHandler(NewHub(), fakeClient, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	handler := NewHandler(NewHub(), fakeClient, nil, nil, []string{testAllowedOrigin}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/1?visitor_token=vt_1&last_message_id=1"

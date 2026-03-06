@@ -13,6 +13,7 @@ AUTH_OUT="$ROOT_DIR/services/auth-service/internal/gen/authv1"
 GATEWAY_AUTH_OUT="$ROOT_DIR/services/gateway-service/internal/gen/authv1"
 
 ADMIN_OUT="$ROOT_DIR/services/admin-service/internal/gen/adminv1"
+REALTIME_ADMIN_OUT="$ROOT_DIR/services/realtime-service/internal/gen/adminv1"
 GATEWAY_ADMIN_OUT="$ROOT_DIR/services/gateway-service/internal/gen/adminv1"
 
 if ! command -v protoc >/dev/null 2>&1; then
@@ -31,7 +32,7 @@ if ! command -v protoc-gen-go-grpc >/dev/null 2>&1; then
 fi
 
 mkdir -p "$CHAT_OUT" "$REALTIME_OUT"
-mkdir -p "$GATEWAY_CHAT_OUT" "$AUTH_OUT" "$GATEWAY_AUTH_OUT" "$ADMIN_OUT" "$GATEWAY_ADMIN_OUT"
+mkdir -p "$GATEWAY_CHAT_OUT" "$AUTH_OUT" "$GATEWAY_AUTH_OUT" "$ADMIN_OUT" "$REALTIME_ADMIN_OUT" "$GATEWAY_ADMIN_OUT"
 
 generate_proto() {
 	local proto_file="$1"
@@ -68,6 +69,9 @@ generate_proto "inlinechat/auth.proto" "$GATEWAY_AUTH_OUT" "inlinechat/services/
 
 echo "生成 admin-service gRPC 代码..."
 generate_proto "inlinechat/admin.proto" "$ADMIN_OUT" "inlinechat/services/admin-service/internal/gen/adminv1"
+
+echo "生成 realtime-service admin gRPC 代码..."
+generate_proto "inlinechat/admin.proto" "$REALTIME_ADMIN_OUT" "inlinechat/services/realtime-service/internal/gen/adminv1"
 
 echo "生成 gateway-service admin gRPC 代码..."
 generate_proto "inlinechat/admin.proto" "$GATEWAY_ADMIN_OUT" "inlinechat/services/gateway-service/internal/gen/adminv1"

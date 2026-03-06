@@ -12,7 +12,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
+	adminv1 "inlinechat/services/gateway-service/internal/gen/adminv1"
 	authv1 "inlinechat/services/gateway-service/internal/gen/authv1"
 	chatv1 "inlinechat/services/gateway-service/internal/gen/chatv1"
 	"inlinechat/services/gateway-service/internal/grpcclient"
@@ -74,6 +77,14 @@ func (s *authAccessStub) Me(ctx context.Context, in *authv1.MeRequest, opts ...g
 	return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
 }
 
+func newActiveSiteAdminStub() *adminClientStub {
+	return &adminClientStub{
+		getSiteBySiteIDFn: func(_ context.Context, in *adminv1.GetSiteBySiteIDRequest, _ ...grpc.CallOption) (*adminv1.Site, error) {
+			return &adminv1.Site{SiteId: in.GetSiteId(), Status: "active"}, nil
+		},
+	}
+}
+
 func TestGetConversationRequiresVisitorTokenWithoutAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -109,11 +120,13 @@ func TestGetConversationVisitorTokenMismatch(t *testing.T) {
 			getConversationFn: func(_ context.Context, _ *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
 				return &chatv1.Conversation{
 					Id:           1,
+					SiteId:       "site_demo",
 					VisitorToken: "vt_expected",
 					Status:       "open",
 				}, nil
 			},
 		},
+		Admin: newActiveSiteAdminStub(),
 	}, time.Second)
 	r := gin.New()
 	h.RegisterRoutes(r)
@@ -143,6 +156,7 @@ func TestGetConversationVisitorResponseNoVisitorToken(t *testing.T) {
 				}, nil
 			},
 		},
+		Admin: newActiveSiteAdminStub(),
 	}, time.Second)
 	r := gin.New()
 	h.RegisterRoutes(r)
@@ -227,7 +241,7 @@ func TestCreateMessageAgentRequiresClaimedConversation(t *testing.T) {
 	h := NewHTTPHandler(&grpcclient.Clients{
 		Chat: &chatAccessStub{
 			getConversationFn: func(_ context.Context, _ *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
-				return &chatv1.Conversation{Id: 1, Status: "open", AssignedAgentId: 0}, nil
+				return &chatv1.Conversation{Id: 1, SiteId: "site_demo", Status: "open", AssignedAgentId: 0}, nil
 			},
 			createMessageFn: func(_ context.Context, _ *chatv1.CreateMessageRequest, _ ...grpc.CallOption) (*chatv1.Message, error) {
 				createCalled = true
@@ -239,6 +253,7 @@ func TestCreateMessageAgentRequiresClaimedConversation(t *testing.T) {
 				return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
 			},
 		},
+		Admin: newActiveSiteAdminStub(),
 	}, time.Second)
 	r := gin.New()
 	h.RegisterRoutes(r)
@@ -272,7 +287,8 @@ func TestCreateMessageRejectsTooLongContent(t *testing.T) {
 				return &chatv1.Message{}, nil
 			},
 		},
-		Auth: &authAccessStub{},
+		Auth:  &authAccessStub{},
+		Admin: newActiveSiteAdminStub(),
 	}, time.Second)
 	r := gin.New()
 	h.RegisterRoutes(r)
@@ -337,5 +353,80 @@ func TestClaimConversationTriggersMarkRead(t *testing.T) {
 	}
 	if markReq.GetConversationId() != 1 || markReq.GetLastReadMessageId() != 12 || markReq.GetActorAgentId() != 7 || markReq.GetActorType() != "agent" {
 		t.Fatalf("unexpected MarkMessagesRead request: %+v", markReq)
+	}
+}
+
+func TestGetConversationRejectsUnavailableSite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	h := NewHTTPHandler(&grpcclient.Clients{
+		Chat: &chatAccessStub{
+			getConversationFn: func(_ context.Context, _ *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
+				return &chatv1.Conversation{
+					Id:           1,
+					SiteId:       "site_missing",
+					VisitorToken: "vt_expected",
+					Status:       "open",
+				}, nil
+			},
+		},
+		Admin: &adminClientStub{
+			getSiteBySiteIDFn: func(_ context.Context, _ *adminv1.GetSiteBySiteIDRequest, _ ...grpc.CallOption) (*adminv1.Site, error) {
+				return nil, status.Error(codes.NotFound, "site not found")
+			},
+		},
+	}, time.Second)
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/v1/conversations/1?visitor_token=vt_expected", nil)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusConflict, rr.Code, rr.Body.String())
+	}
+}
+
+func TestCreateMessageAgentRejectsInactiveSite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	createCalled := false
+	h := NewHTTPHandler(&grpcclient.Clients{
+		Chat: &chatAccessStub{
+			getConversationFn: func(_ context.Context, _ *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
+				return &chatv1.Conversation{Id: 1, SiteId: "site_demo", Status: "open", AssignedAgentId: 7}, nil
+			},
+			createMessageFn: func(_ context.Context, _ *chatv1.CreateMessageRequest, _ ...grpc.CallOption) (*chatv1.Message, error) {
+				createCalled = true
+				return &chatv1.Message{}, nil
+			},
+		},
+		Auth: &authAccessStub{
+			meFn: func(_ context.Context, _ *authv1.MeRequest, _ ...grpc.CallOption) (*authv1.MeResponse, error) {
+				return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
+			},
+		},
+		Admin: &adminClientStub{
+			getSiteBySiteIDFn: func(_ context.Context, in *adminv1.GetSiteBySiteIDRequest, _ ...grpc.CallOption) (*adminv1.Site, error) {
+				return &adminv1.Site{SiteId: in.GetSiteId(), Status: "disabled"}, nil
+			},
+		},
+	}, time.Second)
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	body := []byte(`{"sender_type":"agent","content":"hello","client_msg_id":"a1"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/v1/conversations/1/messages", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer token")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusConflict, rr.Code, rr.Body.String())
+	}
+	if createCalled {
+		t.Fatal("CreateMessage should not be called when site is inactive")
 	}
 }

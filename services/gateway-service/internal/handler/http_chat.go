@@ -421,6 +421,8 @@ func (h *HTTPHandler) markMessagesRead(c *gin.Context) {
 		return
 	} else if !h.applyVisitorRateLimit(c, "mark_read", "", conversationID, visitorToken) {
 		return
+	} else if _, convErr := h.requireConversationForVisitor(c, conversationID, visitorToken); convErr != nil {
+		return
 	}
 
 	ctx, cancel := h.newCallContext(c)
