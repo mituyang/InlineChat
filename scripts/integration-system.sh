@@ -48,8 +48,13 @@ echo "[1/5] 运行端到端冒烟"
 smoke_output="$(ENV_FILE="$ENV_FILE" "$ROOT_DIR/scripts/smoke-e2e.sh")"
 echo "$smoke_output"
 smoke_site_id="$(printf "%s\n" "$smoke_output" | sed -n 's/^site_id=//p' | tail -n1)"
+smoke_site_domain="$(printf "%s\n" "$smoke_output" | sed -n 's/^site_domain=//p' | tail -n1)"
 if [ -z "$smoke_site_id" ]; then
   echo "  冒烟输出中未解析到 site_id"
+  exit 1
+fi
+if [ -z "$smoke_site_domain" ]; then
+  echo "  冒烟输出中未解析到 site_domain"
   exit 1
 fi
 
@@ -77,6 +82,7 @@ echo "[4/5] 校验 Redis + WebSocket + gRPC 消息链路"
   cd "$ROOT_DIR/services/gateway-service"
   GATEWAY_URL="$GATEWAY_URL" \
   WS_CHECK_SITE_ID="$smoke_site_id" \
+  WS_CHECK_SITE_DOMAIN="$smoke_site_domain" \
   GOCACHE="$GO_BUILD_CACHE" \
   GOMODCACHE="$GO_MOD_CACHE" \
   go run ./cmd/ws-push-check

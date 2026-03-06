@@ -227,6 +227,7 @@ echo "  会话已关闭"
 echo
 echo "冒烟通过。"
 echo "site_id=${site_id}"
+echo "site_domain=${SITE_DOMAIN}"
 echo "agent_id=${agent_id}"
 echo "conversation_id=${conversation_id}"
 echo "message_id=${message_id}"
