@@ -8,6 +8,7 @@
 ## CI（全量门禁）
 - 工作流：`.github/workflows/ci.yml`
 - 触发方式：
+  - `pull_request -> main`
   - `push main`
   - `workflow_dispatch`
 - 核心步骤：
@@ -15,7 +16,7 @@
   - 安装 Go
   - 安装 Node
   - `cp .env.example .env`
-  - 安装 `tests/e2e` 依赖
+  - 使用 `npm ci` 安装 `tests/e2e` 依赖（命中 lockfile + cache）
   - 安装 Playwright Chromium
   - 执行 `make verify-all`
 - `make verify-all` 覆盖：
@@ -35,13 +36,16 @@
 ## CD（受 CI 成功门禁）
 - 工作流：`.github/workflows/cd.yml`
 - 自动触发：
-  - 监听 `CI` 的 `workflow_run`，仅当 `conclusion == success` 执行镜像构建
+  - 监听 `CI` 的 `workflow_run`
+  - 仅当 `conclusion == success`
+  - 且该次 `CI` 来自 `main`
+  - 才执行自动镜像构建
 - 自动构建行为：
   - `build-and-push-images` 构建并推送 5 个服务镜像到 GHCR
   - `workflow_run` 场景下：
     - checkout 使用 `github.event.workflow_run.head_sha`
     - 默认标签使用该 `head_sha` 生成 `sha-<12位commit>`
-    - 额外推送 `main` 标签
+    - 仅 `main` 分支额外推送 `main` 标签
 - 手动触发（`workflow_dispatch`）保留：
   - `release_action`: `deploy | rollback`
   - `environment`: `staging | production`

@@ -4,6 +4,8 @@ on:
   workflow_run:
     workflows:
       - CI
+    branches:
+      - main
     types:
       - completed
   workflow_dispatch:
@@ -97,6 +99,7 @@ jobs:
         shell: bash
         env:
           SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          SOURCE_BRANCH: ${{ steps.source.outputs.source_branch }}
         run: |
           set -euo pipefail
           repo_lower="$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
@@ -108,7 +111,7 @@ jobs:
             image_tag="sha-${SOURCE_SHA::12}"
           fi
           alias_tag=""
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" && "${SOURCE_BRANCH}" == "main" ]]; then
             alias_tag="main"
           fi
 
