@@ -242,7 +242,12 @@ func main() {
 	registerStaticRoute(r, appLogger, "/app/customer", []string{"./public/customer", "./apps/customer-console", "../../apps/customer-console"})
 	registerStaticRoute(r, appLogger, "/app/agent", []string{"./public/agent", "./apps/agent-console", "../../apps/agent-console"})
 	registerStaticRoute(r, appLogger, "/app/staff-login", []string{"./public/staff-login", "./apps/staff-login", "../../apps/staff-login"})
-	registerStaticRoute(r, appLogger, "/app/widget", []string{"./public/widget", "./apps/widget-chat", "../../apps/widget-chat"})
+	widgetDir, err := resolveStaticDir("./public/widget", "./apps/widget-chat", "../../apps/widget-chat")
+	if err != nil {
+		appLogger.Warn("widget route disabled due to missing directory", zap.Error(err))
+	} else {
+		mountWidgetRoute(r, appLogger, httpHandler, widgetDir)
+	}
 	registerStaticRoute(r, appLogger, "/app/admin", []string{"./public/admin", "./apps/admin-console", "../../apps/admin-console"})
 	registerStaticRoute(r, appLogger, "/app/demo", []string{"./public/demo", "./apps/demo-site", "../../apps/demo-site"})
 	registerStaticRoute(r, appLogger, "/app/api-docs", []string{"./public/api-docs", "./apps/api-docs", "../../apps/api-docs"})
@@ -307,6 +312,33 @@ func registerStaticRoute(r *gin.Engine, appLogger *zap.Logger, route string, can
 
 	appLogger.Info("static route mounted", zap.String("route", route), zap.String("dir", absDir))
 	r.StaticFS(route, gin.Dir(dir, false))
+}
+
+func mountWidgetRoute(r *gin.Engine, appLogger *zap.Logger, httpHandler *handler.HTTPHandler, widgetDir string) {
+	absDir := widgetDir
+	if v, err := filepath.Abs(widgetDir); err == nil {
+		absDir = v
+	}
+
+	indexHTML, readErr := os.ReadFile(filepath.Join(widgetDir, "index.html"))
+	if readErr != nil {
+		appLogger.Warn("widget entry disabled due to missing index.html", zap.String("dir", absDir), zap.Error(readErr))
+	} else {
+		httpHandler.SetWidgetIndexHTML(indexHTML)
+	}
+
+	fileServer := http.StripPrefix("/app/widget", http.FileServer(gin.Dir(widgetDir, false)))
+	serveWidget := func(c *gin.Context) {
+		if path := strings.TrimSpace(c.Param("filepath")); path == "" || path == "/" {
+			httpHandler.ServeWidgetApp(c)
+			return
+		}
+		fileServer.ServeHTTP(c.Writer, c.Request)
+	}
+
+	r.GET("/app/widget/*filepath", serveWidget)
+	r.HEAD("/app/widget/*filepath", serveWidget)
+	appLogger.Info("widget route mounted", zap.String("route", "/app/widget/*filepath"), zap.String("dir", absDir))
 }
 
 func resolveStaticDir(candidates ...string) (string, error) {

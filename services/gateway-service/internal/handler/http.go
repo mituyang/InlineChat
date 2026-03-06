@@ -13,12 +13,14 @@ const maxMessageContentChars = 2000
 
 // HTTPHandler 负责承接网关入口请求，并分发到 chat/auth/admin 三类上游。
 type HTTPHandler struct {
-	clients        *grpcclient.Clients
-	callTimeout    time.Duration
-	loginLimiter   *ratelimit.Limiter
-	visitorLimiter *ratelimit.Limiter
-	agentLimiter   *ratelimit.Limiter
-	adminLimiter   *ratelimit.Limiter
+	clients         *grpcclient.Clients
+	callTimeout     time.Duration
+	loginLimiter    *ratelimit.Limiter
+	visitorLimiter  *ratelimit.Limiter
+	agentLimiter    *ratelimit.Limiter
+	adminLimiter    *ratelimit.Limiter
+	widgetIndexHTML []byte
+	now             func() time.Time
 }
 
 func NewHTTPHandler(clients *grpcclient.Clients, callTimeout time.Duration) *HTTPHandler {
@@ -28,6 +30,7 @@ func NewHTTPHandler(clients *grpcclient.Clients, callTimeout time.Duration) *HTT
 	return &HTTPHandler{
 		clients:     clients,
 		callTimeout: callTimeout,
+		now:         time.Now,
 	}
 }
 
@@ -39,6 +42,14 @@ func (h *HTTPHandler) SetRateLimiters(loginLimiter *ratelimit.Limiter, visitorLi
 func (h *HTTPHandler) SetStaffRateLimiters(agentLimiter *ratelimit.Limiter, adminLimiter *ratelimit.Limiter) {
 	h.agentLimiter = agentLimiter
 	h.adminLimiter = adminLimiter
+}
+
+func (h *HTTPHandler) SetWidgetIndexHTML(indexHTML []byte) {
+	if len(indexHTML) == 0 {
+		h.widgetIndexHTML = nil
+		return
+	}
+	h.widgetIndexHTML = append([]byte(nil), indexHTML...)
 }
 
 func (h *HTTPHandler) RegisterRoutes(r *gin.Engine) {

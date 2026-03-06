@@ -95,6 +95,22 @@ http_json() {
   curl "${args[@]}"
 }
 
+extract_widget_session() {
+  local html="$1"
+  printf "%s" "$html" | sed -n 's/.*__INLINECHAT_WIDGET_SESSION__="\([^"]*\)".*/\1/p' | head -n1
+}
+
+fetch_widget_session() {
+  local site_id="$1"
+  local site_domain="$2"
+  local parent_origin="https://${site_domain}"
+  local widget_html
+  widget_html="$(curl -fsS \
+    -H "Referer: ${parent_origin}/smoke" \
+    "${GATEWAY_URL}/app/widget/?site_id=${site_id}&parent_origin=https%3A%2F%2F${site_domain}")"
+  extract_widget_session "$widget_html"
+}
+
 wait_gateway_ready() {
   local max_retry="${1:-40}"
   local interval_sec="${2:-2}"
@@ -140,7 +156,7 @@ fi
 echo "  site_id=${site_id}"
 
 echo "[4/9] 创建坐席账号"
-agent_payload="$(printf '{"agent_id":"%s","email":"%s","password":"%s","display_name":"%s","role":"agent"}' "$AGENT_ID" "$AGENT_EMAIL" "$AGENT_PASSWORD" "$AGENT_DISPLAY_NAME")"
+agent_payload="$(printf '{"agent_id":"%s","email":"%s","password":"%s","display_name":"%s","role":"agent","site_id":"%s"}' "$AGENT_ID" "$AGENT_EMAIL" "$AGENT_PASSWORD" "$AGENT_DISPLAY_NAME" "$site_id")"
 agent_resp="$(http_json POST "${GATEWAY_URL}/api/admin/v1/admin/agents" "$agent_payload" "$super_admin_token")"
 agent_id="$(extract_json_number "$agent_resp" "id")"
 if [ -z "$agent_id" ] || [ "$agent_id" = "0" ]; then
@@ -160,8 +176,17 @@ fi
 echo "  登录成功"
 
 echo "[6/9] 匿名访客创建会话"
+widget_session="$(fetch_widget_session "$site_id" "$SITE_DOMAIN")"
+if [ -z "$widget_session" ]; then
+  echo "  获取 widget session 失败"
+  exit 1
+fi
 conversation_payload="$(printf '{"site_id":"%s","visitor_token":"%s"}' "$site_id" "$VISITOR_TOKEN")"
-conversation_resp="$(http_json POST "${GATEWAY_URL}/api/chat/v1/conversations" "$conversation_payload")"
+conversation_resp="$(curl -fsS \
+  -X POST "${GATEWAY_URL}/api/chat/v1/conversations" \
+  -H "Content-Type: application/json" \
+  -H "X-InlineChat-Widget-Session: ${widget_session}" \
+  -d "$conversation_payload")"
 conversation_id="$(extract_json_number "$conversation_resp" "id")"
 if [ -z "$conversation_id" ] || [ "$conversation_id" = "0" ]; then
   echo "  创建会话失败: ${conversation_resp}"

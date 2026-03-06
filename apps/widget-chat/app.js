@@ -11,6 +11,8 @@ const state = {
   siteID: (params.get("site_id") || "").trim(),
   title: (params.get("title") || "在线客服").trim(),
   parentOrigin: (params.get("parent_origin") || "*").trim(),
+  widgetSession: String(window.__INLINECHAT_WIDGET_SESSION__ || "").trim(),
+  widgetScope: String(window.__INLINECHAT_WIDGET_SCOPE__ || "").trim(),
   visitorToken: "",
   visitorTokenIssuedAt: 0,
   visitorTokenLastTouchedAt: 0,
@@ -68,6 +70,9 @@ async function bootstrap() {
 
   if (!state.siteID) {
     throw new Error("缺少 site_id 参数，无法加载会话");
+  }
+  if (!state.widgetSession || !state.widgetScope) {
+    throw new Error("站点接入校验失败，请刷新页面后重试");
   }
 
   state.visitorToken = loadVisitorToken();
@@ -161,7 +166,7 @@ function bindEvents() {
 }
 
 function visitorTokenKey() {
-  return `inlinechat.widget.visitor_token.${state.siteID}`;
+  return `inlinechat.widget.visitor_token.${storageScopeKey()}`;
 }
 
 function withVisitorToken(path) {
@@ -202,11 +207,24 @@ function extractErrorMessage(value, fallback) {
 }
 
 function conversationKey() {
-  return `inlinechat.widget.conversation.${state.siteID}.${state.visitorToken}`;
+  return `inlinechat.widget.conversation.${storageScopeKey()}.${state.visitorToken}`;
 }
 
 function historyKey() {
-  return `inlinechat.widget.conversation_history.${state.siteID}.${state.visitorToken}`;
+  return `inlinechat.widget.conversation_history.${storageScopeKey()}.${state.visitorToken}`;
+}
+
+function storageScopeKey() {
+  return state.widgetScope || state.siteID;
+}
+
+function widgetSessionHeaders() {
+  if (!state.widgetSession) {
+    return {};
+  }
+  return {
+    "X-InlineChat-Widget-Session": state.widgetSession,
+  };
 }
 
 function loadConversationHistory() {
@@ -750,6 +768,7 @@ async function prepareConversation(forceNew, createWhenMissing = true) {
   if (!conversationID && createWhenMissing) {
     const created = await apiRequest("/api/chat/v1/conversations", {
       method: "POST",
+      headers: widgetSessionHeaders(),
       body: {
         site_id: state.siteID,
         visitor_token: state.visitorToken,

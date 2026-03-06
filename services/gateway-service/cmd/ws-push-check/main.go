@@ -16,6 +16,8 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+const widgetSessionHeader = "X-InlineChat-Widget-Session"
+
 type createConversationResponse struct {
 	ID uint64 `json:"id"`
 }
@@ -55,14 +57,24 @@ type messageNewPayload struct {
 func main() {
 	gatewayURL := strings.TrimRight(getenv("GATEWAY_URL", "http://127.0.0.1:8200"), "/")
 	siteID := strings.TrimSpace(getenv("WS_CHECK_SITE_ID", "site_demo"))
+	siteDomain := strings.TrimSpace(getenv("WS_CHECK_SITE_DOMAIN", ""))
 	visitorToken := fmt.Sprintf("ws_check_%d", time.Now().UnixNano())
 	clientMsgIDFromWS := fmt.Sprintf("ws_msg_%d", time.Now().UnixNano())
 	clientMsgIDFromHTTP := fmt.Sprintf("http_msg_%d", time.Now().UnixNano())
+	if siteDomain == "" {
+		fatalf("缺少 WS_CHECK_SITE_DOMAIN，无法获取 widget session")
+	}
+	widgetSession, err := fetchWidgetSession(gatewayURL, siteID, siteDomain)
+	if err != nil {
+		fatalf("获取 widget session 失败: %v", err)
+	}
 
 	conversationResp := createConversationResponse{}
-	if err := requestJSON(http.MethodPost, gatewayURL+"/api/chat/v1/conversations", map[string]any{
+	if err := requestJSONWithHeaders(http.MethodPost, gatewayURL+"/api/chat/v1/conversations", map[string]any{
 		"site_id":       siteID,
 		"visitor_token": visitorToken,
+	}, map[string]string{
+		widgetSessionHeader: widgetSession,
 	}, &conversationResp); err != nil {
 		fatalf("创建会话失败: %v", err)
 	}
@@ -229,6 +241,10 @@ func hasClientMsgID(items []messageItem, clientMsgID string) bool {
 }
 
 func requestJSON(method string, url string, body any, out any) error {
+	return requestJSONWithHeaders(method, url, body, nil, out)
+}
+
+func requestJSONWithHeaders(method string, url string, body any, headers map[string]string, out any) error {
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -243,6 +259,14 @@ func requestJSON(method string, url string, body any, out any) error {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	for key, value := range headers {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		req.Header.Set(key, value)
+	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -269,6 +293,46 @@ func requestJSON(method string, url string, body any, out any) error {
 		return err
 	}
 	return nil
+}
+
+func fetchWidgetSession(gatewayURL string, siteID string, siteDomain string) (string, error) {
+	parentOrigin := "https://" + siteDomain
+	widgetURL := fmt.Sprintf("%s/app/widget/?site_id=%s&parent_origin=%s", gatewayURL, url.QueryEscape(siteID), url.QueryEscape(parentOrigin))
+	req, err := http.NewRequest(http.MethodGet, widgetURL, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Referer", parentOrigin+"/ws-push-check")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+
+	body := string(raw)
+	start := strings.Index(body, `__INLINECHAT_WIDGET_SESSION__="`)
+	if start < 0 {
+		return "", fmt.Errorf("widget session not found")
+	}
+	start += len(`__INLINECHAT_WIDGET_SESSION__="`)
+	end := strings.Index(body[start:], `"`)
+	if end < 0 {
+		return "", fmt.Errorf("widget session not found")
+	}
+	token := strings.TrimSpace(body[start : start+end])
+	if token == "" {
+		return "", fmt.Errorf("widget session not found")
+	}
+	return token, nil
 }
 
 func toWSURL(httpURL string) string {

@@ -135,6 +135,46 @@ http_call() {
   rm -f "$tmp"
 }
 
+extract_widget_session() {
+  local html="$1"
+  printf "%s" "$html" | sed -n 's/.*__INLINECHAT_WIDGET_SESSION__="\([^"]*\)".*/\1/p' | head -n1
+}
+
+fetch_widget_session() {
+  local site_id="$1"
+  local site_domain="$2"
+  local parent_origin="https://${site_domain}"
+  local html
+  html="$(curl -fsS \
+    -H "Referer: ${parent_origin}/full-regression" \
+    "${GATEWAY_URL}/app/widget/?site_id=${site_id}&parent_origin=https%3A%2F%2F${site_domain}")"
+  extract_widget_session "$html"
+}
+
+http_call_widget_conversation() {
+  local site_id="$1"
+  local visitor_token="$2"
+  local widget_session="$3"
+  local payload
+  local tmp
+  payload="$(printf '{"site_id":"%s","visitor_token":"%s"}' "$site_id" "$visitor_token")"
+  tmp="$(mktemp)"
+
+  if ! HTTP_STATUS="$(curl \
+    -sS \
+    -o "$tmp" \
+    -w "%{http_code}" \
+    -X POST "${GATEWAY_URL}/api/chat/v1/conversations" \
+    -H "Content-Type: application/json" \
+    -H "X-InlineChat-Widget-Session: ${widget_session}" \
+    -d "$payload")"; then
+    rm -f "$tmp"
+    fail "请求失败: POST ${GATEWAY_URL}/api/chat/v1/conversations"
+  fi
+  HTTP_BODY="$(cat "$tmp")"
+  rm -f "$tmp"
+}
+
 wait_gateway_ready() {
   local max_retry="${1:-40}"
   local interval_sec="${2:-2}"
@@ -203,10 +243,14 @@ assert_status "409" "禁用站点创建会话"
 
 http_call PATCH "${GATEWAY_URL}/api/admin/v1/admin/sites/${SITE_ID}/status" '{"status":"active"}' "$SUPER_TOKEN"
 assert_status "200" "启用站点"
+WIDGET_SESSION="$(fetch_widget_session "$SITE_ID" "$SITE_DOMAIN")"
+if [ -z "$WIDGET_SESSION" ]; then
+  fail "获取 widget session 失败"
+fi
 echo "  站点流程验证通过: ${SITE_ID}"
 
 step "创建双坐席 + 唯一性约束 + 列表查询"
-create_agent_a_payload="$(printf '{"agent_id":"%s","email":"%s","password":"%s","display_name":"%s","role":"agent"}' "$AGENT_A_ID" "$AGENT_A_EMAIL" "$AGENT_A_PASSWORD_OLD" "$AGENT_A_DISPLAY_NAME")"
+create_agent_a_payload="$(printf '{"agent_id":"%s","email":"%s","password":"%s","display_name":"%s","role":"agent","site_id":"%s"}' "$AGENT_A_ID" "$AGENT_A_EMAIL" "$AGENT_A_PASSWORD_OLD" "$AGENT_A_DISPLAY_NAME" "$SITE_ID")"
 http_call POST "${GATEWAY_URL}/api/admin/v1/admin/agents" "$create_agent_a_payload" "$SUPER_TOKEN"
 assert_status "201" "创建坐席A"
 AGENT_A_NUMERIC_ID="$(json_number '.id')"
@@ -214,7 +258,7 @@ if [ "$AGENT_A_NUMERIC_ID" = "0" ]; then
   fail "创建坐席A未返回有效 id"
 fi
 
-create_agent_b_payload="$(printf '{"agent_id":"%s","email":"%s","password":"%s","display_name":"%s","role":"agent"}' "$AGENT_B_ID" "$AGENT_B_EMAIL" "$AGENT_B_PASSWORD" "$AGENT_B_DISPLAY_NAME")"
+create_agent_b_payload="$(printf '{"agent_id":"%s","email":"%s","password":"%s","display_name":"%s","role":"agent","site_id":"%s"}' "$AGENT_B_ID" "$AGENT_B_EMAIL" "$AGENT_B_PASSWORD" "$AGENT_B_DISPLAY_NAME" "$SITE_ID")"
 http_call POST "${GATEWAY_URL}/api/admin/v1/admin/agents" "$create_agent_b_payload" "$SUPER_TOKEN"
 assert_status "201" "创建坐席B"
 AGENT_B_NUMERIC_ID="$(json_number '.id')"
@@ -222,11 +266,11 @@ if [ "$AGENT_B_NUMERIC_ID" = "0" ]; then
   fail "创建坐席B未返回有效 id"
 fi
 
-dup_email_payload="$(printf '{"agent_id":"%s","email":"%s","password":"%s","display_name":"%s","role":"agent"}' "9001" "$AGENT_A_EMAIL" "$AGENT_B_PASSWORD" "Dup Email ${RUN_ID}")"
+dup_email_payload="$(printf '{"agent_id":"%s","email":"%s","password":"%s","display_name":"%s","role":"agent","site_id":"%s"}' "9001" "$AGENT_A_EMAIL" "$AGENT_B_PASSWORD" "Dup Email ${RUN_ID}" "$SITE_ID")"
 http_call POST "${GATEWAY_URL}/api/admin/v1/admin/agents" "$dup_email_payload" "$SUPER_TOKEN"
 assert_status "409" "重复邮箱约束"
 
-dup_name_payload="$(printf '{"agent_id":"%s","email":"%s","password":"%s","display_name":"%s","role":"agent"}' "9002" "dup_name_${RUN_ID}@example.com" "$AGENT_B_PASSWORD" "$AGENT_A_DISPLAY_NAME")"
+dup_name_payload="$(printf '{"agent_id":"%s","email":"%s","password":"%s","display_name":"%s","role":"agent","site_id":"%s"}' "9002" "dup_name_${RUN_ID}@example.com" "$AGENT_B_PASSWORD" "$AGENT_A_DISPLAY_NAME" "$SITE_ID")"
 http_call POST "${GATEWAY_URL}/api/admin/v1/admin/agents" "$dup_name_payload" "$SUPER_TOKEN"
 assert_status "409" "重复显示名约束"
 
@@ -283,7 +327,7 @@ AGENT_B_TOKEN="$(json_string '.token')"
 echo "  坐席认证能力验证通过"
 
 step "会话主链路：访客/认领/已读/转接确认/关闭"
-http_call POST "${GATEWAY_URL}/api/chat/v1/conversations" "$(printf '{"site_id":"%s","visitor_token":"%s"}' "$SITE_ID" "$VISITOR_TOKEN_A")"
+http_call_widget_conversation "$SITE_ID" "$VISITOR_TOKEN_A" "$WIDGET_SESSION"
 assert_status "201" "创建会话A"
 CONV_A_ID="$(json_number '.id')"
 if [ "$CONV_A_ID" = "0" ]; then
@@ -353,7 +397,7 @@ assert_status "409" "会话A关闭后访客发消息应失败"
 echo "  会话主链路验证通过: conv=${CONV_A_ID} msg1=${MSG_A1_ID}"
 
 step "转接拒绝链路：发起/拒绝后原客服继续接待"
-http_call POST "${GATEWAY_URL}/api/chat/v1/conversations" "$(printf '{"site_id":"%s","visitor_token":"%s"}' "$SITE_ID" "$VISITOR_TOKEN_B")"
+http_call_widget_conversation "$SITE_ID" "$VISITOR_TOKEN_B" "$WIDGET_SESSION"
 assert_status "201" "创建会话B"
 CONV_B_ID="$(json_number '.id')"
 
@@ -380,7 +424,7 @@ assert_status "201" "会话B拒绝转接后原客服仍可发送"
 echo "  转接拒绝链路验证通过: conv=${CONV_B_ID}"
 
 step "自动关闭链路：客服发消息后访客超时未回复"
-http_call POST "${GATEWAY_URL}/api/chat/v1/conversations" "$(printf '{"site_id":"%s","visitor_token":"%s"}' "$SITE_ID" "$VISITOR_TOKEN_C")"
+http_call_widget_conversation "$SITE_ID" "$VISITOR_TOKEN_C" "$WIDGET_SESSION"
 assert_status "201" "创建会话C"
 CONV_C_ID="$(json_number '.id')"
 

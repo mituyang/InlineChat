@@ -60,6 +60,7 @@
   iframe.style.height = "100%";
   iframe.style.border = "0";
   iframe.allow = "clipboard-write";
+  iframe.referrerPolicy = "origin";
   panel.appendChild(iframe);
 
   var button = document.createElement("button");

@@ -69,6 +69,9 @@ func (h *HTTPHandler) createConversation(c *gin.Context) {
 		abortConflict(c, "site is not active")
 		return
 	}
+	if err := h.requireWidgetSession(c, siteResp); err != nil {
+		return
+	}
 
 	resp, err := h.clients.Chat.CreateConversation(ctx, &chatv1.CreateConversationRequest{
 		SiteId:       req.SiteID,
