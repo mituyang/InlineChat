@@ -19,11 +19,12 @@ COVERAGE_THRESHOLD_ALL ?= 12
 MIN_COVERED_PACKAGES ?= 10
 MIN_TOTAL_PACKAGES ?= 20
 
-.PHONY: help ensure-env config schema-check up up-fg down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover env-lint quality e2e-ui verify-all proto build-local image-build smoke integration full-regression mvp-release
+.PHONY: help ensure-env config schema-check prepare-db up up-fg down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover env-lint quality e2e-ui verify-all proto build-local image-build smoke integration full-regression mvp-release
 
 help:
 	@echo "可用命令:"
 	@echo "  make up             使用 .env 后台启动全部服务"
+	@echo "  make prepare-db     先执行迁移，再校验数据库结构"
 	@echo "  make build-local    本地编译全部服务二进制（Linux）"
 	@echo "  make image-build    基于本地二进制构建 Docker 镜像"
 	@echo "  make down           停止并删除容器"
@@ -91,10 +92,12 @@ schema-check: ensure-env
 	done
 	ENV_FILE=$(ENV_FILE) COMPOSE_FILE=$(COMPOSE_FILE) ./scripts/schema-drift-check.sh
 
-up: schema-check build-local image-build
+prepare-db: ensure-env migrate schema-check
+
+up: prepare-db build-local image-build
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d
 
-up-fg: schema-check build-local image-build
+up-fg: prepare-db build-local image-build
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up
 
 down: ensure-env

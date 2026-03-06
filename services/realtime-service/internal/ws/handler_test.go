@@ -66,6 +66,7 @@ func (f *fakeAuthClient) Me(_ context.Context, authorization string) (*authclien
 		return &authclient.MeResult{
 			AgentID: 7,
 			Role:    "agent",
+			SiteID:  "site_demo",
 		}, nil
 	}
 	cp := *f.meResp
@@ -206,7 +207,7 @@ func TestHandlerMessageSendAgentWithToken(t *testing.T) {
 	token := mustIssueAgentToken(t, secret, issuer, 7, "agent")
 
 	fakeClient := &fakeChatClient{resp: &chatclient.Message{ID: 22, ConversationID: 2, Status: "sent"}}
-	fakeAuth := &fakeAuthClient{meResp: &authclient.MeResult{AgentID: 7, Role: "agent"}}
+	fakeAuth := &fakeAuthClient{meResp: &authclient.MeResult{AgentID: 7, Role: "agent", SiteID: "site_demo"}}
 	handler := NewHandler(NewHub(), fakeClient, fakeAuth, nil, []string{testAllowedOrigin}, time.Second, secret, "", issuer, zap.NewNop())
 
 	ts := newWSTestServer(t, handler)
@@ -421,6 +422,32 @@ func TestHandlerRejectAccessTokenInvalidatedByAuthService(t *testing.T) {
 	}
 	if fakeAuth.authorizations[0] != "Bearer "+token {
 		t.Fatalf("unexpected authorization header: %s", fakeAuth.authorizations[0])
+	}
+}
+
+func TestHandlerRejectAgentAccessToDifferentSite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	secret := "secret"
+	issuer := "inlinechat-auth"
+	token := mustIssueAgentToken(t, secret, issuer, 7, "agent")
+	fakeAuth := &fakeAuthClient{
+		meResp: &authclient.MeResult{
+			AgentID: 7,
+			Role:    "agent",
+			SiteID:  "site_other",
+		},
+	}
+	handler := NewHandler(NewHub(), &fakeChatClient{}, fakeAuth, &fakeSiteClient{}, []string{testAllowedOrigin}, time.Second, secret, "", issuer, zap.NewNop())
+	ts := newWSTestServer(t, handler)
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/4?access_token=" + url.QueryEscape(token)
+	_, resp, err := ts.Dial(wsURL, wsDialHeader())
+	if err == nil {
+		t.Fatal("expected websocket handshake error")
+	}
+	if resp == nil || resp.StatusCode != 403 {
+		t.Fatalf("expected 403 handshake response, got %+v err=%v", resp, err)
 	}
 }
 

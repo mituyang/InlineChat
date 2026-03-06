@@ -47,7 +47,7 @@ func (r *GormAgentRepository) List(ctx context.Context, limit int, offset int) (
 	defer cancel()
 	var out []model.Agent
 	err := db.
-		Select("id", "email", "display_name", "role", "status", "created_at", "updated_at").
+		Select("id", "email", "display_name", "site_id", "role", "status", "created_at", "updated_at").
 		Order("id DESC").
 		Limit(limit).
 		Offset(offset).

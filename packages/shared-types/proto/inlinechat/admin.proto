@@ -12,6 +12,7 @@ service AdminGatewayService {
   rpc UpdateSiteStatus(UpdateSiteStatusRequest) returns (Site);
   rpc RotateSiteWidgetKey(RotateSiteWidgetKeyRequest) returns (Site);
   rpc CreateAgent(CreateAgentRequest) returns (Agent);
+  rpc GetAgentByID(GetAgentByIDRequest) returns (Agent);
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
   rpc UpdateAgentStatus(UpdateAgentStatusRequest) returns (Agent);
   rpc ResetAgentPassword(ResetAgentPasswordRequest) returns (Agent);
@@ -58,6 +59,11 @@ message CreateAgentRequest {
   string display_name = 4;
   string role = 5;
   string agent_id = 6;
+  string site_id = 7;
+}
+
+message GetAgentByIDRequest {
+  uint64 agent_id = 1;
 }
 
 message ListAgentsRequest {
@@ -111,6 +117,7 @@ message Agent {
   string status = 5;
   string created_at = 6;
   string updated_at = 7;
+  string site_id = 8;
 }
 
 message ListSitesResponse {

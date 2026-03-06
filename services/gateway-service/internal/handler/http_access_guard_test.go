@@ -23,11 +23,12 @@ import (
 
 type chatAccessStub struct {
 	chatv1.ChatGatewayServiceClient
-	getConversationFn   func(ctx context.Context, in *chatv1.GetConversationRequest, opts ...grpc.CallOption) (*chatv1.Conversation, error)
-	listMessagesFn      func(ctx context.Context, in *chatv1.ListMessagesRequest, opts ...grpc.CallOption) (*chatv1.ListMessagesResponse, error)
-	createMessageFn     func(ctx context.Context, in *chatv1.CreateMessageRequest, opts ...grpc.CallOption) (*chatv1.Message, error)
-	claimConversationFn func(ctx context.Context, in *chatv1.ClaimConversationRequest, opts ...grpc.CallOption) (*chatv1.Conversation, error)
-	markMessagesReadFn  func(ctx context.Context, in *chatv1.MarkMessagesReadRequest, opts ...grpc.CallOption) (*chatv1.MarkMessagesReadResponse, error)
+	getConversationFn      func(ctx context.Context, in *chatv1.GetConversationRequest, opts ...grpc.CallOption) (*chatv1.Conversation, error)
+	listMessagesFn         func(ctx context.Context, in *chatv1.ListMessagesRequest, opts ...grpc.CallOption) (*chatv1.ListMessagesResponse, error)
+	createMessageFn        func(ctx context.Context, in *chatv1.CreateMessageRequest, opts ...grpc.CallOption) (*chatv1.Message, error)
+	claimConversationFn    func(ctx context.Context, in *chatv1.ClaimConversationRequest, opts ...grpc.CallOption) (*chatv1.Conversation, error)
+	transferConversationFn func(ctx context.Context, in *chatv1.TransferConversationRequest, opts ...grpc.CallOption) (*chatv1.Conversation, error)
+	markMessagesReadFn     func(ctx context.Context, in *chatv1.MarkMessagesReadRequest, opts ...grpc.CallOption) (*chatv1.MarkMessagesReadResponse, error)
 }
 
 type authAccessStub struct {
@@ -63,6 +64,13 @@ func (s *chatAccessStub) ClaimConversation(ctx context.Context, in *chatv1.Claim
 	return &chatv1.Conversation{Id: in.GetConversationId(), Status: "open", AssignedAgentId: in.GetAgentId()}, nil
 }
 
+func (s *chatAccessStub) TransferConversation(ctx context.Context, in *chatv1.TransferConversationRequest, opts ...grpc.CallOption) (*chatv1.Conversation, error) {
+	if s.transferConversationFn != nil {
+		return s.transferConversationFn(ctx, in, opts...)
+	}
+	return &chatv1.Conversation{Id: in.GetConversationId(), Status: "open", AssignedAgentId: in.GetToAgentId()}, nil
+}
+
 func (s *chatAccessStub) MarkMessagesRead(ctx context.Context, in *chatv1.MarkMessagesReadRequest, opts ...grpc.CallOption) (*chatv1.MarkMessagesReadResponse, error) {
 	if s.markMessagesReadFn != nil {
 		return s.markMessagesReadFn(ctx, in, opts...)
@@ -74,7 +82,7 @@ func (s *authAccessStub) Me(ctx context.Context, in *authv1.MeRequest, opts ...g
 	if s.meFn != nil {
 		return s.meFn(ctx, in, opts...)
 	}
-	return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
+	return &authv1.MeResponse{AgentId: 7, Role: "agent", SiteId: "site_demo"}, nil
 }
 
 func newActiveSiteAdminStub() *adminClientStub {
@@ -250,7 +258,7 @@ func TestCreateMessageAgentRequiresClaimedConversation(t *testing.T) {
 		},
 		Auth: &authAccessStub{
 			meFn: func(_ context.Context, _ *authv1.MeRequest, _ ...grpc.CallOption) (*authv1.MeResponse, error) {
-				return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
+				return &authv1.MeResponse{AgentId: 7, Role: "agent", SiteId: "site_demo"}, nil
 			},
 		},
 		Admin: newActiveSiteAdminStub(),
@@ -315,8 +323,11 @@ func TestClaimConversationTriggersMarkRead(t *testing.T) {
 	var markReq *chatv1.MarkMessagesReadRequest
 	h := NewHTTPHandler(&grpcclient.Clients{
 		Chat: &chatAccessStub{
+			getConversationFn: func(_ context.Context, in *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
+				return &chatv1.Conversation{Id: in.GetId(), SiteId: "site_demo", Status: "open"}, nil
+			},
 			claimConversationFn: func(_ context.Context, in *chatv1.ClaimConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
-				return &chatv1.Conversation{Id: in.GetConversationId(), Status: "open", AssignedAgentId: in.GetAgentId()}, nil
+				return &chatv1.Conversation{Id: in.GetConversationId(), SiteId: "site_demo", Status: "open", AssignedAgentId: in.GetAgentId()}, nil
 			},
 			listMessagesFn: func(_ context.Context, _ *chatv1.ListMessagesRequest, _ ...grpc.CallOption) (*chatv1.ListMessagesResponse, error) {
 				return &chatv1.ListMessagesResponse{
@@ -333,9 +344,10 @@ func TestClaimConversationTriggersMarkRead(t *testing.T) {
 		},
 		Auth: &authAccessStub{
 			meFn: func(_ context.Context, _ *authv1.MeRequest, _ ...grpc.CallOption) (*authv1.MeResponse, error) {
-				return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
+				return &authv1.MeResponse{AgentId: 7, Role: "agent", SiteId: "site_demo"}, nil
 			},
 		},
+		Admin: newActiveSiteAdminStub(),
 	}, time.Second)
 	r := gin.New()
 	h.RegisterRoutes(r)
@@ -388,6 +400,91 @@ func TestGetConversationRejectsUnavailableSite(t *testing.T) {
 	}
 }
 
+func TestGetConversationAgentRejectsDifferentSite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	h := NewHTTPHandler(&grpcclient.Clients{
+		Chat: &chatAccessStub{
+			getConversationFn: func(_ context.Context, _ *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
+				return &chatv1.Conversation{
+					Id:              1,
+					SiteId:          "site_other",
+					Status:          "open",
+					AssignedAgentId: 7,
+				}, nil
+			},
+		},
+		Auth: &authAccessStub{
+			meFn: func(_ context.Context, _ *authv1.MeRequest, _ ...grpc.CallOption) (*authv1.MeResponse, error) {
+				return &authv1.MeResponse{AgentId: 7, Role: "agent", SiteId: "site_demo"}, nil
+			},
+		},
+		Admin: newActiveSiteAdminStub(),
+	}, time.Second)
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/chat/v1/conversations/1", nil)
+	req.Header.Set("Authorization", "Bearer token")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusForbidden, rr.Code, rr.Body.String())
+	}
+}
+
+func TestTransferConversationRejectsTargetAgentFromDifferentSite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	transferCalled := false
+	h := NewHTTPHandler(&grpcclient.Clients{
+		Chat: &chatAccessStub{
+			getConversationFn: func(_ context.Context, in *chatv1.GetConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
+				return &chatv1.Conversation{
+					Id:              in.GetId(),
+					SiteId:          "site_demo",
+					Status:          "open",
+					AssignedAgentId: 7,
+				}, nil
+			},
+			transferConversationFn: func(_ context.Context, _ *chatv1.TransferConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
+				transferCalled = true
+				return &chatv1.Conversation{}, nil
+			},
+		},
+		Auth: &authAccessStub{
+			meFn: func(_ context.Context, _ *authv1.MeRequest, _ ...grpc.CallOption) (*authv1.MeResponse, error) {
+				return &authv1.MeResponse{AgentId: 7, Role: "agent", SiteId: "site_demo"}, nil
+			},
+		},
+		Admin: &adminClientStub{
+			getSiteBySiteIDFn: func(_ context.Context, in *adminv1.GetSiteBySiteIDRequest, _ ...grpc.CallOption) (*adminv1.Site, error) {
+				return &adminv1.Site{SiteId: in.GetSiteId(), Status: "active"}, nil
+			},
+			getAgentByIDFn: func(_ context.Context, in *adminv1.GetAgentByIDRequest, _ ...grpc.CallOption) (*adminv1.Agent, error) {
+				return &adminv1.Agent{Id: in.GetAgentId(), SiteId: "site_other", Status: "active"}, nil
+			},
+		},
+	}, time.Second)
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	body := []byte(`{"to_agent_id":8}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/v1/conversations/1/transfer", bytes.NewReader(body))
+	req.Header.Set("Authorization", "Bearer token")
+	req.Header.Set("Content-Type", "application/json")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusForbidden, rr.Code, rr.Body.String())
+	}
+	if transferCalled {
+		t.Fatal("TransferConversation should not be called when target agent is outside current site")
+	}
+}
+
 func TestCreateMessageAgentRejectsInactiveSite(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -404,7 +501,7 @@ func TestCreateMessageAgentRejectsInactiveSite(t *testing.T) {
 		},
 		Auth: &authAccessStub{
 			meFn: func(_ context.Context, _ *authv1.MeRequest, _ ...grpc.CallOption) (*authv1.MeResponse, error) {
-				return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
+				return &authv1.MeResponse{AgentId: 7, Role: "agent", SiteId: "site_demo"}, nil
 			},
 		},
 		Admin: &adminClientStub{

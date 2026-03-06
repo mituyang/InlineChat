@@ -61,5 +61,6 @@ func (h *HTTPHandler) me(c *gin.Context) {
 		"email":    resp.GetEmail(),
 		"role":     resp.GetRole(),
 		"exp":      resp.GetExp(),
+		"site_id":  resp.GetSiteId(),
 	})
 }

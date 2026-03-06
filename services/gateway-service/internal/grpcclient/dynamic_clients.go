@@ -380,6 +380,12 @@ func (c *dynamicAdminClient) CreateAgent(ctx context.Context, in *adminv1.Create
 	})
 }
 
+func (c *dynamicAdminClient) GetAgentByID(ctx context.Context, in *adminv1.GetAgentByIDRequest, opts ...grpc.CallOption) (*adminv1.Agent, error) {
+	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.Agent, error) {
+		return client.GetAgentByID(ctx, in, opts...)
+	})
+}
+
 func (c *dynamicAdminClient) ListAgents(ctx context.Context, in *adminv1.ListAgentsRequest, opts ...grpc.CallOption) (*adminv1.ListAgentsResponse, error) {
 	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.ListAgentsResponse, error) {
 		return client.ListAgents(ctx, in, opts...)

@@ -167,11 +167,24 @@ func (s *AdminGatewayServer) CreateAgent(ctx context.Context, req *adminv1.Creat
 		Password:    req.GetPassword(),
 		DisplayName: req.GetDisplayName(),
 		Role:        req.GetRole(),
+		SiteID:      req.GetSiteId(),
 	}, toActorContext(claims))
 	if svcErr != nil {
 		return nil, mapError(svcErr)
 	}
 
+	return toAgentPB(agent), nil
+}
+
+func (s *AdminGatewayServer) GetAgentByID(ctx context.Context, req *adminv1.GetAgentByIDRequest) (*adminv1.Agent, error) {
+	if req.GetAgentId() == 0 {
+		return nil, status.Error(codes.InvalidArgument, "agent_id is required")
+	}
+
+	agent, err := s.adminService.GetAgentByID(ctx, req.GetAgentId())
+	if err != nil {
+		return nil, mapError(err)
+	}
 	return toAgentPB(agent), nil
 }
 
@@ -385,6 +398,7 @@ func toAgentPB(agent *model.Agent) *adminv1.Agent {
 		Id:          agent.ID,
 		Email:       agent.Email,
 		DisplayName: agent.DisplayName,
+		SiteId:      agent.SiteID,
 		Role:        agent.Role,
 		Status:      agent.Status,
 		CreatedAt:   agent.CreatedAt.Format(time.RFC3339Nano),

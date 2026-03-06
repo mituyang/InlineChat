@@ -552,18 +552,25 @@ function renderAgentIdentity(me) {
     if (els.userBox) {
       els.userBox.textContent = "未登录";
     }
+    if (els.siteFilterInput) {
+      els.siteFilterInput.value = "";
+    }
     return;
   }
 
   const agentID = formatAgentID(me.agent_id);
   const role = String(me.role || "-").trim() || "-";
   const email = String(me.email || "-").trim() || "-";
+  const siteID = String(me.site_id || "-").trim() || "-";
 
   if (els.agentBrief) {
-    els.agentBrief.textContent = `客服ID ${agentID} · 角色 ${role}`;
+    els.agentBrief.textContent = `客服ID ${agentID} · 角色 ${role} · site ${siteID}`;
   }
   if (els.userBox) {
     els.userBox.textContent = email;
+  }
+  if (els.siteFilterInput) {
+    els.siteFilterInput.value = siteID === "-" ? "" : siteID;
   }
 }
 

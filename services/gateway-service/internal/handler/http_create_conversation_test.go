@@ -23,11 +23,19 @@ import (
 type adminClientStub struct {
 	adminv1.AdminGatewayServiceClient
 	getSiteBySiteIDFn func(ctx context.Context, in *adminv1.GetSiteBySiteIDRequest, opts ...grpc.CallOption) (*adminv1.Site, error)
+	getAgentByIDFn    func(ctx context.Context, in *adminv1.GetAgentByIDRequest, opts ...grpc.CallOption) (*adminv1.Agent, error)
 }
 
 func (s *adminClientStub) GetSiteBySiteID(ctx context.Context, in *adminv1.GetSiteBySiteIDRequest, opts ...grpc.CallOption) (*adminv1.Site, error) {
 	if s.getSiteBySiteIDFn != nil {
 		return s.getSiteBySiteIDFn(ctx, in, opts...)
+	}
+	return nil, status.Error(codes.Unimplemented, "not implemented")
+}
+
+func (s *adminClientStub) GetAgentByID(ctx context.Context, in *adminv1.GetAgentByIDRequest, opts ...grpc.CallOption) (*adminv1.Agent, error) {
+	if s.getAgentByIDFn != nil {
+		return s.getAgentByIDFn(ctx, in, opts...)
 	}
 	return nil, status.Error(codes.Unimplemented, "not implemented")
 }

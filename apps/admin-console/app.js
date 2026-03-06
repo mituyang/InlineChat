@@ -61,6 +61,7 @@ const els = {
   agentStatusFilter: document.getElementById("agentStatusFilter"),
   createAgentForm: document.getElementById("createAgentForm"),
   agentIdInput: document.getElementById("agentIdInput"),
+  agentSiteSelect: document.getElementById("agentSiteSelect"),
   agentEmailInput: document.getElementById("agentEmailInput"),
   agentPasswordInput: document.getElementById("agentPasswordInput"),
   agentDisplayNameInput: document.getElementById("agentDisplayNameInput"),
@@ -261,6 +262,7 @@ function applyAuthUI(loggedIn) {
     state.auditResourceType = "";
     state.operationFeed = [];
     renderSites([]);
+    renderAgentSiteOptions();
     renderAgents([]);
     renderStats();
     renderOperationFeed();
@@ -390,6 +392,7 @@ async function refreshSites() {
   const data = await apiRequest("/api/admin/v1/admin/sites?limit=100", { auth: true });
   state.sites = Array.isArray(data.items) ? data.items : [];
   renderSites(state.sites);
+  renderAgentSiteOptions();
   renderStats();
   if (els.lastSyncAt) {
     els.lastSyncAt.textContent = formatTime(Date.now());
@@ -470,16 +473,21 @@ async function createAgent() {
   }
 
   const agentID = normalizeAgentID(els.agentIdInput.value);
+  const siteID = normalizeSiteID(els.agentSiteSelect?.value || "");
   const email = els.agentEmailInput.value.trim();
   const password = els.agentPasswordInput.value;
   const displayName = els.agentDisplayNameInput.value.trim();
 
-  if (!agentID || !email || !password || !displayName) {
-    setStatus("请完整填写坐席信息（含 4 位客服ID）", true);
+  if (!agentID || !siteID || !email || !password || !displayName) {
+    setStatus("请完整填写坐席信息（含 4 位客服ID 和归属站点）", true);
     return;
   }
   if (!isValidAgentID(agentID)) {
     setStatus("客服ID 必须为 4 位数字，且不能为 0000", true);
+    return;
+  }
+  if (!state.sites.some((site) => String(site.site_id || "") === siteID)) {
+    setStatus("请选择已存在的站点", true);
     return;
   }
   const passwordError = validateAgentPassword(password);
@@ -494,6 +502,7 @@ async function createAgent() {
       auth: true,
       body: {
         agent_id: agentID,
+        site_id: siteID,
         email,
         password,
         display_name: displayName,
@@ -501,6 +510,9 @@ async function createAgent() {
       },
     });
     els.agentIdInput.value = "";
+    if (els.agentSiteSelect && els.agentSiteSelect.options.length > 0) {
+      els.agentSiteSelect.selectedIndex = 0;
+    }
     els.agentPasswordInput.value = "";
     els.agentDisplayNameInput.value = "";
     await Promise.all([refreshAgents(), refreshAuditLogs()]);
@@ -686,13 +698,43 @@ function filteredAgents(items) {
     const formattedID = formatAgentID(agent.id).toLowerCase();
     const email = String(agent.email || "").toLowerCase();
     const displayName = String(agent.display_name || "").toLowerCase();
+    const siteID = String(agent.site_id || "").toLowerCase();
     return (
       id.includes(state.agentSearch) ||
       formattedID.includes(state.agentSearch) ||
       email.includes(state.agentSearch) ||
-      displayName.includes(state.agentSearch)
+      displayName.includes(state.agentSearch) ||
+      siteID.includes(state.agentSearch)
     );
   });
+}
+
+function renderAgentSiteOptions() {
+  if (!els.agentSiteSelect) {
+    return;
+  }
+
+  const previousValue = normalizeSiteID(els.agentSiteSelect.value || "");
+  const options = ['<option value="">请选择站点</option>'];
+  for (const site of state.sites) {
+    const siteID = normalizeSiteID(site.site_id || "");
+    if (!siteID) {
+      continue;
+    }
+    const label = `${siteID} · ${String(site.name || "未命名站点").trim() || "未命名站点"}`;
+    options.push(`<option value="${escapeHTML(siteID)}">${escapeHTML(label)}</option>`);
+  }
+  els.agentSiteSelect.innerHTML = options.join("");
+
+  if (previousValue && state.sites.some((site) => normalizeSiteID(site.site_id || "") === previousValue)) {
+    els.agentSiteSelect.value = previousValue;
+    return;
+  }
+
+  const firstActiveSite = state.sites.find((site) => String(site.status || "").toLowerCase() === "active");
+  if (firstActiveSite) {
+    els.agentSiteSelect.value = normalizeSiteID(firstActiveSite.site_id || "");
+  }
 }
 
 function renderSites(items) {
@@ -758,7 +800,7 @@ function renderAgents(items) {
     node.className = "item";
     node.innerHTML = `
       <strong>${escapeHTML(agent.display_name || "-")}</strong>
-      <div class="meta">id=${escapeHTML(formattedID)} · role=${escapeHTML(agent.role || "-")}</div>
+      <div class="meta">id=${escapeHTML(formattedID)} · site_id=${escapeHTML(agent.site_id || "-")}</div>
       <div class="meta">email=${escapeHTML(agent.email || "-")} · status=${escapeHTML(agent.status || "-")}</div>
       <div class="item-actions">
         <button

@@ -99,7 +99,7 @@ func (h *HTTPHandler) getConversation(c *gin.Context) {
 		if !h.applyAgentRateLimit(c, "get_conversation", actor.GetAgentId()) {
 			return
 		}
-		conversation, err = h.requireConversationForAgent(c, conversationID, actor.GetAgentId())
+		conversation, err = h.requireConversationForAgent(c, conversationID, actor)
 		if err != nil {
 			return
 		}
@@ -157,6 +157,16 @@ func (h *HTTPHandler) listConversations(c *gin.Context) {
 	}
 
 	siteID := strings.TrimSpace(c.Query("site_id"))
+	actorSiteID, siteErr := h.requireAgentSiteID(c, actor)
+	if siteErr != nil {
+		return
+	}
+	if siteID == "" {
+		siteID = actorSiteID
+	} else if siteID != actorSiteID {
+		abortForbidden(c, "forbidden")
+		return
+	}
 	var assignedAgentID uint64
 	if raw := strings.TrimSpace(c.Query("assigned_agent_id")); raw != "" {
 		v, convErr := strconv.ParseUint(raw, 10, 64)
@@ -256,7 +266,7 @@ func (h *HTTPHandler) createMessage(c *gin.Context) {
 			return
 		}
 		req.SenderID = strconv.FormatUint(actor.GetAgentId(), 10)
-		conversation, convErr := h.requireConversationForAgent(c, conversationID, actor.GetAgentId())
+		conversation, convErr := h.requireConversationForAgent(c, conversationID, actor)
 		if convErr != nil {
 			return
 		}
@@ -335,7 +345,7 @@ func (h *HTTPHandler) listMessages(c *gin.Context) {
 		if !h.applyAgentRateLimit(c, "list_messages", actor.GetAgentId()) {
 			return
 		}
-		if _, convErr := h.requireConversationForAgent(c, conversationID, actor.GetAgentId()); convErr != nil {
+		if _, convErr := h.requireConversationForAgent(c, conversationID, actor); convErr != nil {
 			return
 		}
 	} else {
@@ -408,7 +418,7 @@ func (h *HTTPHandler) markMessagesRead(c *gin.Context) {
 		}
 		actorType = "agent"
 		actorAgentID = actor.GetAgentId()
-		conversation, convErr := h.requireConversationForAgent(c, conversationID, actor.GetAgentId())
+		conversation, convErr := h.requireConversationForAgent(c, conversationID, actor)
 		if convErr != nil {
 			return
 		}
@@ -461,6 +471,10 @@ func (h *HTTPHandler) claimConversation(c *gin.Context) {
 
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
+
+	if _, convErr := h.fetchConversationForAgentSite(c, conversationID, actor); convErr != nil {
+		return
+	}
 
 	resp, err := h.clients.Chat.ClaimConversation(ctx, &chatv1.ClaimConversationRequest{
 		ConversationId: conversationID,
@@ -533,6 +547,24 @@ func (h *HTTPHandler) transferConversation(c *gin.Context) {
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
 
+	conversation, convErr := h.fetchConversationForAgentSite(c, conversationID, actor)
+	if convErr != nil {
+		return
+	}
+	targetAgent, err := h.clients.Admin.GetAgentByID(ctx, &adminv1.GetAgentByIDRequest{AgentId: req.ToAgentID})
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+	if strings.TrimSpace(targetAgent.GetSiteId()) != strings.TrimSpace(conversation.GetSiteId()) {
+		abortForbidden(c, "target agent is outside current site")
+		return
+	}
+	if strings.TrimSpace(strings.ToLower(targetAgent.GetStatus())) != "active" {
+		abortConflict(c, "target agent is not active")
+		return
+	}
+
 	resp, err := h.clients.Chat.TransferConversation(ctx, &chatv1.TransferConversationRequest{
 		ConversationId: conversationID,
 		ActorAgentId:   actor.GetAgentId(),
@@ -565,6 +597,10 @@ func (h *HTTPHandler) confirmTransferConversation(c *gin.Context) {
 
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
+
+	if _, convErr := h.fetchConversationForAgentSite(c, conversationID, actor); convErr != nil {
+		return
+	}
 
 	resp, err := h.clients.Chat.ConfirmTransferConversation(ctx, &chatv1.ConfirmTransferConversationRequest{
 		ConversationId: conversationID,
@@ -600,6 +636,10 @@ func (h *HTTPHandler) rejectTransferConversation(c *gin.Context) {
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
 
+	if _, convErr := h.fetchConversationForAgentSite(c, conversationID, actor); convErr != nil {
+		return
+	}
+
 	resp, err := h.clients.Chat.RejectTransferConversation(ctx, &chatv1.RejectTransferConversationRequest{
 		ConversationId: conversationID,
 		ActorAgentId:   actor.GetAgentId(),
@@ -631,6 +671,10 @@ func (h *HTTPHandler) closeConversation(c *gin.Context) {
 
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
+
+	if _, convErr := h.fetchConversationForAgentSite(c, conversationID, actor); convErr != nil {
+		return
+	}
 
 	resp, err := h.clients.Chat.CloseConversation(ctx, &chatv1.CloseConversationRequest{
 		ConversationId: conversationID,

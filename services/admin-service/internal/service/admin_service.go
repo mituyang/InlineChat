@@ -40,6 +40,7 @@ type CreateAgentInput struct {
 	Password    string
 	DisplayName string
 	Role        string
+	SiteID      string
 }
 
 type ActorContext struct {
@@ -246,6 +247,16 @@ func (s *AdminService) createAgent(ctx context.Context, in CreateAgentInput, act
 	if err != nil {
 		return nil, err
 	}
+	siteID, err := normalizeSiteID(in.SiteID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.siteRepo.GetBySiteID(ctx, siteID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, fmt.Errorf("invalid site_id")
+		}
+		return nil, err
+	}
 
 	email := strings.TrimSpace(strings.ToLower(in.Email))
 	displayName := strings.TrimSpace(in.DisplayName)
@@ -281,6 +292,7 @@ func (s *AdminService) createAgent(ctx context.Context, in CreateAgentInput, act
 		Email:        email,
 		PasswordHash: hash,
 		DisplayName:  displayName,
+		SiteID:       siteID,
 		Role:         role,
 		Status:       "active",
 		TokenVersion: 1,
@@ -297,6 +309,21 @@ func (s *AdminService) createAgent(ctx context.Context, in CreateAgentInput, act
 
 func (s *AdminService) ListAgents(ctx context.Context, limit int, offset int) ([]model.Agent, error) {
 	return s.agentRepo.List(ctx, limit, offset)
+}
+
+func (s *AdminService) GetAgentByID(ctx context.Context, agentID uint64) (*model.Agent, error) {
+	if agentID == 0 {
+		return nil, fmt.Errorf("agent_id is required")
+	}
+
+	agent, err := s.agentRepo.GetByID(ctx, agentID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return agent, nil
 }
 
 func (s *AdminService) UpdateAgentStatus(ctx context.Context, in UpdateAgentStatusInput, actor ActorContext) (*model.Agent, error) {

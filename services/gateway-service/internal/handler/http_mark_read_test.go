@@ -68,7 +68,7 @@ func TestMarkMessagesReadAgentPath(t *testing.T) {
 		},
 		Auth: &authMeClientStub{
 			meFn: func(_ context.Context, _ *authv1.MeRequest, _ ...grpc.CallOption) (*authv1.MeResponse, error) {
-				return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
+				return &authv1.MeResponse{AgentId: 7, Role: "agent", SiteId: "site_demo"}, nil
 			},
 		},
 		Admin: newActiveSiteAdminStub(),
@@ -165,7 +165,7 @@ func TestMarkMessagesReadAgentRequiresAssignedConversation(t *testing.T) {
 		},
 		Auth: &authMeClientStub{
 			meFn: func(_ context.Context, _ *authv1.MeRequest, _ ...grpc.CallOption) (*authv1.MeResponse, error) {
-				return &authv1.MeResponse{AgentId: 7, Role: "agent"}, nil
+				return &authv1.MeResponse{AgentId: 7, Role: "agent", SiteId: "site_demo"}, nil
 			},
 		},
 		Admin: newActiveSiteAdminStub(),

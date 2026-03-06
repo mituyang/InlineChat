@@ -20,6 +20,7 @@ type MeResult struct {
 	Email   string
 	Role    string
 	Exp     int64
+	SiteID  string
 }
 
 // New 建立到 auth-service 的 gRPC 连接。
@@ -61,5 +62,6 @@ func (c *Client) Me(ctx context.Context, authorization string) (*MeResult, error
 		Email:   resp.GetEmail(),
 		Role:    resp.GetRole(),
 		Exp:     resp.GetExp(),
+		SiteID:  resp.GetSiteId(),
 	}, nil
 }

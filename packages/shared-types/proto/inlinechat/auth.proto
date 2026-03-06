@@ -26,6 +26,7 @@ message Agent {
   string status = 5;
   string created_at = 6;
   string updated_at = 7;
+  string site_id = 8;
 }
 
 message AuthResult {
@@ -38,4 +39,5 @@ message MeResponse {
   string email = 2;
   string role = 3;
   int64 exp = 4;
+  string site_id = 5;
 }

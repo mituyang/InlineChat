@@ -203,6 +203,20 @@ func (h *HTTPHandler) requireAgentActor(c *gin.Context) (*authv1.MeResponse, err
 	return actor, nil
 }
 
+func (h *HTTPHandler) requireAgentSiteID(c *gin.Context, actor *authv1.MeResponse) (string, error) {
+	if actor == nil {
+		abortForbidden(c, "forbidden")
+		return "", status.Error(codes.PermissionDenied, "forbidden")
+	}
+
+	siteID := strings.TrimSpace(actor.GetSiteId())
+	if siteID == "" {
+		abortForbidden(c, "agent site is unavailable")
+		return "", status.Error(codes.PermissionDenied, "agent site is unavailable")
+	}
+	return siteID, nil
+}
+
 func (h *HTTPHandler) requireAdminActor(c *gin.Context) (*authv1.MeResponse, error) {
 	actor, err := h.requireActor(c)
 	if err != nil {
@@ -266,19 +280,47 @@ func (h *HTTPHandler) requireConversationForVisitor(c *gin.Context, conversation
 	return conversation, nil
 }
 
-func (h *HTTPHandler) requireConversationForAgent(c *gin.Context, conversationID uint64, agentID uint64) (*chatv1.Conversation, error) {
+func (h *HTTPHandler) requireConversationSiteForAgent(c *gin.Context, conversation *chatv1.Conversation, actor *authv1.MeResponse) error {
+	actorSiteID, err := h.requireAgentSiteID(c, actor)
+	if err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(conversation.GetSiteId()) != actorSiteID {
+		abortForbidden(c, "forbidden")
+		return status.Error(codes.PermissionDenied, "forbidden")
+	}
+	if err := h.requireActiveConversationSite(c, conversation); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (h *HTTPHandler) fetchConversationForAgentSite(c *gin.Context, conversationID uint64, actor *authv1.MeResponse) (*chatv1.Conversation, error) {
 	conversation, err := h.fetchConversation(c, conversationID)
 	if err != nil {
 		handleGRPCError(c, err)
 		return nil, err
 	}
-	if assignedAgentID := conversation.GetAssignedAgentId(); assignedAgentID != 0 && assignedAgentID != agentID {
-		if conversation.GetPendingTransferToAgentId() != agentID {
+	if err := h.requireConversationSiteForAgent(c, conversation, actor); err != nil {
+		return nil, err
+	}
+	return conversation, nil
+}
+
+func (h *HTTPHandler) requireConversationForAgent(c *gin.Context, conversationID uint64, actor *authv1.MeResponse) (*chatv1.Conversation, error) {
+	conversation, err := h.fetchConversation(c, conversationID)
+	if err != nil {
+		handleGRPCError(c, err)
+		return nil, err
+	}
+	if assignedAgentID := conversation.GetAssignedAgentId(); assignedAgentID != 0 && assignedAgentID != actor.GetAgentId() {
+		if conversation.GetPendingTransferToAgentId() != actor.GetAgentId() {
 			abortForbidden(c, "forbidden")
 			return nil, status.Error(codes.PermissionDenied, "forbidden")
 		}
 	}
-	if err := h.requireActiveConversationSite(c, conversation); err != nil {
+	if err := h.requireConversationSiteForAgent(c, conversation, actor); err != nil {
 		return nil, err
 	}
 	return conversation, nil
@@ -392,6 +434,7 @@ func authResultToJSON(item *authv1.AuthResult) gin.H {
 			"id":           agent.GetId(),
 			"email":        agent.GetEmail(),
 			"display_name": agent.GetDisplayName(),
+			"site_id":      agent.GetSiteId(),
 			"role":         agent.GetRole(),
 			"status":       agent.GetStatus(),
 			"created_at":   agent.GetCreatedAt(),
@@ -418,6 +461,7 @@ func adminAgentToJSON(item *adminv1.Agent) gin.H {
 		"id":           item.GetId(),
 		"email":        item.GetEmail(),
 		"display_name": item.GetDisplayName(),
+		"site_id":      item.GetSiteId(),
 		"role":         item.GetRole(),
 		"status":       item.GetStatus(),
 		"created_at":   item.GetCreatedAt(),

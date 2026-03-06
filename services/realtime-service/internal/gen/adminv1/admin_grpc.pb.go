@@ -29,6 +29,7 @@ type AdminGatewayServiceClient interface {
 	UpdateSiteStatus(ctx context.Context, in *UpdateSiteStatusRequest, opts ...grpc.CallOption) (*Site, error)
 	RotateSiteWidgetKey(ctx context.Context, in *RotateSiteWidgetKeyRequest, opts ...grpc.CallOption) (*Site, error)
 	CreateAgent(ctx context.Context, in *CreateAgentRequest, opts ...grpc.CallOption) (*Agent, error)
+	GetAgentByID(ctx context.Context, in *GetAgentByIDRequest, opts ...grpc.CallOption) (*Agent, error)
 	ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error)
 	UpdateAgentStatus(ctx context.Context, in *UpdateAgentStatusRequest, opts ...grpc.CallOption) (*Agent, error)
 	ResetAgentPassword(ctx context.Context, in *ResetAgentPasswordRequest, opts ...grpc.CallOption) (*Agent, error)
@@ -107,6 +108,15 @@ func (c *adminGatewayServiceClient) CreateAgent(ctx context.Context, in *CreateA
 	return out, nil
 }
 
+func (c *adminGatewayServiceClient) GetAgentByID(ctx context.Context, in *GetAgentByIDRequest, opts ...grpc.CallOption) (*Agent, error) {
+	out := new(Agent)
+	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/GetAgentByID", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *adminGatewayServiceClient) ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error) {
 	out := new(ListAgentsResponse)
 	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/ListAgents", in, out, opts...)
@@ -163,6 +173,7 @@ type AdminGatewayServiceServer interface {
 	UpdateSiteStatus(context.Context, *UpdateSiteStatusRequest) (*Site, error)
 	RotateSiteWidgetKey(context.Context, *RotateSiteWidgetKeyRequest) (*Site, error)
 	CreateAgent(context.Context, *CreateAgentRequest) (*Agent, error)
+	GetAgentByID(context.Context, *GetAgentByIDRequest) (*Agent, error)
 	ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error)
 	UpdateAgentStatus(context.Context, *UpdateAgentStatusRequest) (*Agent, error)
 	ResetAgentPassword(context.Context, *ResetAgentPasswordRequest) (*Agent, error)
@@ -195,6 +206,9 @@ func (UnimplementedAdminGatewayServiceServer) RotateSiteWidgetKey(context.Contex
 }
 func (UnimplementedAdminGatewayServiceServer) CreateAgent(context.Context, *CreateAgentRequest) (*Agent, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateAgent not implemented")
+}
+func (UnimplementedAdminGatewayServiceServer) GetAgentByID(context.Context, *GetAgentByIDRequest) (*Agent, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetAgentByID not implemented")
 }
 func (UnimplementedAdminGatewayServiceServer) ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListAgents not implemented")
@@ -350,6 +364,24 @@ func _AdminGatewayService_CreateAgent_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _AdminGatewayService_GetAgentByID_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAgentByIDRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminGatewayServiceServer).GetAgentByID(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/inlinechat.admin.v1.AdminGatewayService/GetAgentByID",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminGatewayServiceServer).GetAgentByID(ctx, req.(*GetAgentByIDRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AdminGatewayService_ListAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListAgentsRequest)
 	if err := dec(in); err != nil {
@@ -474,6 +506,10 @@ var AdminGatewayService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateAgent",
 			Handler:    _AdminGatewayService_CreateAgent_Handler,
+		},
+		{
+			MethodName: "GetAgentByID",
+			Handler:    _AdminGatewayService_GetAgentByID_Handler,
 		},
 		{
 			MethodName: "ListAgents",

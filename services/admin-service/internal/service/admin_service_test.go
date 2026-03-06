@@ -165,12 +165,15 @@ func newTestAdminServiceWithSuperAdminRepo(
 }
 
 func TestCreateAgentDefaultRoleAndHashPassword(t *testing.T) {
-	siteRepo := &fakeSiteRepository{}
+	siteRepo := &fakeSiteRepository{
+		items: []model.Site{{SiteID: "site_demo", Status: "active"}},
+	}
 	agentRepo := &fakeAgentRepository{}
 	svc := newTestAdminService(siteRepo, agentRepo)
 
 	agent, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 		AgentID:     "0012",
+		SiteID:      "site_demo",
 		Email:       "Agent@Example.com",
 		Password:    "Agent#Strong2026!",
 		DisplayName: "客服A",
@@ -188,6 +191,9 @@ func TestCreateAgentDefaultRoleAndHashPassword(t *testing.T) {
 	if agent.ID != 12 {
 		t.Fatalf("unexpected agent id: %d", agent.ID)
 	}
+	if agent.SiteID != "site_demo" {
+		t.Fatalf("unexpected site_id: %s", agent.SiteID)
+	}
 	if agent.Role != "agent" {
 		t.Fatalf("unexpected role: %s", agent.Role)
 	}
@@ -203,10 +209,13 @@ func TestCreateAgentDefaultRoleAndHashPassword(t *testing.T) {
 }
 
 func TestCreateAgentRejectInvalidRole(t *testing.T) {
-	svc := newTestAdminService(&fakeSiteRepository{}, &fakeAgentRepository{})
+	svc := newTestAdminService(&fakeSiteRepository{
+		items: []model.Site{{SiteID: "site_demo", Status: "active"}},
+	}, &fakeAgentRepository{})
 
 	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 		AgentID:     "1001",
+		SiteID:      "site_demo",
 		Email:       "agent@example.com",
 		Password:    "Agent#Strong2026!",
 		DisplayName: "客服A",
@@ -224,10 +233,13 @@ func TestCreateAgentMapDuplicateToConflict(t *testing.T) {
 	agentRepo := &fakeAgentRepository{
 		createErr: errors.New("Duplicate entry"),
 	}
-	svc := newTestAdminService(&fakeSiteRepository{}, agentRepo)
+	svc := newTestAdminService(&fakeSiteRepository{
+		items: []model.Site{{SiteID: "site_demo", Status: "active"}},
+	}, agentRepo)
 
 	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 		AgentID:     "1001",
+		SiteID:      "site_demo",
 		Email:       "agent@example.com",
 		Password:    "Agent#Strong2026!",
 		DisplayName: "客服A",
@@ -245,10 +257,13 @@ func TestCreateAgentRejectSuperAdminEmailConflict(t *testing.T) {
 			{ID: 9001, Email: "super@example.com", Status: "active"},
 		},
 	}
-	svc := newTestAdminServiceWithSuperAdminRepo(&fakeSiteRepository{}, agentRepo, superAdminRepo)
+	svc := newTestAdminServiceWithSuperAdminRepo(&fakeSiteRepository{
+		items: []model.Site{{SiteID: "site_demo", Status: "active"}},
+	}, agentRepo, superAdminRepo)
 
 	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 		AgentID:     "1001",
+		SiteID:      "site_demo",
 		Email:       "super@example.com",
 		Password:    "Agent#Strong2026!",
 		DisplayName: "客服A",
@@ -260,10 +275,13 @@ func TestCreateAgentRejectSuperAdminEmailConflict(t *testing.T) {
 }
 
 func TestCreateAgentRejectWeakPassword(t *testing.T) {
-	svc := newTestAdminService(&fakeSiteRepository{}, &fakeAgentRepository{})
+	svc := newTestAdminService(&fakeSiteRepository{
+		items: []model.Site{{SiteID: "site_demo", Status: "active"}},
+	}, &fakeAgentRepository{})
 
 	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 		AgentID:     "1001",
+		SiteID:      "site_demo",
 		Email:       "agent@example.com",
 		Password:    "password12345!",
 		DisplayName: "客服A",
@@ -278,12 +296,15 @@ func TestCreateAgentRejectWeakPassword(t *testing.T) {
 }
 
 func TestCreateAgentRejectInvalidAgentID(t *testing.T) {
-	svc := newTestAdminService(&fakeSiteRepository{}, &fakeAgentRepository{})
+	svc := newTestAdminService(&fakeSiteRepository{
+		items: []model.Site{{SiteID: "site_demo", Status: "active"}},
+	}, &fakeAgentRepository{})
 
 	cases := []string{"", "12", "abc1", "10000", "0000"}
 	for _, agentID := range cases {
 		_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
 			AgentID:     agentID,
+			SiteID:      "site_demo",
 			Email:       "agent@example.com",
 			Password:    "Agent#Strong2026!",
 			DisplayName: "客服A",
@@ -292,6 +313,42 @@ func TestCreateAgentRejectInvalidAgentID(t *testing.T) {
 		if err == nil {
 			t.Fatalf("expected error for agent_id=%q, got nil", agentID)
 		}
+	}
+}
+
+func TestCreateAgentRequireExistingSite(t *testing.T) {
+	svc := newTestAdminService(&fakeSiteRepository{}, &fakeAgentRepository{})
+
+	_, err := svc.CreateAgent(context.Background(), CreateAgentInput{
+		AgentID:     "1001",
+		SiteID:      "site_missing",
+		Email:       "agent@example.com",
+		Password:    "Agent#Strong2026!",
+		DisplayName: "客服A",
+		Role:        "agent",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "invalid site_id") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetAgentByID(t *testing.T) {
+	agentRepo := &fakeAgentRepository{
+		items: []model.Agent{
+			{ID: 12, SiteID: "site_demo", Email: "agent@example.com"},
+		},
+	}
+	svc := newTestAdminService(&fakeSiteRepository{}, agentRepo)
+
+	agent, err := svc.GetAgentByID(context.Background(), 12)
+	if err != nil {
+		t.Fatalf("GetAgentByID failed: %v", err)
+	}
+	if agent.SiteID != "site_demo" {
+		t.Fatalf("unexpected site_id: %s", agent.SiteID)
 	}
 }
 

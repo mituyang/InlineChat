@@ -189,6 +189,20 @@ func (s *AuthService) ValidateToken(ctx context.Context, token string) (*securit
 	return claims, nil
 }
 
+func (s *AuthService) GetAgentByID(ctx context.Context, agentID uint64) (*model.Agent, error) {
+	if agentID == 0 {
+		return nil, ErrUnauthorized
+	}
+	agent, err := s.agentRepo.GetByID(ctx, agentID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrUnauthorized
+		}
+		return nil, err
+	}
+	return agent, nil
+}
+
 // buildJWTVerifySecrets 支持主密钥+上一个密钥并行验签，便于平滑轮转。
 func buildJWTVerifySecrets(primary string, previous string) [][]byte {
 	out := make([][]byte, 0, 2)

@@ -168,6 +168,7 @@ func (h *HTTPHandler) rotateSiteWidgetKey(c *gin.Context) {
 
 type createAgentRequest struct {
 	AgentID     string `json:"agent_id" binding:"required,len=4,numeric"`
+	SiteID      string `json:"site_id" binding:"required,min=4,max=64"`
 	Email       string `json:"email" binding:"required,email"`
 	Password    string `json:"password" binding:"required,min=12,max=72"`
 	DisplayName string `json:"display_name" binding:"required,min=1,max=128"`
@@ -207,6 +208,7 @@ func (h *HTTPHandler) createAgent(c *gin.Context) {
 	resp, err := h.clients.Admin.CreateAgent(ctx, &adminv1.CreateAgentRequest{
 		Authorization: c.GetHeader("Authorization"),
 		AgentId:       req.AgentID,
+		SiteId:        req.SiteID,
 		Email:         req.Email,
 		Password:      req.Password,
 		DisplayName:   req.DisplayName,

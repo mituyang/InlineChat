@@ -69,12 +69,22 @@ func (h *HTTPHandler) me(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
 		return
 	}
+	siteID := ""
+	if claims.Role == "agent" || claims.Role == "admin" {
+		agent, getErr := h.authService.GetAgentByID(c.Request.Context(), claims.AgentID)
+		if getErr != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			return
+		}
+		siteID = agent.SiteID
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"agent_id": claims.AgentID,
 		"email":    claims.Email,
 		"role":     claims.Role,
 		"exp":      claims.ExpiresAt,
+		"site_id":  siteID,
 	})
 }
 

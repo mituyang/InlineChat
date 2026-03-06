@@ -56,12 +56,21 @@ func (s *AuthGatewayServer) Me(ctx context.Context, req *authv1.MeRequest) (*aut
 	if claims.ExpiresAt != nil {
 		exp = claims.ExpiresAt.Time.Unix()
 	}
+	siteID := ""
+	if claims.Role == "agent" || claims.Role == "admin" {
+		agent, getErr := s.authService.GetAgentByID(ctx, claims.AgentID)
+		if getErr != nil {
+			return nil, status.Error(codes.Unauthenticated, "invalid token")
+		}
+		siteID = agent.SiteID
+	}
 
 	return &authv1.MeResponse{
 		AgentId: claims.AgentID,
 		Email:   claims.Email,
 		Role:    claims.Role,
 		Exp:     exp,
+		SiteId:  siteID,
 	}, nil
 }
 
@@ -103,6 +112,7 @@ func toAgentPB(agent *model.Agent) *authv1.Agent {
 		Id:          agent.ID,
 		Email:       agent.Email,
 		DisplayName: agent.DisplayName,
+		SiteId:      agent.SiteID,
 		Role:        agent.Role,
 		Status:      agent.Status,
 		CreatedAt:   agent.CreatedAt.Format(time.RFC3339Nano),

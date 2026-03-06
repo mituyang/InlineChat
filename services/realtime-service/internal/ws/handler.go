@@ -235,6 +235,7 @@ func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64
 		connCtx = connectionContext{
 			Role:    "agent",
 			AgentID: me.AgentID,
+			SiteID:  strings.TrimSpace(me.SiteID),
 		}
 	} else {
 		visitorToken := strings.TrimSpace(c.Query("visitor_token"))
@@ -275,6 +276,14 @@ func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64
 	}
 	if code, err := h.validateConversationSite(ctx, siteID); err != nil {
 		return connectionContext{}, code, err
+	}
+	if connCtx.Role == "agent" {
+		if connCtx.SiteID == "" {
+			return connectionContext{}, http.StatusForbidden, fmt.Errorf("agent site is unavailable")
+		}
+		if connCtx.SiteID != siteID {
+			return connectionContext{}, http.StatusForbidden, fmt.Errorf("forbidden")
+		}
 	}
 
 	connCtx.SiteID = siteID
