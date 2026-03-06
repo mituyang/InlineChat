@@ -48,11 +48,6 @@ type Conversation struct {
 	Status          string
 }
 
-type MarkMessageDeliveredResult struct {
-	Updated bool
-	Status  string
-}
-
 // New 建立到 chat-service 的 gRPC 连接。
 func New(target string, dialTimeout time.Duration) (*Client, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
@@ -105,22 +100,6 @@ func (c *Client) CreateMessage(ctx context.Context, conversationID uint64, reqBo
 		CreatedAt:      resp.GetCreatedAt(),
 		UpdatedAt:      resp.GetUpdatedAt(),
 		Status:         resp.GetStatus(),
-	}, nil
-}
-
-// MarkMessageDelivered 用于 realtime 确认消息已投递到客户端后回写状态。
-func (c *Client) MarkMessageDelivered(ctx context.Context, conversationID uint64, messageID uint64) (*MarkMessageDeliveredResult, error) {
-	resp, err := c.rpc.MarkMessageDelivered(ctx, &chatv1.MarkMessageDeliveredRequest{
-		ConversationId: conversationID,
-		MessageId:      messageID,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return &MarkMessageDeliveredResult{
-		Updated: resp.GetUpdated(),
-		Status:  resp.GetStatus(),
 	}, nil
 }
 

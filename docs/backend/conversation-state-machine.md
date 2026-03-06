@@ -44,13 +44,11 @@
 
 ## 消息状态机
 - `sent`：消息已持久化。
-- `delivered`：`realtime-service` 广播时检测到至少 1 个“对端角色”在线并成功入队。
 - `read`：客户端显式调用 `mark read` 推进。
 
 状态流转：
-- `sent -> delivered -> read`
+- `sent -> read`
 - 允许幂等重复推进：
-  - 已是 `delivered/read` 再次 `MarkMessageDelivered` 不报错。
   - `MarkMessagesRead` 在无可更新行时返回 `updated_count=0`。
 
 ## 幂等与一致性规则

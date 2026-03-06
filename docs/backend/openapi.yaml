@@ -1014,7 +1014,7 @@ components:
           type: string
         status:
           type: string
-          enum: [sent, delivered, read]
+          enum: [sent, read]
         created_at:
           type: string
           format: date-time

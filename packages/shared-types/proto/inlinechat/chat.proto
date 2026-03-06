@@ -6,7 +6,6 @@ option go_package = "inlinechat/packages/shared-types/proto/chatv1";
 
 service ChatInternalService {
   rpc CreateMessage(CreateMessageRequest) returns (CreateMessageResponse);
-  rpc MarkMessageDelivered(MarkMessageDeliveredRequest) returns (MarkMessageDeliveredResponse);
 }
 
 service ChatGatewayService {
@@ -121,16 +120,6 @@ message CreateMessageResponse {
   string created_at = 7;
   string updated_at = 8;
   string status = 9;
-}
-
-message MarkMessageDeliveredRequest {
-  uint64 conversation_id = 1;
-  uint64 message_id = 2;
-}
-
-message MarkMessageDeliveredResponse {
-  bool updated = 1;
-  string status = 2;
 }
 
 message ListMessagesRequest {

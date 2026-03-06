@@ -13,7 +13,7 @@
 | 服务 | Proto Service | 主要调用方 | 说明 |
 | --- | --- | --- | --- |
 | `chat-service` | `ChatGatewayService` | `gateway-service` | 会话与消息主业务 |
-| `chat-service` | `ChatInternalService` | `realtime-service` | 实时链路内部写消息/送达回写 |
+| `chat-service` | `ChatInternalService` | `realtime-service` | 实时链路内部写消息 |
 | `auth-service` | `AuthGatewayService` | `gateway-service`、`realtime-service` | 登录与 token 身份解析 |
 | `admin-service` | `AdminGatewayService` | `gateway-service` | 站点、客服与审计管理 |
 
@@ -56,13 +56,8 @@
 ## ChatInternalService
 ### 方法列表
 - `CreateMessage`
-- `MarkMessageDelivered`
-
 ### 关键语义
 - `CreateMessage`：用于实时链路写消息，参数校验与 Gateway 版本一致。
-- `MarkMessageDelivered`：
-  - 仅推进到 `delivered`，已是 `delivered/read` 时保持幂等。
-  - 通常由 `realtime-service` 在检测到“对端在线并成功入队”后调用。
 
 ## AuthGatewayService
 ### 方法列表

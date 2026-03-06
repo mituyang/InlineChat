@@ -2,30 +2,41 @@ package ws
 
 import "testing"
 
-func TestHubBroadcastDeliveredToCounterpart(t *testing.T) {
+func TestHubBroadcastSendsToAllClients(t *testing.T) {
 	hub := NewHub()
 	visitor := &Client{send: make(chan []byte, 1)}
 	agent := &Client{send: make(chan []byte, 1)}
 
-	hub.Register("1", visitor, ClientMeta{Role: "visitor"})
-	hub.Register("1", agent, ClientMeta{Role: "agent"})
+	hub.Register("1", visitor)
+	hub.Register("1", agent)
 
-	delivered := hub.Broadcast("1", []byte("x"), "visitor")
-	if !delivered {
-		t.Fatal("expected delivered to counterpart=true")
+	hub.Broadcast("1", []byte("x"))
+
+	select {
+	case <-visitor.send:
+	default:
+		t.Fatal("expected visitor to receive broadcast")
+	}
+	select {
+	case <-agent.send:
+	default:
+		t.Fatal("expected agent to receive broadcast")
 	}
 }
 
-func TestHubBroadcastNoCounterpart(t *testing.T) {
+func TestHubBroadcastSkipsFullClientQueue(t *testing.T) {
 	hub := NewHub()
-	visitorA := &Client{send: make(chan []byte, 1)}
-	visitorB := &Client{send: make(chan []byte, 1)}
+	client := &Client{send: make(chan []byte, 1)}
+	client.send <- []byte("busy")
 
-	hub.Register("1", visitorA, ClientMeta{Role: "visitor"})
-	hub.Register("1", visitorB, ClientMeta{Role: "visitor"})
+	hub.Register("1", client)
 
-	delivered := hub.Broadcast("1", []byte("x"), "visitor")
-	if delivered {
-		t.Fatal("expected delivered to counterpart=false")
+	hub.Broadcast("1", []byte("x"))
+
+	if got, ok := <-client.send; !ok || string(got) != "busy" {
+		t.Fatal("expected buffered message to remain readable before close")
+	}
+	if _, ok := <-client.send; ok {
+		t.Fatal("expected full client queue to be closed after draining buffer")
 	}
 }

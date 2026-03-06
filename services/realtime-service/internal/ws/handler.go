@@ -153,7 +153,7 @@ func (h *Handler) Serve(c *gin.Context) {
 	}
 
 	client := NewClient(conn)
-	h.hub.Register(conversationID, client, ClientMeta{Role: connCtx.Role})
+	h.hub.Register(conversationID, client)
 
 	go client.WriteLoop()
 	// 升级成功后先做历史补拉，再开始实时读循环，避免消息窗口丢失。

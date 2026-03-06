@@ -32,7 +32,6 @@ type MessageRepository interface {
 	GetLatestByConversation(ctx context.Context, conversationID uint64) (*model.Message, error)
 	GetLatestByConversationExcludingSystem(ctx context.Context, conversationID uint64) (*model.Message, error)
 	ListByConversation(ctx context.Context, conversationID uint64, limit int, beforeID uint64) ([]model.Message, error)
-	MarkDelivered(ctx context.Context, conversationID uint64, messageID uint64) (bool, error)
 	MarkReadByConversationAndSender(ctx context.Context, conversationID uint64, senderType string, lastReadMessageID uint64) (int64, error)
 }
 
@@ -352,26 +351,13 @@ func (r *GormMessageRepository) ListByConversation(ctx context.Context, conversa
 	return messages, nil
 }
 
-func (r *GormMessageRepository) MarkDelivered(ctx context.Context, conversationID uint64, messageID uint64) (bool, error) {
-	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
-	defer cancel()
-	tx := db.
-		Model(&model.Message{}).
-		Where("conversation_id = ? AND id = ? AND status = ?", conversationID, messageID, "sent").
-		Update("status", "delivered")
-	if tx.Error != nil {
-		return false, tx.Error
-	}
-	return tx.RowsAffected > 0, nil
-}
-
 func (r *GormMessageRepository) MarkReadByConversationAndSender(ctx context.Context, conversationID uint64, senderType string, lastReadMessageID uint64) (int64, error) {
 	db, cancel := dbWithContext(r.db, ctx, r.defaultQueryTimeout)
 	defer cancel()
 	tx := db.
 		Model(&model.Message{}).
 		Where("conversation_id = ? AND sender_type = ? AND id <= ?", conversationID, senderType, lastReadMessageID).
-		Where("status IN ?", []string{"sent", "delivered"}).
+		Where("status = ?", "sent").
 		Update("status", "read")
 	if tx.Error != nil {
 		return 0, tx.Error

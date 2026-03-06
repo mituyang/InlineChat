@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -142,7 +141,7 @@ func main() {
 	consumeCtx, stopConsume := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopConsume()
 	go func() {
-		// 订阅 Redis 事件并向同会话 WS 连接广播，同时推进 delivered 状态。
+		// 订阅 Redis 事件并向同会话 WS 连接广播。
 		retryDelay := time.Second
 		for {
 			err := publisher.Consume(consumeCtx, func(conversationID string, payload []byte) {
@@ -150,45 +149,11 @@ func main() {
 				if !ok {
 					return
 				}
-				if eventType == "message.status" || eventType == "conversation.closed" || eventType == "conversation.status" {
-					_ = hub.Broadcast(conversationID, payload, "")
+				switch eventType {
+				case "message.new", "message.status", "conversation.closed", "conversation.status":
+					hub.Broadcast(conversationID, payload)
+				default:
 					return
-				}
-				if eventType != "message.new" {
-					return
-				}
-
-				eventConversationID, messageID, senderType, ok := parseMessageNewEvent(payload)
-				if !ok {
-					return
-				}
-
-				delivered := hub.Broadcast(conversationID, payload, senderType)
-				if !delivered || senderType == "" || messageID == 0 {
-					return
-				}
-
-				targetConversationID := eventConversationID
-				if targetConversationID == 0 {
-					id, err := strconv.ParseUint(conversationID, 10, 64)
-					if err != nil {
-						appLogger.Warn("skip mark delivered due to invalid conversation id",
-							zap.String("conversation_id", conversationID),
-							zap.Error(err),
-						)
-						return
-					}
-					targetConversationID = id
-				}
-
-				ctx, cancel := context.WithTimeout(context.Background(), callTimeout)
-				defer cancel()
-				if _, err := chatClient.MarkMessageDelivered(ctx, targetConversationID, messageID); err != nil {
-					appLogger.Warn("mark message delivered failed",
-						zap.Error(err),
-						zap.Uint64("conversation_id", targetConversationID),
-						zap.Uint64("message_id", messageID),
-					)
 				}
 			})
 			if consumeCtx.Err() != nil {
@@ -285,17 +250,6 @@ func main() {
 	_ = srv.Shutdown(shutdownCtx)
 }
 
-type messageNewEvent struct {
-	Type    string `json:"type"`
-	Payload struct {
-		ConversationID uint64 `json:"conversation_id"`
-		Message        struct {
-			ID         uint64 `json:"id"`
-			SenderType string `json:"sender_type"`
-		} `json:"message"`
-	} `json:"payload"`
-}
-
 type messageEventTypeEnvelope struct {
 	Type string `json:"type"`
 }
@@ -310,21 +264,4 @@ func parseMessageEventType(payload []byte) (string, bool) {
 		return "", false
 	}
 	return eventType, true
-}
-
-func parseMessageNewEvent(payload []byte) (conversationID uint64, messageID uint64, senderType string, ok bool) {
-	var event messageNewEvent
-	if err := json.Unmarshal(payload, &event); err != nil {
-		return 0, 0, "", false
-	}
-	if event.Type != "message.new" {
-		return 0, 0, "", false
-	}
-
-	senderType = strings.ToLower(strings.TrimSpace(event.Payload.Message.SenderType))
-	if senderType != "visitor" && senderType != "agent" {
-		senderType = ""
-	}
-
-	return event.Payload.ConversationID, event.Payload.Message.ID, senderType, true
 }

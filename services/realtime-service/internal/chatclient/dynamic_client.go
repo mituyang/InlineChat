@@ -106,30 +106,6 @@ func (d *DynamicClient) CreateMessage(ctx context.Context, conversationID uint64
 	return client.CreateMessage(ctx, conversationID, reqBody)
 }
 
-func (d *DynamicClient) MarkMessageDelivered(ctx context.Context, conversationID uint64, messageID uint64) (*MarkMessageDeliveredResult, error) {
-	client, err := d.clientForCall(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	resp, err := client.MarkMessageDelivered(ctx, conversationID, messageID)
-	if err == nil {
-		return resp, nil
-	}
-	if !isRetryableRPCError(err) {
-		return nil, err
-	}
-	if reconnectErr := d.refresh(ctx, true); reconnectErr != nil {
-		return nil, err
-	}
-
-	client = d.currentClient()
-	if client == nil {
-		return nil, err
-	}
-	return client.MarkMessageDelivered(ctx, conversationID, messageID)
-}
-
 func (d *DynamicClient) GetConversation(ctx context.Context, conversationID uint64) (*Conversation, error) {
 	client, err := d.clientForCall(ctx)
 	if err != nil {

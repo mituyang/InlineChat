@@ -45,7 +45,6 @@ flowchart TB
   GW -->|反向代理 /ws| REALTIME
 
   REALTIME -->|gRPC CreateMessage| CHAT
-  REALTIME -->|gRPC MarkMessageDelivered| CHAT
   REALTIME -->|gRPC Me| AUTH
 
   CHAT -->|读写| MYSQL
@@ -116,14 +115,6 @@ sequenceDiagram
   CH->>RD: Publish message.new
   RD-->>RT: PSubscribe chat.messages.*
   RT-->>C: WS message.new
-
-  alt 检测到至少一个对端在线并成功入队
-    RT->>CH: gRPC MarkMessageDelivered
-    CH->>DB: UPDATE status=delivered
-    CH->>RD: Publish message.status
-    RD-->>RT: message.status
-    RT-->>C: WS message.status delivered
-  end
 ```
 
 ## 4. Outbox 一致性机制图
@@ -181,11 +172,8 @@ stateDiagram-v2
 ```mermaid
 stateDiagram-v2
   [*] --> SENT: CreateMessage 持久化成功
-  SENT --> DELIVERED: realtime 调用 MarkMessageDelivered
-  DELIVERED --> READ: MarkMessagesRead
   SENT --> READ: MarkMessagesRead 直接推进
 
-  DELIVERED --> DELIVERED: 幂等重复推进
   READ --> READ: 幂等重复上报
 ```
 

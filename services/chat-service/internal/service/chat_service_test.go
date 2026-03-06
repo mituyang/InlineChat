@@ -278,22 +278,6 @@ func (r *fakeMessageRepository) ListByConversation(_ context.Context, conversati
 	return out, nil
 }
 
-func (r *fakeMessageRepository) MarkDelivered(_ context.Context, conversationID uint64, messageID uint64) (bool, error) {
-	items := r.items[conversationID]
-	for i := range items {
-		if items[i].ID != messageID {
-			continue
-		}
-		if items[i].Status != MessageStatusSent {
-			return false, nil
-		}
-		items[i].Status = MessageStatusDelivered
-		r.items[conversationID] = items
-		return true, nil
-	}
-	return false, nil
-}
-
 func (r *fakeMessageRepository) MarkReadByConversationAndSender(_ context.Context, conversationID uint64, senderType string, lastReadMessageID uint64) (int64, error) {
 	items := r.items[conversationID]
 	var updated int64
@@ -317,9 +301,6 @@ func (r *fakeMessageRepository) MarkReadByConversationAndSender(_ context.Contex
 type fakePublisher struct {
 	calls                int
 	lastMessage          *model.Message
-	statusCalls          int
-	lastStatusMessageID  uint64
-	lastStatus           string
 	rangeStatusCalls     int
 	lastRangeSenderType  string
 	lastRangeUpToMessage uint64
@@ -333,13 +314,6 @@ func (p *fakePublisher) PublishMessageCreated(_ context.Context, message *model.
 	p.calls++
 	copyMessage := *message
 	p.lastMessage = &copyMessage
-	return p.err
-}
-
-func (p *fakePublisher) PublishMessageStatus(_ context.Context, _ uint64, messageID uint64, status string) error {
-	p.statusCalls++
-	p.lastStatusMessageID = messageID
-	p.lastStatus = status
 	return p.err
 }
 
@@ -1126,43 +1100,6 @@ func TestCreateMessageIdempotentByClientMsgID(t *testing.T) {
 	}
 }
 
-func TestMarkMessageDeliveredOnlySentToDelivered(t *testing.T) {
-	svc, _, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
-		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open"},
-	})
-	if err := messageRepo.Create(context.Background(), &model.Message{
-		ConversationID: 1,
-		SenderType:     "visitor",
-		Content:        "hello",
-		ClientMsgID:    "m_1",
-		Status:         MessageStatusSent,
-	}); err != nil {
-		t.Fatalf("seed message failed: %v", err)
-	}
-
-	out, err := svc.MarkMessageDelivered(context.Background(), 1, 1)
-	if err != nil {
-		t.Fatalf("MarkMessageDelivered failed: %v", err)
-	}
-	if !out.Updated || out.Status != MessageStatusDelivered {
-		t.Fatalf("unexpected first delivered result: %+v", out)
-	}
-	if publisher.statusCalls != 1 || publisher.lastStatusMessageID != 1 || publisher.lastStatus != MessageStatusDelivered {
-		t.Fatalf("expected publish delivered status once, got %+v", publisher)
-	}
-
-	out, err = svc.MarkMessageDelivered(context.Background(), 1, 1)
-	if err != nil {
-		t.Fatalf("MarkMessageDelivered second call failed: %v", err)
-	}
-	if out.Updated || out.Status != MessageStatusDelivered {
-		t.Fatalf("expected idempotent delivered status, got %+v", out)
-	}
-	if publisher.statusCalls != 1 {
-		t.Fatalf("idempotent delivered should not republish, got calls=%d", publisher.statusCalls)
-	}
-}
-
 func TestMarkMessagesReadSuccess(t *testing.T) {
 	svc, _, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
 		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open"},
@@ -1179,7 +1116,7 @@ func TestMarkMessagesReadSuccess(t *testing.T) {
 		SenderType:     "visitor",
 		Content:        "v2",
 		ClientMsgID:    "m_2",
-		Status:         MessageStatusDelivered,
+		Status:         MessageStatusSent,
 	})
 	_ = messageRepo.Create(context.Background(), &model.Message{
 		ConversationID: 1,

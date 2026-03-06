@@ -1424,7 +1424,7 @@ function normalizeMessageStatus(status) {
   const text = String(status || "")
     .trim()
     .toLowerCase();
-  if (text === "sending" || text === "sent" || text === "delivered" || text === "read" || text === "failed") {
+  if (text === "sending" || text === "sent" || text === "read" || text === "failed") {
     return text;
   }
   return "";

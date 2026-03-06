@@ -4,7 +4,6 @@
 - 管理 WebSocket 连接（访客与客服）。
 - 将客户端 `message.send` 转换为 `chat-service` gRPC 写入请求。
 - 订阅 Redis 事件并向同会话连接广播。
-- 在“对端在线且成功入队”时，回写 `delivered` 状态到 `chat-service`。
 
 ## 端口与探针
 - 默认 HTTP 端口：`8203`（`HTTP_PORT`）

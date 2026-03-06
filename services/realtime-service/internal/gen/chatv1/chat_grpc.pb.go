@@ -23,7 +23,6 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ChatInternalServiceClient interface {
 	CreateMessage(ctx context.Context, in *CreateMessageRequest, opts ...grpc.CallOption) (*CreateMessageResponse, error)
-	MarkMessageDelivered(ctx context.Context, in *MarkMessageDeliveredRequest, opts ...grpc.CallOption) (*MarkMessageDeliveredResponse, error)
 }
 
 type chatInternalServiceClient struct {
@@ -43,21 +42,11 @@ func (c *chatInternalServiceClient) CreateMessage(ctx context.Context, in *Creat
 	return out, nil
 }
 
-func (c *chatInternalServiceClient) MarkMessageDelivered(ctx context.Context, in *MarkMessageDeliveredRequest, opts ...grpc.CallOption) (*MarkMessageDeliveredResponse, error) {
-	out := new(MarkMessageDeliveredResponse)
-	err := c.cc.Invoke(ctx, "/inlinechat.chat.v1.ChatInternalService/MarkMessageDelivered", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // ChatInternalServiceServer is the server API for ChatInternalService service.
 // All implementations must embed UnimplementedChatInternalServiceServer
 // for forward compatibility
 type ChatInternalServiceServer interface {
 	CreateMessage(context.Context, *CreateMessageRequest) (*CreateMessageResponse, error)
-	MarkMessageDelivered(context.Context, *MarkMessageDeliveredRequest) (*MarkMessageDeliveredResponse, error)
 	mustEmbedUnimplementedChatInternalServiceServer()
 }
 
@@ -67,9 +56,6 @@ type UnimplementedChatInternalServiceServer struct {
 
 func (UnimplementedChatInternalServiceServer) CreateMessage(context.Context, *CreateMessageRequest) (*CreateMessageResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateMessage not implemented")
-}
-func (UnimplementedChatInternalServiceServer) MarkMessageDelivered(context.Context, *MarkMessageDeliveredRequest) (*MarkMessageDeliveredResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method MarkMessageDelivered not implemented")
 }
 func (UnimplementedChatInternalServiceServer) mustEmbedUnimplementedChatInternalServiceServer() {}
 
@@ -102,24 +88,6 @@ func _ChatInternalService_CreateMessage_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
-func _ChatInternalService_MarkMessageDelivered_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(MarkMessageDeliveredRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(ChatInternalServiceServer).MarkMessageDelivered(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/inlinechat.chat.v1.ChatInternalService/MarkMessageDelivered",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(ChatInternalServiceServer).MarkMessageDelivered(ctx, req.(*MarkMessageDeliveredRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // ChatInternalService_ServiceDesc is the grpc.ServiceDesc for ChatInternalService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -130,10 +98,6 @@ var ChatInternalService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateMessage",
 			Handler:    _ChatInternalService_CreateMessage_Handler,
-		},
-		{
-			MethodName: "MarkMessageDelivered",
-			Handler:    _ChatInternalService_MarkMessageDelivered_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -684,7 +684,7 @@ function normalizeMessageStatus(status) {
   const text = String(status || "")
     .trim()
     .toLowerCase();
-  if (text === "sending" || text === "sent" || text === "delivered" || text === "read" || text === "failed") {
+  if (text === "sending" || text === "sent" || text === "read" || text === "failed") {
     return text;
   }
   return "";
@@ -1130,9 +1130,6 @@ function formatMessageStatus(status) {
     return "发送失败";
   }
   if (status === "sent") {
-    return "已发送";
-  }
-  if (status === "delivered") {
     return "已发送";
   }
   if (status === "read") {

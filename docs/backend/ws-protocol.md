@@ -87,19 +87,7 @@
 ```
 
 ### `message.status`
-消息状态推进广播，常见于 `delivered/read`。
-
-单条更新：
-```json
-{
-  "type": "message.status",
-  "payload": {
-    "conversation_id": 1,
-    "message_id": 123,
-    "status": "delivered"
-  }
-}
-```
+消息状态推进广播，当前用于 `read`。
 
 区间更新：
 ```json

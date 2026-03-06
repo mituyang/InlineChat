@@ -63,26 +63,6 @@ func (s *ChatInternalServer) CreateMessage(ctx context.Context, req *chatv1.Crea
 	}, nil
 }
 
-// MarkMessageDelivered 用于 realtime 在成功下发后回写 delivered。
-func (s *ChatInternalServer) MarkMessageDelivered(ctx context.Context, req *chatv1.MarkMessageDeliveredRequest) (*chatv1.MarkMessageDeliveredResponse, error) {
-	if req.GetConversationId() == 0 {
-		return nil, status.Error(codes.InvalidArgument, "conversation_id is required")
-	}
-	if req.GetMessageId() == 0 {
-		return nil, status.Error(codes.InvalidArgument, "message_id is required")
-	}
-
-	result, err := s.chatService.MarkMessageDelivered(ctx, req.GetConversationId(), req.GetMessageId())
-	if err != nil {
-		return nil, mapError(err)
-	}
-
-	return &chatv1.MarkMessageDeliveredResponse{
-		Updated: result.Updated,
-		Status:  result.Status,
-	}, nil
-}
-
 // mapError 将领域错误映射到 gRPC code，减少调用方分支复杂度。
 func mapError(err error) error {
 	if errors.Is(err, service.ErrConversationNotFound) {

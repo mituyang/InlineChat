@@ -59,27 +59,6 @@ func (p *RedisMessagePublisher) PublishMessageCreated(_ context.Context, message
 	return nil
 }
 
-// PublishMessageStatus 推送单条消息状态变更（sent -> delivered/read）。
-func (p *RedisMessagePublisher) PublishMessageStatus(_ context.Context, conversationID uint64, messageID uint64, status string) error {
-	if conversationID == 0 || messageID == 0 {
-		return nil
-	}
-
-	payload := map[string]any{
-		"type": "message.status",
-		"payload": map[string]any{
-			"conversation_id": conversationID,
-			"message_id":      messageID,
-			"status":          status,
-		},
-	}
-
-	if err := p.publishByConversationID(conversationID, payload); err != nil {
-		return fmt.Errorf("publish message.status(single) failed: %w", err)
-	}
-	return nil
-}
-
 // PublishMessageStatusRange 推送“截至某条消息”的批量状态推进事件。
 func (p *RedisMessagePublisher) PublishMessageStatusRange(_ context.Context, conversationID uint64, senderType string, upToMessageID uint64, status string) error {
 	if conversationID == 0 || upToMessageID == 0 {

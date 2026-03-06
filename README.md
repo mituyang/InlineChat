@@ -83,7 +83,7 @@
   - 客服工作台与管理后台均支持亮色/暗色主题切换，并使用同一主题偏好存储键进行跨页面保持。
   - 客服端支持会话列表、会话认领/转接/关闭、消息收发、未读统计、快捷语、会话统计面板；客服与访客都可通过 WebSocket 发消息，断连自动重连并降级轮询。
   - WebSocket 支持断线补拉：连接时带 `last_message_id` 可回补该消息之后的历史消息。
-  - 消息状态支持 `sent -> delivered -> read`：写入后为 `sent`，对端在线并成功入队后推进到 `delivered`，客户端显式上报已读后推进到 `read`。
+  - 消息状态支持 `sent -> read`：写入后为 `sent`，客户端显式上报已读后推进到 `read`。
   - 超级管理员账号只从 `.env` 读取并由 `auth-service` 启动时确保存在（写入 `super_admins` 表）；客服账号存储在 `agents` 表并由管理台创建。
 
 ## Widget 嵌入方式
@@ -230,7 +230,6 @@
 - `gateway-service` 通过 gRPC 调用 `chat-service`、`auth-service`、`admin-service`
 - `realtime-service` 通过 gRPC 调用 `chat-service`
 - `chat-service` 在消息写入成功后会发布 `message.new` 到 Redis 频道，`realtime-service` 订阅后广播给 WebSocket 客户端（访客与客服均可实时收到）
-- 广播时若检测到至少 1 个“对端角色”在线连接成功入队，`realtime-service` 会回写消息状态到 `delivered`
 - gRPC 协议定义：
   - `packages/shared-types/proto/inlinechat/chat.proto`
   - `packages/shared-types/proto/inlinechat/auth.proto`
@@ -271,7 +270,7 @@
 {"type":"message.send","payload":{"sender_type":"agent","content":"您好，请问有什么可以帮您？","client_msg_id":"a1"}}
 ```
 
-`message.new` 中的 `message` 结构会包含 `status` 字段（`sent`/`delivered`/`read`）。
+`message.new` 中的 `message` 结构会包含 `status` 字段（`sent`/`read`）。
 
 断线补拉示例（从 `message_id=120` 之后继续）：
 - `GET /ws/:conversation_id?visitor_token=vt_xxx&last_message_id=120`

@@ -29,7 +29,6 @@ var (
 
 const (
 	MessageStatusSent      = "sent"
-	MessageStatusDelivered = "delivered"
 	MessageStatusRead      = "read"
 	MaxMessageContentChars = 2000
 	conversationCreateLock = 5 * time.Second
@@ -67,7 +66,6 @@ type outboxNotifyState struct {
 
 type MessageEventPublisher interface {
 	PublishMessageCreated(ctx context.Context, message *model.Message) error
-	PublishMessageStatus(ctx context.Context, conversationID uint64, messageID uint64, status string) error
 	PublishMessageStatusRange(ctx context.Context, conversationID uint64, senderType string, upToMessageID uint64, status string) error
 	PublishConversationClosed(ctx context.Context, conversationID uint64) error
 }
@@ -75,10 +73,6 @@ type MessageEventPublisher interface {
 type noopMessageEventPublisher struct{}
 
 func (noopMessageEventPublisher) PublishMessageCreated(context.Context, *model.Message) error {
-	return nil
-}
-
-func (noopMessageEventPublisher) PublishMessageStatus(context.Context, uint64, uint64, string) error {
 	return nil
 }
 
@@ -149,11 +143,6 @@ type MarkMessagesReadInput struct {
 	ActorType         string
 	ActorAgentID      uint64
 	VisitorToken      string
-}
-
-type MarkMessageDeliveredResult struct {
-	Updated bool
-	Status  string
 }
 
 func New(conversationRepo repository.ConversationRepository, messageRepo repository.MessageRepository, logger *zap.Logger, publisher MessageEventPublisher, autoCloseAfter time.Duration) *ChatService {
@@ -417,59 +406,6 @@ func (s *ChatService) CreateMessage(ctx context.Context, input CreateMessageInpu
 	}
 
 	return message, nil
-}
-
-func (s *ChatService) MarkMessageDelivered(ctx context.Context, conversationID uint64, messageID uint64) (MarkMessageDeliveredResult, error) {
-	if conversationID == 0 {
-		return MarkMessageDeliveredResult{}, fmt.Errorf("conversation_id is required")
-	}
-	if messageID == 0 {
-		return MarkMessageDeliveredResult{}, fmt.Errorf("message_id is required")
-	}
-
-	var result MarkMessageDeliveredResult
-	err := s.withEventTransaction(ctx, func(txCtx context.Context) error {
-		message, err := s.messageRepo.GetByID(txCtx, conversationID, messageID)
-		if err != nil {
-			if errors.Is(err, repository.ErrNotFound) {
-				return ErrMessageNotFound
-			}
-			return err
-		}
-
-		// delivered/read 的重复推进按幂等处理，避免并发重复更新报错。
-		switch message.Status {
-		case MessageStatusRead, MessageStatusDelivered:
-			result = MarkMessageDeliveredResult{Updated: false, Status: message.Status}
-			return nil
-		}
-
-		updated, err := s.messageRepo.MarkDelivered(txCtx, conversationID, messageID)
-		if err != nil {
-			return err
-		}
-		if updated {
-			if err := s.emitMessageStatus(txCtx, conversationID, messageID, MessageStatusDelivered); err != nil {
-				return err
-			}
-			result = MarkMessageDeliveredResult{Updated: true, Status: MessageStatusDelivered}
-			return nil
-		}
-
-		latest, err := s.messageRepo.GetByID(txCtx, conversationID, messageID)
-		if err != nil {
-			if errors.Is(err, repository.ErrNotFound) {
-				return ErrMessageNotFound
-			}
-			return err
-		}
-		result = MarkMessageDeliveredResult{Updated: false, Status: latest.Status}
-		return nil
-	})
-	if err != nil {
-		return MarkMessageDeliveredResult{}, err
-	}
-	return result, nil
 }
 
 func (s *ChatService) MarkMessagesRead(ctx context.Context, input MarkMessagesReadInput) (uint64, error) {
@@ -998,33 +934,6 @@ func (s *ChatService) emitMessageCreated(ctx context.Context, message *model.Mes
 		},
 	}
 	return s.enqueueOutboxEvent(ctx, message.ConversationID, "message.new", payload)
-}
-
-func (s *ChatService) emitMessageStatus(ctx context.Context, conversationID uint64, messageID uint64, status string) error {
-	if conversationID == 0 || messageID == 0 {
-		return nil
-	}
-	if !s.eventOutboxEnabled() {
-		if err := s.publisher.PublishMessageStatus(ctx, conversationID, messageID, status); err != nil {
-			s.logger.Warn("publish message.status event failed",
-				zap.Error(err),
-				zap.Uint64("conversation_id", conversationID),
-				zap.Uint64("message_id", messageID),
-				zap.String("status", status),
-			)
-		}
-		return nil
-	}
-
-	payload := map[string]any{
-		"type": "message.status",
-		"payload": map[string]any{
-			"conversation_id": conversationID,
-			"message_id":      messageID,
-			"status":          status,
-		},
-	}
-	return s.enqueueOutboxEvent(ctx, conversationID, "message.status", payload)
 }
 
 func (s *ChatService) emitMessageStatusRange(ctx context.Context, conversationID uint64, senderType string, upToMessageID uint64, status string) error {

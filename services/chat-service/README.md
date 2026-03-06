@@ -59,7 +59,7 @@ go run ./services/chat-service/cmd/server
 ```
 
 ## 状态与一致性说明
-- 消息状态：`sent -> delivered -> read`
+- 消息状态：`sent -> read`
 - 消息幂等键：`client_msg_id`（会话内唯一）
 - 会话创建使用锁避免并发重复建会话
 - Outbox 开启时，业务写入与事件落库同事务提交
