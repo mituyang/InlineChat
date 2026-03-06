@@ -245,7 +245,14 @@ func buildWidgetStorageScope(siteID string, siteDomain string) string {
 func matchesSiteDomain(siteDomain string, raw string) bool {
 	normalizedSiteDomain := normalizeHostLike(siteDomain)
 	normalizedHost := normalizeHostLike(raw)
-	return normalizedSiteDomain != "" && normalizedSiteDomain == normalizedHost
+	if normalizedSiteDomain == "" || normalizedHost == "" {
+		return false
+	}
+	if normalizedSiteDomain == normalizedHost {
+		return true
+	}
+	// 本地开发时允许 localhost 跨端口调试，避免每次切换 dev server 都改站点配置。
+	return isLocalhostHost(normalizedSiteDomain) && isLocalhostHost(normalizedHost)
 }
 
 func normalizeOrigin(raw string) string {
@@ -315,4 +322,12 @@ func normalizeHostFromURL(parsed *url.URL) string {
 	default:
 		return host + ":" + port
 	}
+}
+
+func isLocalhostHost(raw string) bool {
+	hostURL, ok := parseURLLike("https://" + strings.TrimSpace(raw))
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(hostURL.Hostname()), "localhost")
 }

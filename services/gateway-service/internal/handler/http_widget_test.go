@@ -103,3 +103,24 @@ func TestValidateWidgetSessionTokenRejectExpired(t *testing.T) {
 		t.Fatal("expected expired widget session to fail")
 	}
 }
+
+func TestValidateWidgetRequestSourceAllowsLocalhostAnyPort(t *testing.T) {
+	parentOrigin, err := validateWidgetRequestSource(
+		"localhost",
+		"http://localhost:8200",
+		"http://localhost:3000/demo",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("expected localhost any port to be allowed, got err=%v", err)
+	}
+	if parentOrigin != "http://localhost:8200" {
+		t.Fatalf("unexpected parent origin: %s", parentOrigin)
+	}
+}
+
+func TestMatchesSiteDomainKeepsNonLocalhostPortStrict(t *testing.T) {
+	if matchesSiteDomain("demo.example.com", "https://demo.example.com:8200") {
+		t.Fatal("non-localhost domain should not ignore custom port")
+	}
+}
