@@ -19,7 +19,7 @@ COVERAGE_THRESHOLD_ALL ?= 12
 MIN_COVERED_PACKAGES ?= 10
 MIN_TOTAL_PACKAGES ?= 20
 
-.PHONY: help ensure-env config up up-fg down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover env-lint quality e2e-ui verify-all proto build-local image-build smoke integration full-regression mvp-release
+.PHONY: help ensure-env config schema-check up up-fg down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover env-lint quality e2e-ui verify-all proto build-local image-build smoke integration full-regression mvp-release
 
 help:
 	@echo "可用命令:"
@@ -33,6 +33,7 @@ help:
 	@echo "  make monitoring-down 停止监控组件"
 	@echo "  make monitoring-logs 查看监控组件日志"
 	@echo "  make config         校验 docker compose 配置"
+	@echo "  make schema-check   启动前校验当前数据库结构是否与仓库 migrations 一致"
 	@echo "  make migrate        执行全部迁移任务"
 	@echo "  make lint           执行格式与静态检查（fmt-check + vet）"
 	@echo "  make test           运行后端 Go 测试"
@@ -77,10 +78,23 @@ build-local:
 image-build: ensure-env
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) build
 
-up: ensure-env build-local image-build
+schema-check: ensure-env
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d mysql
+	@attempt=0; \
+	until docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) exec -T mysql sh -lc 'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysqladmin ping -h localhost -uroot --silent' >/dev/null 2>&1; do \
+		attempt=$$((attempt + 1)); \
+		if [ $$attempt -ge 30 ]; then \
+			echo "mysql 未在预期时间内进入可用状态"; \
+			exit 1; \
+		fi; \
+		sleep 2; \
+	done
+	ENV_FILE=$(ENV_FILE) COMPOSE_FILE=$(COMPOSE_FILE) ./scripts/schema-drift-check.sh
+
+up: schema-check build-local image-build
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d
 
-up-fg: ensure-env build-local image-build
+up-fg: schema-check build-local image-build
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up
 
 down: ensure-env
