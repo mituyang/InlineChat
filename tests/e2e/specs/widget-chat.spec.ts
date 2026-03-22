@@ -127,6 +127,8 @@ test("widget-sdk：客服发消息后悬浮图标显示未读数", async ({ page
   expect(conversationID).toMatch(/^\d+$/);
 
   await expect(frame.locator("#messages")).toContainText(visitorText);
+  await frame.locator("#backBtn").click();
+  await expect(frame.locator('[data-conversation-id]')).toBeVisible();
   await frame.locator("#closeBtn").click();
   await expect(page.locator('iframe[title="E2E 在线客服"]')).toBeHidden();
 
@@ -154,4 +156,83 @@ test("widget-sdk：客服发消息后悬浮图标显示未读数", async ({ page
   const badge = page.locator('[data-inlinechat-unread-badge="true"]');
   await expect(badge).toBeVisible();
   await expect(badge).toHaveText("1");
+
+  await launcher.click();
+  const historyItem = frame.locator(`[data-conversation-id="${conversationID}"]`);
+  await expect(historyItem).toBeVisible();
+  await expect(historyItem.locator('[data-history-unread-badge="true"]')).toHaveText("1");
+});
+
+test("widget-chat：停留历史列表时客服新消息会刷新会话未读", async ({ page, request }) => {
+  requireSuperAdminCredentials();
+
+  const seed = buildScenarioSeed("widget-history-unread");
+  const superToken = await loginAsSuperAdmin(request);
+  await createSite(request, superToken, seed.site);
+  const agent = await createAgentWithRetry(request, superToken, seed.agent);
+  const agentToken = await loginByPassword(request, agent.email, agent.password);
+
+  await page.addInitScript(
+    ({ siteID, siteDomain, visitorToken }) => {
+      const key = `inlinechat.widget.visitor_token.${siteID}@${siteDomain}`;
+      localStorage.setItem(key, visitorToken);
+    },
+    {
+      siteID: seed.site.siteID,
+      siteDomain: seed.site.siteDomain,
+      visitorToken: seed.visitorToken,
+    },
+  );
+
+  await page.goto(
+    `/app/widget/?site_id=${encodeURIComponent(seed.site.siteID)}&title=${encodeURIComponent("E2E Widget")}&parent_origin=${encodeURIComponent(e2eEnv.baseOrigin)}`,
+    {
+      waitUntil: "domcontentloaded",
+      referer: `${e2eEnv.baseOrigin}/tests/e2e/widget-host`,
+    },
+  );
+
+  await page.click("#startChatBtn");
+  const visitorText = `widget-history-visitor-${seed.suffix}`;
+  const createConversationPromise = page.waitForResponse((response) => {
+    if (response.request().method() !== "POST") {
+      return false;
+    }
+    return new URL(response.url()).pathname === "/api/chat/v1/conversations";
+  });
+  await page.fill("#contentInput", visitorText);
+  await page.click("#sendBtn");
+
+  const createConversationResp = await createConversationPromise;
+  expect(createConversationResp.ok()).toBeTruthy();
+  const createdConversation = await createConversationResp.json();
+  const conversationID = String(createdConversation?.id || "").trim();
+  expect(conversationID).toMatch(/^\d+$/);
+
+  await page.click("#backBtn");
+  const historyItem = page.locator(`[data-conversation-id="${conversationID}"]`);
+  await expect(historyItem).toBeVisible();
+
+  const claimResp = await request.post(`/api/chat/v1/conversations/${conversationID}/claim`, {
+    headers: {
+      Authorization: `Bearer ${agentToken}`,
+    },
+  });
+  expect(claimResp.ok()).toBeTruthy();
+
+  const agentText = `widget-history-agent-${seed.suffix}`;
+  const sendAgentResp = await request.post(`/api/chat/v1/conversations/${conversationID}/messages`, {
+    headers: {
+      Authorization: `Bearer ${agentToken}`,
+      "Content-Type": "application/json",
+    },
+    data: {
+      sender_type: "agent",
+      content: agentText,
+      client_msg_id: `agent_history_${seed.suffix}`,
+    },
+  });
+  expect(sendAgentResp.ok()).toBeTruthy();
+
+  await expect(historyItem.locator('[data-history-unread-badge="true"]')).toHaveText("1");
 });

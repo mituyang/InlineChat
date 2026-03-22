@@ -160,6 +160,14 @@ body {
   gap: 10px;
 }
 
+.history-item-side {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+}
+
 .history-item-title {
   font-size: 15px;
   font-weight: 600;
@@ -169,6 +177,22 @@ body {
 .history-item-time {
   font-size: 12px;
   color: var(--sub);
+  flex-shrink: 0;
+}
+
+.history-item-unread {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
   flex-shrink: 0;
 }
 

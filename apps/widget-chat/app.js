@@ -3,6 +3,7 @@ const ACK_TIMEOUT_MS = 5000;
 const CONVERSATION_META_SYNC_MIN_INTERVAL_MS = 2000;
 const WS_AUTO_RETRY_MAX = 2;
 const BACKFILL_SYNC_INTERVAL_MS = 12000;
+const HISTORY_SYNC_INTERVAL_MS = 5000;
 const VISITOR_TOKEN_RECORD_VERSION = 1;
 const VISITOR_TOKEN_IDLE_TTL_MS = 1000 * 60 * 60 * 24 * 90;
 const VISITOR_TOKEN_TOUCH_MIN_INTERVAL_MS = 1000 * 60;
@@ -31,6 +32,8 @@ const state = {
   pollTimer: null,
   pollInFlight: false,
   pollAttempt: 0,
+  historySyncTimer: null,
+  historySyncInFlight: false,
   backfillTimer: null,
   backfillInFlight: false,
   conversationMetaSyncTimer: null,
@@ -183,7 +186,12 @@ function handleHostMessage(event) {
       void reportReadProgress();
       void runBackfillSync(false);
       schedulePollingSync(0);
+    } else if (state.conversationHistory.length > 0) {
+      void refreshHistoryConversationStatuses();
+      scheduleHistorySync(0);
     }
+  } else {
+    stopHistorySync();
   }
   notifyHostUnreadCount();
 }
@@ -297,6 +305,7 @@ function normalizeHistoryEntry(item) {
     conversation_id: conversationID,
     status: normalizeConversationStatus(item.status) || "open",
     assigned_agent_id: normalizeAssignedAgentID(item.assigned_agent_id),
+    unread_count: normalizeUnreadCount(item.unread_count),
     preview: String(item.preview || "").trim().slice(0, 120),
     updated_at: String(item.updated_at || "").trim(),
   };
@@ -324,6 +333,8 @@ function upsertConversationHistoryEntry(entry) {
   }
   const hasAssignedAgentID =
     Boolean(entry) && typeof entry === "object" && Object.prototype.hasOwnProperty.call(entry, "assigned_agent_id");
+  const hasUnreadCount =
+    Boolean(entry) && typeof entry === "object" && Object.prototype.hasOwnProperty.call(entry, "unread_count");
 
   let found = false;
   const next = state.conversationHistory.map((item) => {
@@ -335,6 +346,7 @@ function upsertConversationHistoryEntry(entry) {
       ...item,
       status: normalized.status || item.status,
       assigned_agent_id: hasAssignedAgentID ? normalized.assigned_agent_id : normalizeAssignedAgentID(item.assigned_agent_id),
+      unread_count: hasUnreadCount ? normalized.unread_count : normalizeUnreadCount(item.unread_count),
       preview: normalized.preview || item.preview,
       updated_at: normalized.updated_at || item.updated_at,
     };
@@ -363,6 +375,44 @@ function summarizeMessagePreview(text) {
     .replace(/\s+/g, " ")
     .trim()
     .slice(0, 80);
+}
+
+function normalizeUnreadCount(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return 0;
+  }
+  return Math.floor(numeric);
+}
+
+function formatUnreadCount(value) {
+  const unread = normalizeUnreadCount(value);
+  if (unread <= 0) {
+    return "";
+  }
+  return unread > 99 ? "99+" : String(unread);
+}
+
+function countConversationUnreadMessages(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return 0;
+  }
+  return messages.reduce((sum, item) => {
+    if (item?.sender_type !== "agent") {
+      return sum;
+    }
+    if (item.status === "read") {
+      return sum;
+    }
+    return sum + 1;
+  }, 0);
+}
+
+function countTotalUnreadMessages() {
+  if (!Array.isArray(state.conversationHistory) || state.conversationHistory.length === 0) {
+    return 0;
+  }
+  return state.conversationHistory.reduce((sum, item) => sum + normalizeUnreadCount(item?.unread_count), 0);
 }
 
 function normalizeAssignedAgentID(value) {
@@ -414,6 +464,7 @@ function renderConversationHistory() {
   const items = sortHistoryEntries(state.conversationHistory);
   if (items.length === 0) {
     els.historyEmpty.hidden = false;
+    notifyHostUnreadCount();
     return;
   }
 
@@ -436,12 +487,26 @@ function renderConversationHistory() {
     const formattedAgentID = formatAgentID4(item.assigned_agent_id);
     title.textContent = formattedAgentID ? `客服${formattedAgentID}` : "客服待接入";
 
+    const side = document.createElement("div");
+    side.className = "history-item-side";
+
     const time = document.createElement("div");
     time.className = "history-item-time";
     time.textContent = formatHistoryTime(item.updated_at);
 
+    side.appendChild(time);
+
+    const unread = normalizeUnreadCount(item.unread_count);
+    if (unread > 0) {
+      const badge = document.createElement("span");
+      badge.className = "history-item-unread";
+      badge.setAttribute("data-history-unread-badge", "true");
+      badge.textContent = formatUnreadCount(unread);
+      side.appendChild(badge);
+    }
+
     head.appendChild(title);
-    head.appendChild(time);
+    head.appendChild(side);
 
     const preview = document.createElement("div");
     preview.className = "history-item-preview";
@@ -466,30 +531,118 @@ function renderConversationHistory() {
     entry.appendChild(meta);
     els.historyList.appendChild(entry);
   }
+
+  notifyHostUnreadCount();
 }
 
 async function refreshHistoryConversationStatuses() {
   const snapshot = state.conversationHistory.slice(0, 20);
-  for (const item of snapshot) {
-    const conversationID = String(item?.conversation_id || "").trim();
-    if (!conversationID) {
-      continue;
-    }
-    try {
-      const conversation = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${conversationID}`));
-      if (conversation.site_id !== state.siteID) {
-        continue;
+  await Promise.all(
+    snapshot.map(async (item) => {
+      const conversationID = String(item?.conversation_id || "").trim();
+      if (!conversationID) {
+        return;
       }
-      upsertConversationHistoryEntry({
+
+      const patch = {
         conversation_id: conversationID,
-        status: normalizeConversationStatus(conversation.status) || item.status || "open",
-        assigned_agent_id: conversation.assigned_agent_id,
-        updated_at: String(conversation.updated_at || conversation.created_at || item.updated_at || "").trim() || new Date().toISOString(),
-      });
-    } catch {
-      // 历史项同步失败时保留本地记录，避免把已关闭会话从列表中移除。
-    }
+        status: normalizeConversationStatus(item?.status) || "open",
+        assigned_agent_id: normalizeAssignedAgentID(item?.assigned_agent_id),
+        unread_count: normalizeUnreadCount(item?.unread_count),
+        preview: String(item?.preview || "").trim(),
+        updated_at: String(item?.updated_at || "").trim(),
+      };
+
+      try {
+        const conversation = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${conversationID}`));
+        if (conversation.site_id !== state.siteID) {
+          return;
+        }
+        patch.status = normalizeConversationStatus(conversation.status) || patch.status;
+        patch.assigned_agent_id = conversation.assigned_agent_id;
+        patch.updated_at = String(conversation.updated_at || conversation.created_at || patch.updated_at || "").trim() || new Date().toISOString();
+      } catch {
+        // 历史项同步失败时保留本地记录，避免把已关闭会话从列表中移除。
+      }
+
+      try {
+        let messages = [];
+        if (conversationID === String(state.conversationID || "") && Array.isArray(state.messages) && state.messages.length > 0) {
+          messages = state.messages.map(normalizeMessage).filter(Boolean).sort(compareMessageOrder);
+        } else {
+          const data = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${conversationID}/messages?limit=200`));
+          messages = (Array.isArray(data.items) ? data.items : []).map(normalizeMessage).filter(Boolean).sort(compareMessageOrder);
+        }
+
+        patch.unread_count = countConversationUnreadMessages(messages);
+        const latest = messages[messages.length - 1];
+        if (latest) {
+          patch.preview = summarizeMessagePreview(latest.content || "") || patch.preview;
+          patch.updated_at =
+            String(latest.updated_at || latest.created_at || patch.updated_at || "").trim() || new Date().toISOString();
+        }
+      } catch {
+        // 消息列表拉取失败时保留当前未读与预览，避免覆盖已有本地状态。
+      }
+
+      upsertConversationHistoryEntry(patch);
+    })
+  );
+}
+
+function shouldRunHistorySync() {
+  if (!state.hostOpen) {
+    return false;
   }
+  if (state.viewMode !== "history") {
+    return false;
+  }
+  if (!Array.isArray(state.conversationHistory) || state.conversationHistory.length === 0) {
+    return false;
+  }
+  if (typeof document !== "undefined" && document.visibilityState && document.visibilityState !== "visible") {
+    return false;
+  }
+  return true;
+}
+
+function stopHistorySync() {
+  if (state.historySyncTimer) {
+    clearTimeout(state.historySyncTimer);
+    state.historySyncTimer = null;
+  }
+  state.historySyncInFlight = false;
+}
+
+function scheduleHistorySync(delayMs = HISTORY_SYNC_INTERVAL_MS) {
+  if (!shouldRunHistorySync()) {
+    stopHistorySync();
+    return;
+  }
+  if (state.historySyncTimer) {
+    return;
+  }
+  const delay = Number.isFinite(Number(delayMs)) ? Math.max(0, Number(delayMs)) : HISTORY_SYNC_INTERVAL_MS;
+  state.historySyncTimer = setTimeout(async () => {
+    state.historySyncTimer = null;
+    if (!shouldRunHistorySync()) {
+      return;
+    }
+    if (state.historySyncInFlight) {
+      scheduleHistorySync(300);
+      return;
+    }
+
+    state.historySyncInFlight = true;
+    try {
+      await refreshHistoryConversationStatuses();
+    } finally {
+      state.historySyncInFlight = false;
+      if (shouldRunHistorySync()) {
+        scheduleHistorySync(HISTORY_SYNC_INTERVAL_MS);
+      }
+    }
+  }, delay);
 }
 
 function setViewMode(mode) {
@@ -506,7 +659,11 @@ function setViewMode(mode) {
     els.backBtn.hidden = nextMode !== "chat";
   }
   if (nextMode === "chat") {
+    stopHistorySync();
     void reportReadProgress();
+  } else if (state.conversationHistory.length > 0) {
+    void refreshHistoryConversationStatuses();
+    scheduleHistorySync(0);
   }
 }
 
@@ -1427,27 +1584,12 @@ function mergeMessages(items) {
   void reportReadProgress();
 }
 
-function countUnreadMessages() {
-  if (!Array.isArray(state.messages) || state.messages.length === 0) {
-    return 0;
-  }
-  return state.messages.reduce((sum, item) => {
-    if (item?.sender_type !== "agent") {
-      return sum;
-    }
-    if (item.status === "read") {
-      return sum;
-    }
-    return sum + 1;
-  }, 0);
-}
-
 function notifyHostUnreadCount() {
   window.parent.postMessage(
     {
       type: "inlinechat.widget.unread",
       payload: {
-        count: countUnreadMessages(),
+        count: countTotalUnreadMessages(),
       },
     },
     state.parentOrigin || "*"
@@ -1463,6 +1605,7 @@ function updateConversationHistoryFromMessages() {
   upsertConversationHistoryEntry({
     conversation_id: state.conversationID,
     status: state.conversationStatus || "open",
+    unread_count: countConversationUnreadMessages(state.messages),
     preview: summary,
     updated_at: String(latest?.created_at || latest?.updated_at || "").trim() || new Date().toISOString(),
   });
