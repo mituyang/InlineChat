@@ -15,7 +15,7 @@
 
 ## 对外能力
 - gRPC：
-  - `AuthGatewayService`（`Login`、`Me`）
+  - `AuthGatewayService`（`Login`、`Me`；`Me` 被 `gateway-service` / `realtime-service` 用于身份确认）
 - HTTP（服务内调试入口，前缀 `/v1`）：
   - `POST /v1/auth/login`
   - `GET /v1/auth/me`

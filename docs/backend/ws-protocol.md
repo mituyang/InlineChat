@@ -1,7 +1,8 @@
-# InlineChat WebSocket 协议（realtime-service）
+# InlineChat WebSocket 协议（对外由 gateway-service 暴露，内部由 realtime-service 承接）
 
 ## 连接入口
-- 路径：`GET /ws/:conversation_id`
+- 外部路径：`gateway-service` 的 `GET /ws/:conversation_id`
+- 内部承接：`realtime-service` 的同路径，由网关反向代理
 - 参数：
   - `visitor_token`：访客连接必填
   - `access_token`：客服连接必填（JWT，`agent` 角色）
@@ -11,7 +12,8 @@
 ## 鉴权规则
 - 带 `access_token` 时按客服链路鉴权，并向 `auth-service` 做二次校验。
 - 不带 `access_token` 时按访客链路鉴权，要求 `visitor_token` 与会话绑定值一致。
-- 二者都不满足时返回 `401/403`。
+- 两类连接都会先向 `chat-service` 校验会话存在，再向 `admin-service` 校验会话所属站点仍为 `active`。
+- 校验失败时可能返回 `401/403/404/409`。
 
 ## 客户端 -> 服务端事件
 
@@ -37,7 +39,7 @@
 ## 服务端 -> 客户端事件
 
 ### `message.ack`
-`message.send` 成功落库后回包。
+`message.send` 成功调用 `chat-service` 落库后立即回包；真正广播由 `chat -> Redis -> realtime` 异步链路完成。
 
 ```json
 {

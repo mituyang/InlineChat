@@ -46,6 +46,7 @@ flowchart TB
 
   REALTIME -->|gRPC CreateMessage| CHAT
   REALTIME -->|gRPC Me| AUTH
+  REALTIME -->|gRPC GetSiteBySiteID| ADMINSVC
 
   CHAT -->|读写| MYSQL
   CHAT -->|发布 chat.messages.*| REDIS
@@ -79,6 +80,7 @@ flowchart LR
 
   RT -->|Resolve grpc chat| ETCD
   RT -->|Resolve grpc auth| ETCD
+  RT -->|Resolve grpc admin| ETCD
 
   CHAT -->|Register grpc| ETCD
   AUTH -->|Register grpc| ETCD
@@ -92,6 +94,7 @@ flowchart LR
 
   RT -->|gRPC ChatInternalService| CHAT
   RT -->|gRPC AuthGatewayService.Me| AUTH
+  RT -->|gRPC AdminGatewayService.GetSiteBySiteID| ADMIN
 ```
 
 ## 3. 实时消息主链路时序图
@@ -216,12 +219,14 @@ flowchart TB
   ETCD --> REALTIME
   ETCD --> GW
 
-  CHAT --> REALTIME
+  REALTIME --> CHAT
+  REALTIME --> AUTH
+  REALTIME --> ADMIN
 
-  CHAT --> GW
-  AUTH --> GW
-  ADMIN --> GW
-  REALTIME --> GW
+  GW --> CHAT
+  GW --> AUTH
+  GW --> ADMIN
+  GW --> REALTIME
 ```
 
 ## 8. 监控与告警拓扑图

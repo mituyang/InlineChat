@@ -36,5 +36,6 @@
 
 ## 代码事实来源
 - HTTP 聚合层：`services/gateway-service/internal/handler`
+- Widget 会话与嵌入校验：`services/gateway-service/internal/handler/http_widget.go`
 - WebSocket 协议：`services/realtime-service/internal/ws/handler.go`
 - 会话/消息规则：`services/chat-service/internal/service/chat_service.go`

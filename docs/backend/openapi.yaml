@@ -66,7 +66,11 @@ paths:
     post:
       tags: [Chat]
       summary: 创建匿名会话
-      description: 使用 `site_id + visitor_token` 创建或复用 open 会话。
+      description: |
+        使用 `site_id + visitor_token` 创建或复用 open 会话。
+        该接口额外要求 `X-InlineChat-Widget-Session` 请求头，网关会先校验站点状态与 widget 会话。
+      parameters:
+        - $ref: "#/components/parameters/WidgetSession"
       requestBody:
         required: true
         content:
@@ -82,12 +86,16 @@ paths:
                 $ref: "#/components/schemas/ConversationPublic"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
         "429":
           $ref: "#/components/responses/RateLimited"
         "502":
           $ref: "#/components/responses/UpstreamUnavailable"
+        "504":
+          $ref: "#/components/responses/UpstreamTimeout"
 
     get:
       tags: [Chat]
@@ -755,6 +763,13 @@ components:
       schema:
         type: integer
         format: uint64
+    WidgetSession:
+      in: header
+      name: X-InlineChat-Widget-Session
+      required: true
+      description: 由 `/app/widget/?site_id=...&parent_origin=...` 初始化页面下发的 widget 会话令牌
+      schema:
+        type: string
 
   responses:
     BadRequest:

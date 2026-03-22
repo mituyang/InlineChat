@@ -27,27 +27,43 @@
    - `*_SERVICE_NAME`
    - `*_SERVICE_ADVERTISE_*_ENDPOINT`
 
-### 2) WebSocket 连接失败（401/403）
+### 2) 创建匿名会话失败（403/409）
+现象：
+- `POST /api/chat/v1/conversations` 返回 `widget session is required` / `invalid widget session`
+- 或返回 `site is not active`
+
+排查步骤：
+1. 确认请求经过 `gateway-service`，不是直接调用 `chat-service` 的调试路由。
+2. 确认调用方已先访问 `/app/widget/?site_id=...&parent_origin=...`，并携带 `X-InlineChat-Widget-Session`。
+3. 检查管理后台对应 `site_id` 是否存在且状态为 `active`。
+4. 检查 `parent_origin`、`Referer`、`Origin` 是否匹配站点域名。
+
+### 3) WebSocket 连接失败（401/403/409）
 现象：
 - 访客连接报 `visitor_token is required` 或 `invalid visitor_token`。
 - 客服连接报 `invalid access_token` / `agent role required`。
+- 也可能报 `site is unavailable` / `site is not active`。
 
 排查步骤：
-1. 访客端确认 URL 包含 `visitor_token`，且与会话绑定值一致。
-2. 客服端确认 URL 包含 `access_token`，token 未过期且角色为 `agent`。
-3. 检查 `WS_ALLOWED_ORIGINS` 是否覆盖当前页面 Origin。
+1. 确认客户端连接的是网关入口 `GET /ws/:conversation_id`，而不是绕过网关直连其它端口。
+2. 访客端确认 URL 包含 `visitor_token`，且与会话绑定值一致。
+3. 客服端确认 URL 包含 `access_token`，token 未过期且角色为 `agent`。
+4. 检查 `WS_ALLOWED_ORIGINS` 是否覆盖当前页面 Origin。
+5. 若提示站点不可用，检查 `admin-service` 可用性及站点状态。
 
-### 3) 发消息后没有实时推送
+### 4) 发消息后没有实时推送
 现象：
-- HTTP 发消息成功，但对端 WebSocket 收不到 `message.new`。
+- HTTP / WS 发消息成功，但对端 WebSocket 收不到 `message.new`。
 
 排查步骤：
-1. 检查 `chat-service` 是否成功发布消息事件（查看日志）。
-2. 检查 `realtime-service` Redis 订阅循环是否有错误重试日志。
-3. 检查 Redis 连通性与配置：`REDIS_ADDR`、`REDIS_PASSWORD`、`REDIS_DB`。
-4. 若消息状态始终停留 `sent`，重点看对端连接是否在线。
+1. 确认消息发送方和接收方都已连接到同一个 `conversation_id`，且连接未被服务端主动关闭。
+2. 检查 `chat-service` 是否成功发布消息事件（查看日志）。
+3. 若开启 outbox，检查 `OutboxDispatcher` 是否存在重试/死信日志。
+4. 检查 `realtime-service` Redis 订阅循环是否有错误重试日志。
+5. 检查 Redis 连通性与配置：`REDIS_ADDR`、`REDIS_PASSWORD`、`REDIS_DB`。
+6. 若消息状态始终停留 `sent`，重点看对端连接是否在线。
 
-### 4) API 频繁返回 429
+### 5) API 频繁返回 429
 现象：
 - 返回 `error.code=rate_limited`。
 
@@ -62,7 +78,7 @@
    - `RATE_LIMIT_REDIS_TIMEOUT_MS`
    - 是否出现熔断降级日志（fallback to local limiter）
 
-### 5) MySQL/Redis 异常导致服务不就绪
+### 6) MySQL/Redis 异常导致服务不就绪
 现象：
 - `auth/admin/chat/realtime` 的 `readyz` 报依赖不可达。
 

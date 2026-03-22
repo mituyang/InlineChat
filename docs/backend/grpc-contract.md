@@ -15,7 +15,7 @@
 | `chat-service` | `ChatGatewayService` | `gateway-service` | 会话与消息主业务 |
 | `chat-service` | `ChatInternalService` | `realtime-service` | 实时链路内部写消息 |
 | `auth-service` | `AuthGatewayService` | `gateway-service`、`realtime-service` | 登录与 token 身份解析 |
-| `admin-service` | `AdminGatewayService` | `gateway-service` | 站点、客服与审计管理 |
+| `admin-service` | `AdminGatewayService` | `gateway-service`、`realtime-service` | 站点、客服与审计管理；站点查询也用于 WS 握手校验 |
 
 ## ChatGatewayService
 ### 方法列表
@@ -91,6 +91,7 @@
 - 管理入口要求 `admin/super_admin`。
 - 高风险动作（如创建客服、状态变更、重置密码、强制下线）要求 `super_admin`。
 - `ListSites` / `ListAgents` 默认 `limit=50`，`limit>200` 视为非法。
+- `GetSiteBySiteID` / `GetSiteByDomain` 除网关建会话外，也被 `realtime-service` 用于 WS 握手时校验站点是否仍然 `active`。
 
 ### 常见错误码
 - `Unauthenticated`：缺失或无效 token。
@@ -107,7 +108,7 @@
 - 网关侧 gRPC 超时：
   - `GRPC_DIAL_TIMEOUT_SEC`
   - `GRPC_CALL_TIMEOUT_SEC`
-- 实时侧调用 chat 超时：
+- 实时侧 gRPC 超时（chat/auth/admin 客户端共享）：
   - `CHAT_GRPC_DIAL_TIMEOUT_SEC`
   - `CHAT_GRPC_CALL_TIMEOUT_SEC`
 

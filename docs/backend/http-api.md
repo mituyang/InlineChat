@@ -6,6 +6,7 @@
   - `Chat`: `/api/chat/v1`
   - `Auth`: `/api/auth/v1/auth`
   - `Admin`: `/api/admin/v1/admin`
+- WebSocket 外部入口见：`docs/backend/ws-protocol.md`（`gateway-service` 暴露 `GET /ws/:conversation_id`）
 - 统一错误格式（经 `gateway-service` 返回）：
 
 ```json
@@ -20,15 +21,22 @@
 
 ## 鉴权模式
 - 访客模式：依赖 `visitor_token`（query 或 body，按接口定义）。
+- 匿名建会话额外要求 `X-InlineChat-Widget-Session`，用于校验站点来源与 widget 会话。
 - 员工模式：`Authorization: Bearer <token>`。
 - 角色约束：
   - 客服接口由 `agent` 访问（例如会话认领/转接/关闭）。
   - 管理接口由 `admin/super_admin` 访问；部分高风险操作仅 `super_admin` 可执行（由下游服务校验）。
 
+## Widget Session 约定
+- 请求头：`X-InlineChat-Widget-Session`
+- 适用接口：`POST /api/chat/v1/conversations`
+- 生成方式：由 `gateway-service` 的 `/app/widget/?site_id=...&parent_origin=...` 初始化页面注入；官方 `widget-chat` 与 `customer-console` 已自动处理
+- 校验内容：站点 `site_id`、`widget_key`、`site_domain`、过期时间
+
 ## Chat API
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
-| `POST` | `/api/chat/v1/conversations` | 访客 | 创建匿名会话（需 `site_id` + `visitor_token`） |
+| `POST` | `/api/chat/v1/conversations` | 访客 + Widget Session | 创建匿名会话（需 `site_id` + `visitor_token` + `X-InlineChat-Widget-Session`；网关会先校验站点状态） |
 | `GET` | `/api/chat/v1/conversations` | `agent` | 会话列表（支持 `status/site_id/assigned_agent_id/unassigned_only/limit/offset`） |
 | `GET` | `/api/chat/v1/conversations/:id` | 访客或 `agent` | 会话详情 |
 | `POST` | `/api/chat/v1/conversations/:id/messages` | 访客或 `agent` | 发消息（`client_msg_id` 幂等） |

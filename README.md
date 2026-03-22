@@ -16,6 +16,7 @@
 - `apps/agent-console`: 客服工作台前端源码
 - `apps/admin-console`: 管理后台前端源码
 - `apps/customer-console`: 访客调试页前端源码
+- `apps/staff-login`: 员工统一登录页前端源码
 - `apps/widget-chat`: Widget 聊天窗（iframe）前端源码
 - `apps/demo-site`: 业务网站示例前端源码（已嵌入客服）
 - `apps/api-docs`: Swagger UI 接口文档前端源码
@@ -102,6 +103,7 @@
 - `data-site-id` 必须使用管理后台已创建站点的 `site_id`，前端值与后台站点不匹配将无法创建会话。
 - 管理后台创建站点时需先填写 `site_id`（可点击“生成ID”按钮），再提交创建。
 - 建议直接使用管理后台站点卡片中的“嵌入脚本”复制结果，避免手工输入错误。
+- 网关创建匿名会话前会校验 `X-InlineChat-Widget-Session`；官方 Widget 与 `customer-console` 会自动通过 `/app/widget/?site_id=...&parent_origin=...` 初始化该会话，无需手工构造。
 
 可选参数：
 - `data-gateway-origin`: 网关地址（默认取脚本 `src` 的域名）
@@ -227,9 +229,9 @@
 
 ## 服务间通信
 - 所有服务通过 `etcd` 做服务注册与发现，键前缀由 `DISCOVERY_PREFIX` 控制（默认 `/inlinechat/services`）。
-- `gateway-service` 通过 gRPC 调用 `chat-service`、`auth-service`、`admin-service`
-- `realtime-service` 通过 gRPC 调用 `chat-service`
-- `chat-service` 在消息写入成功后会发布 `message.new` 到 Redis 频道，`realtime-service` 订阅后广播给 WebSocket 客户端（访客与客服均可实时收到）
+- `gateway-service` 通过 gRPC 调用 `chat-service`、`auth-service`、`admin-service`，并将外部 `/ws/:conversation_id` 反向代理到 `realtime-service`
+- `realtime-service` 通过 gRPC 调用 `chat-service`、`auth-service`、`admin-service`
+- `chat-service` 在消息写入成功后会发布 `message.new`、`message.status`、`conversation.closed` 到 Redis 频道，`realtime-service` 订阅后广播给 WebSocket 客户端（访客与客服均可实时收到）
 - gRPC 协议定义：
   - `packages/shared-types/proto/inlinechat/chat.proto`
   - `packages/shared-types/proto/inlinechat/auth.proto`
@@ -242,22 +244,31 @@
 - Chat:
   - `POST /api/chat/v1/conversations`
   - `GET /api/chat/v1/conversations`（需要 Bearer Token）
-  - `POST /api/chat/v1/conversations/:id/claim`（需要 Bearer Token）
-  - `POST /api/chat/v1/conversations/:id/transfer`（需要 Bearer Token）
-  - `POST /api/chat/v1/conversations/:id/close`（需要 Bearer Token）
+  - `GET /api/chat/v1/conversations/:id`（访客需 `visitor_token`，客服需 Bearer Token）
   - `POST /api/chat/v1/conversations/:id/messages`
   - `GET /api/chat/v1/conversations/:id/messages`
   - `POST /api/chat/v1/conversations/:id/read`
+  - `POST /api/chat/v1/conversations/:id/claim`（需要 Bearer Token）
+  - `POST /api/chat/v1/conversations/:id/transfer`（需要 Bearer Token）
+  - `POST /api/chat/v1/conversations/:id/transfer/confirm`（需要 Bearer Token）
+  - `POST /api/chat/v1/conversations/:id/transfer/reject`（需要 Bearer Token）
+  - `POST /api/chat/v1/conversations/:id/close`（需要 Bearer Token）
 - Auth:
   - `POST /api/auth/v1/auth/login`
   - `GET /api/auth/v1/auth/me`
 - Admin:
   - `POST /api/admin/v1/admin/sites`（需要 Bearer Token，且角色为 `admin/super_admin`；请求体需包含 `site_id`、`name`、`domain`）
   - `GET /api/admin/v1/admin/sites`（需要 Bearer Token，且角色为 `admin/super_admin`）
+  - `PATCH /api/admin/v1/admin/sites/:site_id/status`（需要 Bearer Token，且角色为 `admin/super_admin`）
+  - `POST /api/admin/v1/admin/sites/:site_id/rotate-widget-key`（需要 Bearer Token，且角色为 `admin/super_admin`）
   - `POST /api/admin/v1/admin/agents`（需要 Bearer Token，且角色必须为 `super_admin`；请求体需包含 `agent_id`（4位数字，不能为`0000`）、`email`、`password`、`display_name`；`email` 与 `display_name` 全局唯一）
   - `GET /api/admin/v1/admin/agents`（需要 Bearer Token，且角色为 `admin/super_admin`）
+  - `PATCH /api/admin/v1/admin/agents/:id/status`（需要 Bearer Token，且角色为 `admin/super_admin`）
+  - `POST /api/admin/v1/admin/agents/:id/reset-password`（需要 Bearer Token，且角色为 `admin/super_admin`）
+  - `POST /api/admin/v1/admin/agents/:id/force-logout`（需要 Bearer Token，且角色为 `admin/super_admin`）
+  - `GET /api/admin/v1/admin/audit-logs`（需要 Bearer Token，且角色为 `admin/super_admin`）
 - Realtime:
- - `GET /ws/:conversation_id`（访客需 `visitor_token`，客服需 `access_token`，可选 `last_message_id` 用于断线补拉）
+ - `GET /ws/:conversation_id`（对外由 `gateway-service` 暴露并反代到 `realtime-service`；访客需 `visitor_token`，客服需 `access_token`，可选 `last_message_id` 用于断线补拉）
 
 ## WebSocket 示例
 发送：

@@ -2,6 +2,7 @@
 
 ## 服务职责
 - 对外统一 HTTP 入口。
+- 创建匿名会话前校验站点状态与 `X-InlineChat-Widget-Session`。
 - 聚合并转发 `chat/auth/admin` gRPC 接口。
 - 反向代理 `/ws/*` 到 `realtime-service`。
 - 提供请求追踪、统一错误格式、限流、安全响应头。
@@ -62,4 +63,5 @@ go run ./services/gateway-service/cmd/server
 
 ## 常见排障
 - `GET /readyz` 返回 `503`：优先检查 etcd 与 4 个上游服务注册状态。
+- 创建匿名会话返回 `403`：优先检查 `X-InlineChat-Widget-Session` 是否存在且与站点匹配。
 - 频繁 `429`：检查限流阈值与 Redis 降级日志。

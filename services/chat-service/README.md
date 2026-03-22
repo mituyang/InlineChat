@@ -17,7 +17,7 @@
 - gRPC：
   - `ChatGatewayService`
   - `ChatInternalService`
-- HTTP（服务内调试入口，前缀 `/v1`）：
+- HTTP（服务内调试入口，不是外部统一入口，前缀 `/v1`）：
   - `POST /v1/conversations`
   - `GET /v1/conversations/:id`
   - `POST /v1/conversations/:id/messages`

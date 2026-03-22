@@ -4,7 +4,7 @@
 - 管理站点（site）与客服账号（agent）。
 - 提供审计日志查询。
 - 处理高风险管理动作（状态变更、密码重置、强制下线等）。
-- 通过 gRPC 向网关提供管理域能力。
+- 通过 gRPC 向网关提供管理域能力，并向 `realtime-service` 提供站点查询能力。
 
 ## 端口与探针
 - 默认 HTTP 端口：`8204`（`HTTP_PORT`）
@@ -15,7 +15,7 @@
 
 ## 对外能力
 - gRPC：
-  - `AdminGatewayService`
+  - `AdminGatewayService`（管理域写操作 + `GetSiteBySiteID` / `GetSiteByDomain` 查询）
 - HTTP（服务内调试入口，前缀 `/v1/admin`）：
   - 站点管理：创建、列表、状态变更、轮换 `widget_key`
   - 客服管理：创建、列表、状态变更、重置密码、强制下线
