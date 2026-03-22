@@ -21,6 +21,7 @@ const state = {
   conversationStatus: "",
   composeMode: false,
   viewMode: "history",
+  hostOpen: window.self === window.top,
   messages: [],
   ws: null,
   wsConversationID: "",
@@ -116,6 +117,8 @@ async function bootstrap() {
 }
 
 function bindEvents() {
+  window.addEventListener("message", handleHostMessage);
+
   els.closeBtn.addEventListener("click", () => {
     window.parent.postMessage({ type: "inlinechat.widget.close" }, state.parentOrigin || "*");
   });
@@ -163,6 +166,37 @@ function bindEvents() {
   updateSessionUI();
   renderConversationHistory();
   setViewMode("history");
+}
+
+function handleHostMessage(event) {
+  if (!isAllowedParentMessage(event)) {
+    return;
+  }
+  if (event.data.type !== "inlinechat.widget.host_visibility") {
+    return;
+  }
+
+  state.hostOpen = Boolean(event.data.payload && event.data.payload.open);
+  if (state.hostOpen) {
+    touchVisitorToken(true);
+    if (state.viewMode === "chat") {
+      void reportReadProgress();
+      void runBackfillSync(false);
+      schedulePollingSync(0);
+    }
+  }
+  notifyHostUnreadCount();
+}
+
+function isAllowedParentMessage(event) {
+  if (!event || !event.data || typeof event.data !== "object") {
+    return false;
+  }
+  const expectedOrigin = String(state.parentOrigin || "").trim();
+  if (!expectedOrigin || expectedOrigin === "*") {
+    return true;
+  }
+  return event.origin === expectedOrigin;
 }
 
 function visitorTokenKey() {
@@ -477,6 +511,9 @@ function setViewMode(mode) {
 }
 
 function shouldReportReadProgress() {
+  if (!state.hostOpen) {
+    return false;
+  }
   if (state.viewMode !== "chat") {
     return false;
   }
@@ -1390,6 +1427,33 @@ function mergeMessages(items) {
   void reportReadProgress();
 }
 
+function countUnreadMessages() {
+  if (!Array.isArray(state.messages) || state.messages.length === 0) {
+    return 0;
+  }
+  return state.messages.reduce((sum, item) => {
+    if (item?.sender_type !== "agent") {
+      return sum;
+    }
+    if (item.status === "read") {
+      return sum;
+    }
+    return sum + 1;
+  }, 0);
+}
+
+function notifyHostUnreadCount() {
+  window.parent.postMessage(
+    {
+      type: "inlinechat.widget.unread",
+      payload: {
+        count: countUnreadMessages(),
+      },
+    },
+    state.parentOrigin || "*"
+  );
+}
+
 function updateConversationHistoryFromMessages() {
   if (!state.conversationID) {
     return;
@@ -1840,6 +1904,7 @@ function renderMessages(items) {
     } else {
       els.messages.innerHTML = '<div class="empty">你好，我是在线客服助手，请输入消息。</div>';
     }
+    notifyHostUnreadCount();
     return;
   }
 
@@ -1894,6 +1959,7 @@ function renderMessages(items) {
   }
 
   els.messages.scrollTop = els.messages.scrollHeight;
+  notifyHostUnreadCount();
 }
 
 function setStatus(text) {

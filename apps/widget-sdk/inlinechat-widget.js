@@ -72,12 +72,37 @@
   button.style.border = "0";
   button.style.display = "grid";
   button.style.placeItems = "center";
+  button.style.position = "relative";
+  button.style.overflow = "visible";
   button.style.cursor = "pointer";
   button.style.color = "#fff";
   button.style.background = primaryColor;
   button.style.boxShadow = "0 12px 24px rgba(0,0,0,0.28)";
   button.style.transition = "transform 0.2s ease";
   button.innerHTML = iconSVG();
+
+  var unreadCount = 0;
+  var badge = document.createElement("span");
+  badge.setAttribute("data-inlinechat-unread-badge", "true");
+  badge.style.position = "absolute";
+  badge.style.top = "-4px";
+  badge.style.right = "-4px";
+  badge.style.minWidth = "20px";
+  badge.style.height = "20px";
+  badge.style.padding = "0 5px";
+  badge.style.borderRadius = "999px";
+  badge.style.display = "none";
+  badge.style.alignItems = "center";
+  badge.style.justifyContent = "center";
+  badge.style.background = "#ef4444";
+  badge.style.boxShadow = "0 4px 10px rgba(239,68,68,0.28)";
+  badge.style.color = "#fff";
+  badge.style.fontSize = "11px";
+  badge.style.fontWeight = "700";
+  badge.style.lineHeight = "1";
+  badge.style.pointerEvents = "none";
+  badge.style.border = "2px solid #fff";
+  button.appendChild(badge);
 
   button.addEventListener("mouseenter", function () {
     button.style.transform = "translateY(-1px) scale(1.02)";
@@ -90,11 +115,15 @@
   function openPanel() {
     panel.style.display = "block";
     isOpen = true;
+    renderUnreadBadge();
+    syncHostVisibility();
   }
 
   function closePanel() {
     panel.style.display = "none";
     isOpen = false;
+    renderUnreadBadge();
+    syncHostVisibility();
   }
 
   function togglePanel() {
@@ -106,6 +135,7 @@
   }
 
   button.addEventListener("click", togglePanel);
+  iframe.addEventListener("load", syncHostVisibility);
 
   function onMessage(event) {
     if (event.origin !== gatewayOrigin) {
@@ -120,6 +150,9 @@
     if (event.data.type === "inlinechat.widget.open") {
       openPanel();
     }
+    if (event.data.type === "inlinechat.widget.unread") {
+      setUnreadCount(event.data.payload && event.data.payload.count);
+    }
   }
 
   window.addEventListener("message", onMessage);
@@ -133,12 +166,18 @@
     open: openPanel,
     close: closePanel,
     toggle: togglePanel,
+    getUnreadCount: function () {
+      return unreadCount;
+    },
     destroy: function () {
       window.removeEventListener("message", onMessage);
+      iframe.removeEventListener("load", syncHostVisibility);
       host.remove();
       window.InlineChatWidget = undefined;
     },
   };
+
+  renderUnreadBadge();
 
   function toPx(input, fallback) {
     var v = (input || "").trim();
@@ -149,6 +188,53 @@
       return v + "px";
     }
     return v;
+  }
+
+  function normalizeUnreadCount(value) {
+    var numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+      return 0;
+    }
+    return Math.floor(numeric);
+  }
+
+  function formatUnreadCount(value) {
+    return value > 99 ? "99+" : String(value);
+  }
+
+  function syncButtonLabel() {
+    var label = title;
+    if (unreadCount > 0) {
+      label += "，" + formatUnreadCount(unreadCount) + "条未读消息";
+    }
+    button.setAttribute("aria-label", label);
+  }
+
+  function renderUnreadBadge() {
+    var visible = unreadCount > 0 && !isOpen;
+    badge.style.display = visible ? "flex" : "none";
+    badge.textContent = visible ? formatUnreadCount(unreadCount) : "";
+    syncButtonLabel();
+  }
+
+  function setUnreadCount(value) {
+    unreadCount = normalizeUnreadCount(value);
+    renderUnreadBadge();
+  }
+
+  function syncHostVisibility() {
+    if (!iframe.contentWindow) {
+      return;
+    }
+    iframe.contentWindow.postMessage(
+      {
+        type: "inlinechat.widget.host_visibility",
+        payload: {
+          open: isOpen,
+        },
+      },
+      gatewayOrigin
+    );
   }
 
   function iconSVG() {
