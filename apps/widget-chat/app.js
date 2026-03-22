@@ -87,12 +87,26 @@ async function bootstrap() {
     try {
       const conversation = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${storedConversationID}`));
       if (conversation.site_id === state.siteID) {
-        upsertConversationHistoryEntry({
+        const historyPatch = {
           conversation_id: storedConversationID,
           status: normalizeConversationStatus(conversation.status) || "open",
           assigned_agent_id: conversation.assigned_agent_id,
           updated_at: String(conversation.updated_at || conversation.created_at || "").trim() || new Date().toISOString(),
-        });
+        };
+        try {
+          const data = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${storedConversationID}/messages?limit=200`));
+          const messages = (Array.isArray(data.items) ? data.items : []).map(normalizeMessage).filter(Boolean).sort(compareMessageOrder);
+          historyPatch.unread_count = countConversationUnreadMessages(messages);
+          const latest = messages[messages.length - 1];
+          if (latest) {
+            historyPatch.preview = summarizeMessagePreview(latest.content || "");
+            historyPatch.updated_at =
+              String(latest.updated_at || latest.created_at || historyPatch.updated_at || "").trim() || new Date().toISOString();
+          }
+        } catch {
+          // 首屏补拉历史失败时保留会话元信息，避免阻断 widget 初始化。
+        }
+        upsertConversationHistoryEntry(historyPatch);
       } else {
         upsertConversationHistoryEntry({
           conversation_id: storedConversationID,
@@ -440,12 +454,14 @@ function formatHistoryTime(value) {
     return "--";
   }
   const diff = Date.now() - date.getTime();
+  const minute = 60 * 1000;
+  if (Math.abs(diff) < minute) {
+    return "刚刚";
+  }
   if (diff >= 0) {
-    const minute = 60 * 1000;
     const hour = 60 * minute;
     if (diff < hour) {
-      const mins = Math.max(1, Math.floor(diff / minute));
-      return `${mins}分钟前`;
+      return `${Math.floor(diff / minute)}分钟前`;
     }
     if (diff < 24 * hour) {
       const hours = Math.floor(diff / hour);
