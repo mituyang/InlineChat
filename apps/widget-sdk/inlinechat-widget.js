@@ -16,6 +16,7 @@
 
   var scriptURL = new URL(script.src, window.location.href);
   var gatewayOrigin = (script.dataset.gatewayOrigin || scriptURL.origin).trim();
+  var widgetPath = (script.dataset.widgetPath || "/app/widget/").trim() || "/app/widget/";
   var title = (script.dataset.title || "在线客服").trim();
   var primaryColor = (script.dataset.primaryColor || "#2f343c").trim();
   var bottom = toPx(script.dataset.bottom, "24px");
@@ -24,7 +25,8 @@
   var panelWidth = toPx(script.dataset.panelWidth, "380px");
   var panelHeight = toPx(script.dataset.panelHeight, "620px");
 
-  var frameURL = new URL(gatewayOrigin + "/app/widget/");
+  var frameURLBase = script.dataset.gatewayOrigin ? new URL(gatewayOrigin, window.location.href) : scriptURL;
+  var frameURL = new URL(widgetPath, frameURLBase);
   var parentOrigin = window.location.origin && window.location.origin !== "null" ? window.location.origin : "*";
   frameURL.searchParams.set("site_id", siteId);
   frameURL.searchParams.set("title", title);

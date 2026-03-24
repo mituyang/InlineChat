@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>InlineChat Widget</title>
-    <link rel="stylesheet" href="/app/widget/styles.css" />
+    <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="chat-shell">
@@ -40,6 +40,22 @@
       </section>
     </main>
 
-    <script src="/app/widget/app.js" defer></script>
+    <script>
+      (function () {
+        if (window.__INLINECHAT_WIDGET_SESSION__ && window.__INLINECHAT_WIDGET_SCOPE__) {
+          return;
+        }
+
+        var isLocalStaticWidget = window.location.pathname.indexOf("/apps/widget-chat/") === 0 || window.location.protocol === "file:";
+        if (!isLocalStaticWidget) {
+          return;
+        }
+
+        window.__INLINECHAT_WIDGET_SESSION__ = "demo_local_widget_session";
+        window.__INLINECHAT_WIDGET_SCOPE__ =
+          window.location.origin && window.location.origin !== "null" ? window.location.origin : "local";
+      })();
+    </script>
+    <script src="./app.js" defer></script>
   </body>
 </html>

@@ -3,8 +3,8 @@ window.INLINECHAT_DEMO_CONFIG = {
   siteID: "site_test",
 
   // 以下参数可按需修改，不影响会话归属。
-  title: "青禾在线客服",
-  primaryColor: "#2f343c",
+  title: "青禾家居顾问",
+  primaryColor: "#466a58",
   bottom: "24",
   right: "24",
   panelWidth: "380",

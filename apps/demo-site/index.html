@@ -3,216 +3,743 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>青禾家居 - 官方商城</title>
+    <title>青禾家居 | 城市家庭与品质租住人群的家居生活品牌</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23466a58'/%3E%3Ctext x='50%25' y='55%25' text-anchor='middle' font-size='24' fill='white' font-family='Arial'%3E%E9%9D%92%E7%A6%BE%3C/text%3E%3C/svg%3E"
+    />
     <style>
       :root {
-        --bg: #f8fafc;
-        --bg-soft: #eef5fb;
-        --card: #ffffff;
-        --line: #e2e8f0;
-        --text: #0f172a;
-        --sub: #64748b;
-        --primary: #0891b2;
-        --primary-strong: #0e7490;
-        --focus: rgba(34, 211, 238, 0.3);
+        --bg: #f6f1e8;
+        --bg-soft: #fbf8f2;
+        --bg-strong: #ece2d1;
+        --card: rgba(255, 255, 255, 0.88);
+        --card-strong: #ffffff;
+        --line: rgba(93, 82, 63, 0.14);
+        --ink: #23312b;
+        --sub: #66756d;
+        --primary: #466a58;
+        --primary-strong: #345241;
+        --accent: #a56f3a;
+        --accent-soft: rgba(165, 111, 58, 0.12);
+        --shadow: 0 20px 60px rgba(43, 48, 44, 0.08);
+        --radius-xl: 28px;
+        --radius-lg: 20px;
+        --radius-md: 14px;
+        --focus: rgba(70, 106, 88, 0.22);
       }
 
       * {
         box-sizing: border-box;
       }
 
+      html {
+        scroll-behavior: smooth;
+      }
+
       body {
         margin: 0;
-        background: linear-gradient(180deg, var(--bg) 0%, var(--bg-soft) 100%);
-        color: var(--text);
+        color: var(--ink);
+        background:
+          radial-gradient(circle at top left, rgba(255, 255, 255, 0.7), transparent 30%),
+          linear-gradient(180deg, #f9f4eb 0%, #f6f1e8 32%, #f5efe4 100%);
         font-family: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", sans-serif;
-        line-height: 1.5;
+        line-height: 1.65;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      img {
+        max-width: 100%;
+        display: block;
       }
 
       .container {
-        width: min(1120px, calc(100% - 32px));
+        width: min(1180px, calc(100% - 32px));
         margin: 0 auto;
       }
 
-      header {
+      .site-header {
         position: sticky;
         top: 0;
-        z-index: 10;
-        backdrop-filter: blur(6px);
-        background: rgba(248, 250, 252, 0.9);
-        border-bottom: 1px solid rgba(226, 232, 240, 0.9);
+        z-index: 20;
+        backdrop-filter: blur(12px);
+        background: rgba(250, 246, 239, 0.78);
+        border-bottom: 1px solid rgba(93, 82, 63, 0.08);
       }
 
       .nav {
+        min-height: 74px;
         display: flex;
-        justify-content: space-between;
         align-items: center;
-        padding: 12px 0;
+        justify-content: space-between;
+        gap: 16px;
       }
 
       .brand {
-        font-size: 20px;
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .brand-mark {
+        width: 42px;
+        height: 42px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, #4b715e, #b07a44);
+        color: #fff;
+        display: grid;
+        place-items: center;
         font-weight: 700;
+        font-size: 16px;
+        letter-spacing: 2px;
+        box-shadow: 0 10px 24px rgba(70, 106, 88, 0.22);
       }
 
-      .brand span {
-        color: var(--primary);
+      .brand-text {
+        display: grid;
+        gap: 2px;
       }
 
-      .nav ul {
+      .brand-name {
+        font-family: "Georgia", "Songti SC", "STSong", serif;
+        font-size: 22px;
+        font-weight: 700;
+        letter-spacing: 1px;
+      }
+
+      .brand-sub {
+        font-size: 12px;
+        letter-spacing: 1.6px;
+        text-transform: uppercase;
+        color: var(--sub);
+      }
+
+      .nav-links {
         display: flex;
-        margin: 0;
-        padding: 0;
-        list-style: none;
+        align-items: center;
         gap: 10px;
+        list-style: none;
+        padding: 0;
+        margin: 0;
         color: var(--sub);
         font-size: 14px;
       }
 
-      .nav li {
-        padding: 8px 10px;
-        border-radius: 8px;
+      .nav-links a {
+        padding: 10px 12px;
+        border-radius: 999px;
       }
 
-      .hero {
-        padding: 52px 0 40px;
-        display: grid;
-        gap: 16px;
+      .nav-links a:hover {
+        color: var(--ink);
+        background: rgba(255, 255, 255, 0.65);
       }
 
-      .hero h1 {
-        margin: 0;
-        font-size: clamp(30px, 6vw, 54px);
-        line-height: 1.16;
-        letter-spacing: 0.4px;
-      }
-
-      .hero p {
-        margin: 0;
-        max-width: 68ch;
-        line-height: 1.72;
-        color: var(--sub);
-      }
-
-      .hero .actions {
+      .header-actions {
         display: flex;
-        gap: 12px;
-        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
       }
 
       .btn {
-        border: 1px solid transparent;
-        border-radius: 10px;
-        padding: 10px 16px;
         min-height: 44px;
+        border-radius: 999px;
+        padding: 0 18px;
+        border: 1px solid transparent;
         cursor: pointer;
         font: inherit;
-        transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease, transform 0.18s ease;
+      }
+
+      .btn:hover {
+        transform: translateY(-1px);
       }
 
       .btn.primary {
-        color: #ffffff;
         background: var(--primary);
-      }
-
-      .btn.ghost {
-        color: var(--text);
-        background: #fff;
-        border: 1px solid var(--line);
+        color: #fff;
+        box-shadow: 0 14px 28px rgba(70, 106, 88, 0.18);
       }
 
       .btn.primary:hover {
         background: var(--primary-strong);
       }
 
-      .btn.ghost:hover {
-        border-color: #cbd5e1;
-        background: #f8fafc;
+      .btn.secondary {
+        background: rgba(255, 255, 255, 0.82);
+        border-color: var(--line);
+        color: var(--ink);
       }
 
-      .btn:focus-visible {
-        outline: none;
-        box-shadow: 0 0 0 3px var(--focus);
-      }
-
-      .grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 16px;
-        padding-bottom: 22px;
-      }
-
-      .card {
-        background: var(--card);
-        border: 1px solid var(--line);
-        border-radius: 12px;
-        overflow: hidden;
-        transition: border-color 0.18s ease, background-color 0.18s ease;
-      }
-
-      .card:hover {
-        border-color: #cbd5e1;
-      }
-
-      .thumb {
-        height: 180px;
-        background: linear-gradient(140deg, #e3f6fb, #eff9ff);
-      }
-
-      .content {
-        padding: 14px;
-        display: grid;
-        gap: 8px;
-      }
-
-      .title {
-        font-size: 18px;
-        font-weight: 600;
-      }
-
-      .desc {
-        color: var(--sub);
-        line-height: 1.6;
-      }
-
-      .price {
-        color: var(--primary-strong);
-        font-size: 20px;
-        font-weight: 700;
-      }
-
-      .feature {
-        margin: 30px 0 56px;
-        padding: 20px;
-        border-radius: 12px;
+      .btn.secondary:hover {
         background: #fff;
-        border: 1px solid var(--line);
+        border-color: rgba(93, 82, 63, 0.22);
+      }
+
+      .btn:focus-visible,
+      summary:focus-visible,
+      a:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 4px var(--focus);
+      }
+
+      .hero {
+        padding: 48px 0 28px;
+      }
+
+      .hero-grid {
         display: grid;
-        grid-template-columns: repeat(4, minmax(0, 1fr));
+        grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.85fr);
+        gap: 22px;
+        align-items: stretch;
+      }
+
+      .hero-copy,
+      .hero-panel {
+        border-radius: var(--radius-xl);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow);
+      }
+
+      .hero-copy {
+        padding: 38px;
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(255, 251, 245, 0.88)),
+          linear-gradient(145deg, rgba(70, 106, 88, 0.08), rgba(165, 111, 58, 0.06));
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.7);
+        color: var(--primary-strong);
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+      }
+
+      .hero h1 {
+        margin: 18px 0 14px;
+        font-family: "Georgia", "Songti SC", "STSong", serif;
+        font-size: clamp(34px, 5vw, 62px);
+        line-height: 1.1;
+        letter-spacing: 0.3px;
+      }
+
+      .hero p {
+        margin: 0;
+        max-width: 66ch;
+        color: var(--sub);
+        font-size: 16px;
+      }
+
+      .hero-actions {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+        margin-top: 24px;
+      }
+
+      .hero-notes {
+        margin-top: 22px;
+        display: flex;
+        flex-wrap: wrap;
         gap: 10px;
       }
 
-      .feature-item {
-        padding: 12px;
-        border-radius: 10px;
-        background: #f8fafc;
-        border: 1px solid #e8edf3;
+      .note-pill {
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.78);
+        border: 1px solid rgba(93, 82, 63, 0.1);
+        color: var(--sub);
+        font-size: 13px;
       }
 
-      .feature-item strong {
+      .hero-panel {
+        padding: 24px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(246, 241, 232, 0.88)),
+          linear-gradient(135deg, rgba(70, 106, 88, 0.08), rgba(165, 111, 58, 0.06));
+        display: grid;
+        gap: 18px;
+      }
+
+      .panel-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        align-items: flex-start;
+      }
+
+      .panel-top strong {
         display: block;
-        margin-bottom: 6px;
+        font-size: 24px;
+        margin-bottom: 4px;
       }
 
-      .feature-item p {
+      .panel-badge {
+        padding: 8px 10px;
+        border-radius: 999px;
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .stat-card {
+        padding: 16px;
+        border-radius: var(--radius-lg);
+        background: rgba(255, 255, 255, 0.8);
+        border: 1px solid rgba(93, 82, 63, 0.08);
+      }
+
+      .stat-card strong {
+        display: block;
+        font-size: 24px;
+        margin-bottom: 4px;
+      }
+
+      .stat-card span {
+        color: var(--sub);
+        font-size: 13px;
+      }
+
+      .meta-list {
+        display: grid;
+        gap: 10px;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .meta-list li {
+        padding: 12px 14px;
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.82);
+        border: 1px solid rgba(93, 82, 63, 0.08);
+        color: var(--sub);
+        font-size: 14px;
+      }
+
+      .meta-list strong {
+        color: var(--ink);
+      }
+
+      .section {
+        padding: 34px 0;
+      }
+
+      .section-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        gap: 18px;
+        margin-bottom: 20px;
+      }
+
+      .section-head h2 {
+        margin: 0;
+        font-family: "Georgia", "Songti SC", "STSong", serif;
+        font-size: clamp(28px, 4vw, 40px);
+        line-height: 1.15;
+      }
+
+      .section-head p {
+        margin: 0;
+        max-width: 62ch;
+        color: var(--sub);
+      }
+
+      .trust-strip {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .trust-card {
+        padding: 22px;
+        border-radius: var(--radius-lg);
+        background: rgba(255, 255, 255, 0.74);
+        border: 1px solid var(--line);
+        box-shadow: var(--shadow);
+      }
+
+      .trust-card strong {
+        display: block;
+        font-size: 28px;
+        margin-bottom: 4px;
+      }
+
+      .trust-card span {
+        color: var(--sub);
+        font-size: 14px;
+      }
+
+      .story-grid,
+      .dual-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+        gap: 18px;
+      }
+
+      .story-card,
+      .info-card,
+      .timeline-card,
+      .category-card,
+      .product-card,
+      .service-card,
+      .process-card,
+      .member-card,
+      .contact-card,
+      .faq-group {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: var(--radius-xl);
+        box-shadow: var(--shadow);
+      }
+
+      .story-card,
+      .timeline-card,
+      .info-card,
+      .faq-group {
+        padding: 28px;
+      }
+
+      .story-card p,
+      .timeline-card p,
+      .info-card p,
+      .faq-group p {
         margin: 0;
         color: var(--sub);
-        line-height: 1.6;
       }
 
-      footer {
-        padding: 22px 0 34px;
-        color: #64748b;
+      .story-list,
+      .check-list,
+      .spec-list,
+      .service-list,
+      .contact-list {
+        margin: 18px 0 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 10px;
+      }
+
+      .story-list li,
+      .check-list li,
+      .spec-list li,
+      .service-list li,
+      .contact-list li {
+        padding: 12px 14px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.82);
+        border: 1px solid rgba(93, 82, 63, 0.08);
+      }
+
+      .story-list strong,
+      .check-list strong,
+      .spec-list strong,
+      .service-list strong,
+      .contact-list strong {
+        color: var(--ink);
+      }
+
+      .timeline {
+        margin: 18px 0 0;
+        display: grid;
+        gap: 12px;
+      }
+
+      .timeline-item {
+        padding: 16px 16px 16px 18px;
+        border-left: 3px solid var(--accent);
+        border-radius: 0 16px 16px 0;
+        background: rgba(255, 255, 255, 0.82);
+        border-top: 1px solid rgba(93, 82, 63, 0.08);
+        border-right: 1px solid rgba(93, 82, 63, 0.08);
+        border-bottom: 1px solid rgba(93, 82, 63, 0.08);
+      }
+
+      .timeline-item strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .category-grid,
+      .product-grid,
+      .service-grid,
+      .process-grid,
+      .member-grid,
+      .contact-grid {
+        display: grid;
+        gap: 16px;
+      }
+
+      .category-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .category-card {
+        padding: 22px;
+      }
+
+      .category-card small,
+      .product-card small,
+      .member-card small {
+        display: inline-flex;
+        padding: 7px 10px;
+        border-radius: 999px;
+        background: rgba(70, 106, 88, 0.08);
+        color: var(--primary-strong);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+      }
+
+      .category-card h3,
+      .product-card h3,
+      .member-card h3,
+      .service-card h3,
+      .process-card h3,
+      .faq-group h3,
+      .contact-card h3 {
+        margin: 14px 0 8px;
+        font-size: 22px;
+      }
+
+      .category-card p,
+      .product-card p,
+      .member-card p,
+      .service-card p,
+      .process-card p,
+      .contact-card p {
+        margin: 0;
+        color: var(--sub);
+      }
+
+      .tags {
+        margin-top: 16px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .tag {
+        padding: 7px 11px;
+        border-radius: 999px;
+        background: rgba(165, 111, 58, 0.1);
+        color: var(--accent);
+        font-size: 12px;
+        font-weight: 600;
+      }
+
+      .product-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .product-card {
+        padding: 24px;
+      }
+
+      .product-top {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 14px;
+      }
+
+      .product-price {
+        font-size: 28px;
+        font-weight: 700;
+        color: var(--primary-strong);
+        white-space: nowrap;
+      }
+
+      .product-desc {
+        margin-top: 12px;
+      }
+
+      .spec-list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .service-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .service-card {
+        padding: 22px;
+      }
+
+      .service-index {
+        display: inline-flex;
+        width: 36px;
+        height: 36px;
+        border-radius: 12px;
+        align-items: center;
+        justify-content: center;
+        background: rgba(70, 106, 88, 0.12);
+        color: var(--primary-strong);
+        font-weight: 700;
+      }
+
+      .process-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+      }
+
+      .process-card {
+        padding: 22px;
+      }
+
+      .process-card strong {
+        display: inline-flex;
+        width: 40px;
+        height: 40px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 14px;
+        background: rgba(165, 111, 58, 0.12);
+        color: var(--accent);
+      }
+
+      .enterprise-layout {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+        gap: 18px;
+      }
+
+      .member-grid,
+      .contact-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .member-card,
+      .contact-card {
+        padding: 24px;
+      }
+
+      .member-card ul,
+      .contact-card ul {
+        margin: 18px 0 0;
+        padding-left: 18px;
+        color: var(--sub);
+      }
+
+      .member-card li,
+      .contact-card li {
+        margin-bottom: 10px;
+      }
+
+      .faq-layout {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      details {
+        padding: 16px 0;
+        border-bottom: 1px solid rgba(93, 82, 63, 0.08);
+      }
+
+      details:last-child {
+        border-bottom: 0;
+      }
+
+      summary {
+        list-style: none;
+        cursor: pointer;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      summary::-webkit-details-marker {
+        display: none;
+      }
+
+      details p {
+        margin-top: 10px;
+      }
+
+      .site-footer {
+        padding: 28px 0 40px;
+      }
+
+      .footer-shell {
+        padding: 28px;
+        border-radius: var(--radius-xl);
+        background: linear-gradient(180deg, rgba(39, 49, 43, 0.98), rgba(47, 57, 50, 0.98));
+        color: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 24px 60px rgba(24, 27, 25, 0.24);
+      }
+
+      .footer-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 18px;
+      }
+
+      .footer-top p {
+        margin: 10px 0 0;
+        max-width: 56ch;
+        color: rgba(255, 255, 255, 0.68);
+      }
+
+      .footer-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .footer-card {
+        padding: 18px;
+        border-radius: 18px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .footer-card strong {
+        display: block;
+        margin-bottom: 8px;
+      }
+
+      .footer-card p,
+      .footer-card li {
+        margin: 0;
+        color: rgba(255, 255, 255, 0.7);
+      }
+
+      .footer-card ul {
+        margin: 0;
+        padding-left: 18px;
+      }
+
+      .footer-bottom {
+        margin-top: 18px;
+        padding-top: 18px;
+        border-top: 1px solid rgba(255, 255, 255, 0.1);
+        color: rgba(255, 255, 255, 0.58);
         font-size: 14px;
       }
 
@@ -226,105 +753,722 @@
         }
       }
 
-      @media (max-width: 980px) {
-        .grid {
+      @media (max-width: 1080px) {
+        .hero-grid,
+        .story-grid,
+        .dual-grid,
+        .enterprise-layout {
+          grid-template-columns: 1fr;
+        }
+
+        .category-grid,
+        .service-grid,
+        .process-grid,
+        .footer-grid,
+        .member-grid,
+        .contact-grid {
           grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
-        .feature {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+        .product-grid,
+        .faq-layout {
+          grid-template-columns: 1fr;
         }
       }
 
-      @media (max-width: 640px) {
-        .nav ul {
-          display: none;
+      @media (max-width: 760px) {
+        .nav {
+          min-height: auto;
+          padding: 14px 0;
+          flex-wrap: wrap;
         }
 
-        .grid,
-        .feature {
+        .nav-links {
+          width: 100%;
+          order: 3;
+          overflow-x: auto;
+          padding-bottom: 4px;
+        }
+
+        .header-actions {
+          width: 100%;
+          justify-content: flex-start;
+        }
+
+        .hero-copy,
+        .hero-panel,
+        .story-card,
+        .timeline-card,
+        .info-card,
+        .faq-group {
+          padding: 22px;
+        }
+
+        .trust-strip,
+        .category-grid,
+        .service-grid,
+        .process-grid,
+        .member-grid,
+        .contact-grid,
+        .footer-grid,
+        .stats-grid,
+        .spec-list {
           grid-template-columns: 1fr;
+        }
+
+        .section {
+          padding: 26px 0;
+        }
+
+        .section-head {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .footer-top {
+          flex-direction: column;
         }
       }
     </style>
   </head>
   <body>
-    <header>
+    <header class="site-header">
       <div class="container nav">
-        <div class="brand">青禾<span>家居</span></div>
-        <ul>
-          <li>首页</li>
-          <li>新品</li>
-          <li>爆款</li>
-          <li>企业采购</li>
-          <li>会员中心</li>
-        </ul>
+        <a class="brand" href="#top" aria-label="青禾家居首页">
+          <span class="brand-mark">青禾</span>
+          <span class="brand-text">
+            <span class="brand-name">青禾家居</span>
+            <span class="brand-sub">QINGHE HOME</span>
+          </span>
+        </a>
+
+        <nav aria-label="主导航">
+          <ul class="nav-links">
+            <li><a href="#about">品牌故事</a></li>
+            <li><a href="#categories">产品矩阵</a></li>
+            <li><a href="#products">明星单品</a></li>
+            <li><a href="#quality">质控与仓配</a></li>
+            <li><a href="#enterprise">企业采购</a></li>
+            <li><a href="#member">会员权益</a></li>
+            <li><a href="#faq">常见问题</a></li>
+          </ul>
+        </nav>
+
+        <div class="header-actions">
+          <a class="btn secondary" href="#member">新人礼包</a>
+          <a class="btn primary" href="#enterprise">企业采购咨询</a>
+        </div>
       </div>
     </header>
 
-    <main class="container">
+    <main class="container" id="top">
       <section class="hero">
-        <h1>把家的舒适，装进每一个日常细节</h1>
-        <p>
-          青禾家居专注于高性价比家居产品，覆盖卧室、客厅、厨房、收纳全场景。
-          支持 48 小时极速发货与 30 天无忧退换，企业客户支持专属报价与一对一顾问服务。
-        </p>
-        <div class="actions">
-          <button class="btn primary">立即选购</button>
-          <button class="btn ghost">领取新人优惠券</button>
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <span class="eyebrow">城市家庭与品质租住人群的家居生活品牌</span>
+            <h1>让卧室、客厅、厨房与收纳空间，都回到舒适而有秩序的日常。</h1>
+            <p>
+              青禾家居成立于 2019 年，总部位于杭州，围绕睡眠家居、居家照明、收纳整理、厨房家居四大产品线布局，
+              以“舒适、实用、耐看、易用”为核心产品原则，为家庭用户、年轻租住人群和企业采购客户提供高性价比家居解决方案。
+            </p>
+            <div class="hero-actions">
+              <a class="btn primary" href="#products">查看明星单品</a>
+              <a class="btn secondary" href="#about">了解品牌故事</a>
+            </div>
+            <div class="hero-notes">
+              <span class="note-pill">工作日下单 48 小时内发货</span>
+              <span class="note-pill">全国 4 仓就近配送</span>
+              <span class="note-pill">30 天无忧退换</span>
+              <span class="note-pill">7x12 小时人工客服</span>
+            </div>
+          </div>
+
+          <aside class="hero-panel" aria-label="品牌概览">
+            <div class="panel-top">
+              <div>
+                <strong>青禾家居生活（杭州）有限公司</strong>
+                <div style="color: var(--sub); font-size: 14px">自有品牌运营 + 深度供应链协同</div>
+              </div>
+              <span class="panel-badge">品牌资料</span>
+            </div>
+
+            <div class="stats-grid">
+              <div class="stat-card">
+                <strong>32+</strong>
+                <span>常销 SKU</span>
+              </div>
+              <div class="stat-card">
+                <strong>4</strong>
+                <span>核心产品线</span>
+              </div>
+              <div class="stat-card">
+                <strong>18 万+</strong>
+                <span>服务家庭用户</span>
+              </div>
+              <div class="stat-card">
+                <strong>1,200+</strong>
+                <span>累计企业项目</span>
+              </div>
+            </div>
+
+            <ul class="meta-list">
+              <li><strong>总部：</strong>中国杭州滨江区青禾设计中心</li>
+              <li><strong>仓配网络：</strong>杭州、佛山、武汉、成都 4 地仓配协同</li>
+              <li><strong>供应链：</strong>12 家核心协作工厂，覆盖纺织、照明、收纳与厨具类目</li>
+              <li><strong>服务渠道：</strong>官方商城、会员中心、企业采购、青禾在线客服</li>
+            </ul>
+          </aside>
         </div>
       </section>
 
-      <section class="grid">
-        <article class="card">
-          <div class="thumb"></div>
-          <div class="content">
-            <div class="title">云感记忆棉枕</div>
-            <div class="desc">慢回弹承托，贴合颈椎曲线，提升睡眠质量。</div>
-            <div class="price">¥159</div>
-          </div>
-        </article>
-        <article class="card">
-          <div class="thumb" style="background: linear-gradient(140deg, #e6f3ff, #ecf8ff)"></div>
-          <div class="content">
-            <div class="title">极简落地灯</div>
-            <div class="desc">三档亮度调节，阅读与氛围照明一灯兼顾。</div>
-            <div class="price">¥239</div>
-          </div>
-        </article>
-        <article class="card">
-          <div class="thumb" style="background: linear-gradient(140deg, #e2f6ef, #edf9f3)"></div>
-          <div class="content">
-            <div class="title">可折叠收纳柜</div>
-            <div class="desc">即装即用，多规格可选，租房和家庭都适配。</div>
-            <div class="price">¥199</div>
-          </div>
-        </article>
+      <section class="section">
+        <div class="trust-strip" aria-label="品牌数据">
+          <article class="trust-card">
+            <strong>2019</strong>
+            <span>品牌创立，聚焦高频日常家居消费</span>
+          </article>
+          <article class="trust-card">
+            <strong>4 大仓</strong>
+            <span>华东、华南、华中、西南分仓就近履约</span>
+          </article>
+          <article class="trust-card">
+            <strong>88 元券包</strong>
+            <span>新会员注册即领，支持分阶段使用</span>
+          </article>
+          <article class="trust-card">
+            <strong>20 件起</strong>
+            <span>标准 SKU 可申请企业项目报价</span>
+          </article>
+        </div>
       </section>
 
-      <section class="feature">
-        <div class="feature-item">
-          <strong>极速发货</strong>
-          <p>工作日下单 48 小时内发货，全国多仓就近配送。</p>
+      <section class="section" id="about">
+        <div class="section-head">
+          <div>
+            <h2>品牌故事</h2>
+            <p>从“高溢价之外，普通家庭也值得拥有稳定而舒适的生活用品”这一想法出发，青禾家居持续打磨基础品类。</p>
+          </div>
         </div>
-        <div class="feature-item">
-          <strong>企业采购</strong>
-          <p>支持公司对公付款、专票开具、批量采购折扣。</p>
+
+        <div class="story-grid">
+          <article class="story-card">
+            <p>
+              青禾家居起步于睡眠与收纳两类高频产品。创始团队在长期家居零售与供应链工作中发现，很多消费者真正缺少的，
+              并不是复杂的功能堆叠，而是价格合理、设计不过度、品质稳定、交付清晰的日用型家居产品。因此，品牌以“日常家居升级”
+              为核心切口，优先布局枕具、照明、收纳、厨房家居等家庭高频使用品类。
+            </p>
+            <ul class="story-list">
+              <li><strong>品牌定位：</strong>高性价比家居生活品牌，兼顾家庭零售与企业采购。</li>
+              <li><strong>产品原则：</strong>舒适、实用、耐看、易用。</li>
+              <li><strong>设计风格：</strong>简洁、自然、轻暖调，适合大多数城市居住空间。</li>
+              <li><strong>客户理念：</strong>减少决策负担，让居住升级以更低门槛发生。</li>
+            </ul>
+          </article>
+
+          <aside class="timeline-card">
+            <p>品牌发展里程碑</p>
+            <div class="timeline">
+              <div class="timeline-item">
+                <strong>2019</strong>
+                杭州成立品牌与设计团队，推出第一批睡眠和收纳基础款产品。
+              </div>
+              <div class="timeline-item">
+                <strong>2021</strong>
+                完成照明与厨房类目拓展，形成多场景产品矩阵。
+              </div>
+              <div class="timeline-item">
+                <strong>2023</strong>
+                建立 4 地仓配网络，常规零售订单实现就近发货。
+              </div>
+              <div class="timeline-item">
+                <strong>2025</strong>
+                企业采购业务升级，形成专属顾问、报价、对公开票与项目交付标准流程。
+              </div>
+            </div>
+          </aside>
         </div>
-        <div class="feature-item">
-          <strong>安装指导</strong>
-          <p>客服在线答疑，复杂品类提供图文视频安装指南。</p>
+      </section>
+
+      <section class="section" id="categories">
+        <div class="section-head">
+          <div>
+            <h2>产品矩阵</h2>
+            <p>围绕卧室、客厅、厨房与收纳等空间进行布局，优先解决真实生活中最常见、最容易感知的家居问题。</p>
+          </div>
         </div>
-        <div class="feature-item">
-          <strong>售后无忧</strong>
-          <p>30 天无忧退换，7x12 小时人工客服在线服务。</p>
+
+        <div class="category-grid">
+          <article class="category-card">
+            <small>睡眠家居</small>
+            <h3>卧室舒睡系列</h3>
+            <p>围绕枕芯、床品和基础舒睡用品，重点改善承托感、触感和日常睡眠体验。</p>
+            <div class="tags">
+              <span class="tag">云感记忆棉枕</span>
+              <span class="tag">暮岚针织四件套</span>
+              <span class="tag">主卧 / 次卧</span>
+            </div>
+          </article>
+
+          <article class="category-card">
+            <small>居家照明</small>
+            <h3>客厅与阅读照明</h3>
+            <p>通过落地灯、台灯等轻改造产品，让阅读、休闲和氛围照明在同一空间内更自然地切换。</p>
+            <div class="tags">
+              <span class="tag">极简落地灯</span>
+              <span class="tag">暖域床头台灯</span>
+              <span class="tag">客厅 / 阅读角</span>
+            </div>
+          </article>
+
+          <article class="category-card">
+            <small>收纳整理</small>
+            <h3>家庭收纳系统</h3>
+            <p>强调即装即用、多规格适配和空间效率提升，适合租房、小户型和家庭日常整理。</p>
+            <div class="tags">
+              <span class="tag">可折叠收纳柜</span>
+              <span class="tag">雾砂餐边收纳架</span>
+              <span class="tag">卧室 / 客厅 / 厨房</span>
+            </div>
+          </article>
+
+          <article class="category-card">
+            <small>厨房家居</small>
+            <h3>轻烹饪与整理用品</h3>
+            <p>聚焦餐储、备餐与台面收纳，让厨房使用动线更整洁，日常清洁和维护更省力。</p>
+            <div class="tags">
+              <span class="tag">柔雾珐琅锅</span>
+              <span class="tag">溪木砧板套组</span>
+              <span class="tag">厨房 / 餐边区</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="products">
+        <div class="section-head">
+          <div>
+            <h2>明星单品</h2>
+            <p>以下产品为青禾家居当前对外重点展示单品，覆盖睡眠、照明、收纳与厨房四大高频使用场景。</p>
+          </div>
+        </div>
+
+        <div class="product-grid">
+          <article class="product-card">
+            <div class="product-top">
+              <div>
+                <small>QH-SL-101</small>
+                <h3>云感记忆棉枕</h3>
+              </div>
+              <div class="product-price">¥159</div>
+            </div>
+            <p class="product-desc">慢回弹承托，贴合颈椎曲线，定位为卧室睡眠场景中的基础舒睡升级款。</p>
+            <ul class="spec-list">
+              <li><strong>适用场景：</strong>主卧、次卧、客房、公寓</li>
+              <li><strong>核心特点：</strong>承托感稳定，价格门槛友好</li>
+              <li><strong>目标人群：</strong>关注睡眠舒适度的家庭用户</li>
+              <li><strong>配套推荐：</strong>暮岚针织四件套</li>
+            </ul>
+          </article>
+
+          <article class="product-card">
+            <div class="product-top">
+              <div>
+                <small>QH-SL-204</small>
+                <h3>暮岚针织四件套</h3>
+              </div>
+              <div class="product-price">¥399</div>
+            </div>
+            <p class="product-desc">采用柔软亲肤针织面料，兼顾日常好打理与卧室整体搭配感，是睡眠系列中的搭配型产品。</p>
+            <ul class="spec-list">
+              <li><strong>尺寸适配：</strong>1.5m / 1.8m 床型</li>
+              <li><strong>风格方向：</strong>低饱和暖雾色系</li>
+              <li><strong>适用场景：</strong>主卧、新婚新居</li>
+              <li><strong>配套推荐：</strong>云感记忆棉枕</li>
+            </ul>
+          </article>
+
+          <article class="product-card">
+            <div class="product-top">
+              <div>
+                <small>QH-LT-112</small>
+                <h3>极简落地灯</h3>
+              </div>
+              <div class="product-price">¥239</div>
+            </div>
+            <p class="product-desc">支持三档亮度调节，阅读与氛围照明一灯兼顾，适合在不改动主灯的情况下增强空间层次。</p>
+            <ul class="spec-list">
+              <li><strong>适用场景：</strong>客厅、卧室、阅读角</li>
+              <li><strong>功能特点：</strong>阅读照明与休闲氛围切换</li>
+              <li><strong>设计语言：</strong>简约、轻暖、易搭配</li>
+              <li><strong>售后支持：</strong>灯具类 12 个月质保</li>
+            </ul>
+          </article>
+
+          <article class="product-card">
+            <div class="product-top">
+              <div>
+                <small>QH-LT-126</small>
+                <h3>暖域床头台灯</h3>
+              </div>
+              <div class="product-price">¥169</div>
+            </div>
+            <p class="product-desc">陶感底座搭配织物灯罩，适合卧室床头、书桌角落和客房侧柜，突出柔和照明和空间点缀价值。</p>
+            <ul class="spec-list">
+              <li><strong>适用场景：</strong>床头、书桌、客房</li>
+              <li><strong>使用体验：</strong>夜间不刺眼，适合柔光陪伴</li>
+              <li><strong>风格标签：</strong>自然、温和、轻复古</li>
+              <li><strong>配套推荐：</strong>极简落地灯</li>
+            </ul>
+          </article>
+
+          <article class="product-card">
+            <div class="product-top">
+              <div>
+                <small>QH-ST-301</small>
+                <h3>可折叠收纳柜</h3>
+              </div>
+              <div class="product-price">¥199</div>
+            </div>
+            <p class="product-desc">即装即用，多规格可选，租房和家庭都适配，是青禾家居收纳整理线中的核心销量款。</p>
+            <ul class="spec-list">
+              <li><strong>适用场景：</strong>卧室、客厅、儿童用品整理</li>
+              <li><strong>功能特点：</strong>低门槛安装，移动使用灵活</li>
+              <li><strong>目标人群：</strong>租房、小户型、整理需求家庭</li>
+              <li><strong>售后支持：</strong>收纳结构类 24 个月质保</li>
+            </ul>
+          </article>
+
+          <article class="product-card">
+            <div class="product-top">
+              <div>
+                <small>QH-ST-318</small>
+                <h3>雾砂餐边收纳架</h3>
+              </div>
+              <div class="product-price">¥269</div>
+            </div>
+            <p class="product-desc">针对厨房与餐边区的分类整理需求开发，适合摆放锅具、干货、咖啡器具与日常备餐用品。</p>
+            <ul class="spec-list">
+              <li><strong>适用场景：</strong>厨房、餐边柜、备餐区</li>
+              <li><strong>功能特点：</strong>开放式拿取，分类可视化</li>
+              <li><strong>空间优势：</strong>减少台面拥挤，优化动线</li>
+              <li><strong>配套推荐：</strong>柔雾珐琅锅、溪木砧板套组</li>
+            </ul>
+          </article>
+
+          <article class="product-card">
+            <div class="product-top">
+              <div>
+                <small>QH-KT-402</small>
+                <h3>柔雾珐琅锅</h3>
+              </div>
+              <div class="product-price">¥329</div>
+            </div>
+            <p class="product-desc">24cm 规格，适合 2 至 4 人家庭日常炖煮与焖烤，强调一锅多用和厨房陈列质感。</p>
+            <ul class="spec-list">
+              <li><strong>适用场景：</strong>家庭烹饪、节日聚餐</li>
+              <li><strong>风格方向：</strong>柔雾釉色，适合开放厨房陈列</li>
+              <li><strong>目标人群：</strong>注重颜值与功能兼顾的家庭用户</li>
+              <li><strong>配套推荐：</strong>雾砂餐边收纳架</li>
+            </ul>
+          </article>
+
+          <article class="product-card">
+            <div class="product-top">
+              <div>
+                <small>QH-KT-415</small>
+                <h3>溪木砧板套组</h3>
+              </div>
+              <div class="product-price">¥129</div>
+            </div>
+            <p class="product-desc">以家庭日常备餐为出发点设计的基础厨用组合，满足切配、分区和日常易收纳需求。</p>
+            <ul class="spec-list">
+              <li><strong>适用场景：</strong>厨房台面、餐边备餐区</li>
+              <li><strong>功能特点：</strong>分区使用更清晰</li>
+              <li><strong>搭配思路：</strong>适合与餐边收纳体系组合陈列</li>
+              <li><strong>目标人群：</strong>追求整洁动线的家庭用户</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div>
+            <h2>服务体系</h2>
+            <p>从发货、仓配、售后到安装指导，青禾家居通过标准化流程降低客户的决策与售后成本。</p>
+          </div>
+        </div>
+
+        <div class="service-grid">
+          <article class="service-card">
+            <span class="service-index">01</span>
+            <h3>快速发货</h3>
+            <p>常规零售订单工作日下单后 48 小时内发货，大件项目订单按合同排产与分批交付。</p>
+          </article>
+          <article class="service-card">
+            <span class="service-index">02</span>
+            <h3>多仓履约</h3>
+            <p>杭州、佛山、武汉、成都 4 地仓配协同，覆盖华东、华南、华中、西南常规配送需求。</p>
+          </article>
+          <article class="service-card">
+            <span class="service-index">03</span>
+            <h3>售后无忧</h3>
+            <p>支持 30 天无忧退换，灯具类 12 个月质保，收纳结构类 24 个月结构质保。</p>
+          </article>
+          <article class="service-card">
+            <span class="service-index">04</span>
+            <h3>人工客服</h3>
+            <p>提供 7x12 小时人工在线服务，复杂品类可提供图文视频安装指南与使用答疑。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="quality">
+        <div class="section-head">
+          <div>
+            <h2>质控与仓配</h2>
+            <p>高性价比不等于低要求。青禾家居以核心工厂协作、稳定款长期生产和标准化出货流程确保产品与交付一致性。</p>
+          </div>
+        </div>
+
+        <div class="dual-grid">
+          <article class="info-card">
+            <p>
+              品牌当前与 12 家核心协作工厂建立年度合作机制，覆盖纺织、灯具、金属结构、厨具与包装等生产环节。
+              在产品策略上，青禾家居以“稳定款 + 小步迭代”为主，不追求频繁大改，而是围绕用户反馈优化触感、结构、安装体验、
+              包装强度和日常使用便利性。
+            </p>
+            <ul class="check-list">
+              <li><strong>生产协同：</strong>按品类建立稳定合作工厂，保障打样、补货与批量项目供货效率。</li>
+              <li><strong>质控重点：</strong>关注承托感、照明稳定性、结构牢固度、包装抗损能力与实际装配便利度。</li>
+              <li><strong>仓配策略：</strong>对常销 SKU 采取滚动备货，减少断货与跨仓调拨带来的交付不稳定。</li>
+              <li><strong>出货管理：</strong>零售订单和企业订单分仓分波次处理，支持项目型分批交付。</li>
+            </ul>
+          </article>
+
+          <div class="process-grid">
+            <article class="process-card">
+              <strong>01</strong>
+              <h3>选品立项</h3>
+              <p>从高频生活问题出发，确定品类方向、价格带与使用门槛。</p>
+            </article>
+            <article class="process-card">
+              <strong>02</strong>
+              <h3>打样评审</h3>
+              <p>围绕结构、触感、安装、陈列效果与运输适配性进行多轮评审。</p>
+            </article>
+            <article class="process-card">
+              <strong>03</strong>
+              <h3>批量生产</h3>
+              <p>核心合作工厂按稳定款标准化生产，保持品质和交付节奏一致。</p>
+            </article>
+            <article class="process-card">
+              <strong>04</strong>
+              <h3>仓配交付</h3>
+              <p>常销款滚动备货，常规零售订单走就近仓，企业项目支持分批送达。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="enterprise">
+        <div class="section-head">
+          <div>
+            <h2>企业采购</h2>
+            <p>适用于办公室、员工宿舍、公寓项目、样板间、小型酒店与接待空间等场景，支持专属报价与标准商务流程。</p>
+          </div>
+        </div>
+
+        <div class="enterprise-layout">
+          <article class="info-card">
+            <p>
+              青禾家居面向企业客户提供专属报价、一对一顾问、对公付款、专票开具、项目交付与批量采购折扣服务。
+              标准 SKU 20 件起可申请企业报价，100 件以上可根据项目规模提供阶梯价格与阶段性交付方案。
+            </p>
+            <ul class="service-list">
+              <li><strong>适用行业：</strong>办公空间、公寓管理、样板间、民宿酒店、教育后勤、电商仓配休息区。</li>
+              <li><strong>付款支持：</strong>支持公司对公转账，重点项目可按合同节点执行付款安排。</li>
+              <li><strong>开票支持：</strong>支持增值税专用发票与普通发票，付款确认后 7 个工作日内开具。</li>
+              <li><strong>定制能力：</strong>300 件以上项目可申请外箱贴标、欢迎卡与组合清单定制。</li>
+            </ul>
+          </article>
+
+          <article class="timeline-card">
+            <p>企业采购合作流程</p>
+            <div class="timeline">
+              <div class="timeline-item">
+                <strong>1. 提交需求</strong>
+                提供项目类型、空间数量、预算范围、期望交付时间与收货城市。
+              </div>
+              <div class="timeline-item">
+                <strong>2. 顾问选品</strong>
+                输出推荐品类、搭配清单、样品建议与初步交付方案。
+              </div>
+              <div class="timeline-item">
+                <strong>3. 报价确认</strong>
+                按数量、品类、仓配方式与交付阶段提供正式报价。
+              </div>
+              <div class="timeline-item">
+                <strong>4. 对公执行</strong>
+                确认合同、付款、发票、出货批次与项目联系人信息。
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="member">
+        <div class="section-head">
+          <div>
+            <h2>会员权益与新客礼包</h2>
+            <p>青禾家居通过分层会员体系覆盖首次购买、日常复购和整屋补货等不同消费阶段。</p>
+          </div>
+        </div>
+
+        <div class="member-grid">
+          <article class="member-card">
+            <small>新客权益</small>
+            <h3>禾苗会员</h3>
+            <p>注册即领 88 元券包，包含满 299 减 30、满 599 减 20、满 999 减 38 三张组合券。</p>
+            <ul>
+              <li>首单可用，适合枕具、台灯、收纳类基础产品入手</li>
+              <li>支持与站内常规活动叠加，特殊项目商品除外</li>
+              <li>有效期 15 天，适合新客户快速完成首次试购</li>
+            </ul>
+          </article>
+
+          <article class="member-card">
+            <small>年度消费满 999 元</small>
+            <h3>青禾会员</h3>
+            <p>适合家庭日常复购客户，可享积分累计、会员专场价和新品优先试用资格。</p>
+            <ul>
+              <li>全年消费每满 1 元积 1 分，100 积分可抵 1 元</li>
+              <li>每月 8 日享会员专场日，部分常销款 95 折起</li>
+              <li>生日月可领取家居品类定向券包</li>
+            </ul>
+          </article>
+
+          <article class="member-card">
+            <small>年度消费满 3999 元</small>
+            <h3>禾选会员</h3>
+            <p>适合整屋集中采购与长期复购客户，提供更高等级服务与新品抢先购权益。</p>
+            <ul>
+              <li>重点大件与新品预售可提前预约锁货</li>
+              <li>专属客服通道，售后登记优先处理</li>
+              <li>整屋搭配咨询与季度家居清单推荐服务</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
+      <section class="section" id="faq">
+        <div class="section-head">
+          <div>
+            <h2>常见问题</h2>
+            <p>以下问题涵盖大部分零售与企业客户在下单、发货、售后和项目采购中的常见关注点。</p>
+          </div>
+        </div>
+
+        <div class="faq-layout">
+          <article class="faq-group">
+            <h3>零售订单</h3>
+            <details open>
+              <summary>下单后多久发货？<span>+</span></summary>
+              <p>常规零售订单在工作日下单后 48 小时内发货，节假日与大促期间可能顺延 1 至 2 天，页面和客服会同步提示。</p>
+            </details>
+            <details>
+              <summary>多久能收到货？<span>+</span></summary>
+              <p>华东、华中、华南主要城市通常 2 至 4 天送达，西南和部分偏远地区通常 4 至 7 天，以仓配分配和快递时效为准。</p>
+            </details>
+            <details>
+              <summary>支持退换货吗？<span>+</span></summary>
+              <p>支持 30 天无忧退换。商品需保持未影响二次销售状态，包装、附件和赠品齐全。质量问题由品牌承担往返沟通与处理支持。</p>
+            </details>
+            <details>
+              <summary>安装复杂的产品怎么办？<span>+</span></summary>
+              <p>收纳、灯具等复杂品类提供图文视频安装指南，必要时可通过在线客服获取一对一安装答疑。</p>
+            </details>
+          </article>
+
+          <article class="faq-group">
+            <h3>企业采购</h3>
+            <details open>
+              <summary>企业采购有起订量吗？<span>+</span></summary>
+              <p>标准 SKU 20 件起可申请企业报价，100 件以上项目可根据场景、交付方式和组合清单申请阶梯价格。</p>
+            </details>
+            <details>
+              <summary>可以开专票吗？<span>+</span></summary>
+              <p>可以。支持增值税专用发票与普通发票，付款确认后 7 个工作日内完成开票。</p>
+            </details>
+            <details>
+              <summary>支持分批交付吗？<span>+</span></summary>
+              <p>支持。针对公寓、宿舍和样板间类项目，可根据装修节奏、房间批次或收货城市拆分出货。</p>
+            </details>
+            <details>
+              <summary>支持定制包装吗？<span>+</span></summary>
+              <p>300 件以上项目可申请外箱贴标、项目欢迎卡、组合清单等轻量定制服务，具体以项目顾问沟通结果为准。</p>
+            </details>
+          </article>
         </div>
       </section>
     </main>
 
-    <footer class="container">© 2026 青禾家居（示例业务网站）</footer>
+    <footer class="site-footer">
+      <div class="container footer-shell">
+        <div class="footer-top">
+          <div>
+            <div class="brand-name" style="color: #fff">青禾家居</div>
+            <p>
+              青禾家居生活（杭州）有限公司，专注城市家庭与品质租住人群的高性价比家居产品。
+              围绕睡眠、照明、收纳、厨房四大高频生活场景，提供兼顾设计感、价格效率与稳定服务的家居解决方案。
+            </p>
+          </div>
+          <div>
+            <a class="btn primary" href="#enterprise">立即咨询企业采购</a>
+          </div>
+        </div>
 
-    <script src="/app/demo/config.js"></script>
+        <div class="footer-grid">
+          <div class="footer-card">
+            <strong>公司信息</strong>
+            <p>青禾家居生活（杭州）有限公司</p>
+            <p>总部：杭州市滨江区长河街道青禾设计中心</p>
+            <p>品牌邮箱：service@qinghehome.cn</p>
+          </div>
+          <div class="footer-card">
+            <strong>仓配网络</strong>
+            <ul>
+              <li>华东仓：杭州临平</li>
+              <li>华南仓：佛山南海</li>
+              <li>华中仓：武汉东西湖</li>
+              <li>西南仓：成都双流</li>
+            </ul>
+          </div>
+          <div class="footer-card">
+            <strong>客户服务</strong>
+            <ul>
+              <li>服务热线：400-807-9218</li>
+              <li>服务时间：7x12 小时</li>
+              <li>售后支持：30 天无忧退换</li>
+              <li>安装支持：图文视频指南</li>
+            </ul>
+          </div>
+          <div class="footer-card">
+            <strong>企业采购</strong>
+            <ul>
+              <li>企业邮箱：b2b@qinghehome.cn</li>
+              <li>标准 SKU 20 件起询价</li>
+              <li>支持对公付款与专票开具</li>
+              <li>支持批量采购折扣与分批交付</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="footer-bottom">© 2026 青禾家居生活（杭州）有限公司 版权所有</div>
+      </div>
+    </footer>
+
+    <script src="./config.js"></script>
     <script>
       (function () {
         var config = window.INLINECHAT_DEMO_CONFIG || {};
@@ -332,30 +1476,62 @@
 
         var hint = document.createElement("div");
         hint.className = "container";
-        hint.style.marginBottom = "18px";
+        hint.style.margin = "0 auto 18px";
         hint.style.fontSize = "14px";
-        hint.style.color = "#475569";
+        hint.style.color = "#57665f";
+
+        var footer = document.querySelector("footer.site-footer");
+        if (!footer) {
+          return;
+        }
 
         if (!siteID) {
-          hint.innerHTML = "未配置站点参数。请编辑 <code>/app/demo/config.js</code> 写入后台生成的 site_id。";
-          document.body.insertBefore(hint, document.querySelector("footer.container"));
+          hint.innerHTML = "未配置站点参数。请编辑 <code>./config.js</code> 写入后台生成的 site_id。";
+          document.body.insertBefore(hint, footer);
           return;
         }
 
         hint.textContent = "已配置客服接入参数";
-        document.body.insertBefore(hint, document.querySelector("footer.container"));
+        document.body.insertBefore(hint, footer);
 
-        var sdk = document.createElement("script");
-        sdk.src = "/sdk/inlinechat-widget.js";
-        sdk.dataset.siteId = siteID;
-        sdk.dataset.title = String(config.title || "青禾在线客服");
-        sdk.dataset.primaryColor = String(config.primaryColor || "#2f343c");
-        sdk.dataset.bottom = String(config.bottom || "24");
-        sdk.dataset.right = String(config.right || "24");
-        sdk.dataset.panelWidth = String(config.panelWidth || "380");
-        sdk.dataset.panelHeight = String(config.panelHeight || "620");
-        sdk.defer = true;
-        document.body.appendChild(sdk);
+        var isLocalStaticDemo = window.location.pathname.indexOf("/apps/demo-site/") === 0 || window.location.protocol === "file:";
+        var sdkSources = isLocalStaticDemo
+          ? ["../widget-sdk/inlinechat-widget.js", "/apps/widget-sdk/inlinechat-widget.js", "/sdk/inlinechat-widget.js"]
+          : ["/sdk/inlinechat-widget.js", "../widget-sdk/inlinechat-widget.js", "/apps/widget-sdk/inlinechat-widget.js"];
+
+        function appendSDK(index) {
+          if (index >= sdkSources.length) {
+            var sdkHint = document.createElement("div");
+            sdkHint.className = "container";
+            sdkHint.style.margin = "0 auto 18px";
+            sdkHint.style.fontSize = "14px";
+            sdkHint.style.color = "#8a5a2b";
+            sdkHint.textContent = "客服组件脚本未加载成功，请确认网关静态资源或本地 demo 路径配置。";
+            document.body.insertBefore(sdkHint, footer);
+            return;
+          }
+
+          var sdk = document.createElement("script");
+          sdk.src = sdkSources[index];
+          sdk.dataset.siteId = siteID;
+          sdk.dataset.title = String(config.title || "青禾家居顾问");
+          sdk.dataset.primaryColor = String(config.primaryColor || "#466a58");
+          sdk.dataset.bottom = String(config.bottom || "24");
+          sdk.dataset.right = String(config.right || "24");
+          sdk.dataset.panelWidth = String(config.panelWidth || "380");
+          sdk.dataset.panelHeight = String(config.panelHeight || "620");
+          if (sdkSources[index] !== "/sdk/inlinechat-widget.js") {
+            sdk.dataset.widgetPath = "../widget-chat/";
+          }
+          sdk.defer = true;
+          sdk.onerror = function () {
+            sdk.remove();
+            appendSDK(index + 1);
+          };
+          document.body.appendChild(sdk);
+        }
+
+        appendSDK(0);
       })();
     </script>
   </body>
