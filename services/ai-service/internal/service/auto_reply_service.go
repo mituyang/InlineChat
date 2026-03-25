@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -32,6 +33,41 @@ const (
 )
 
 var thinkTagPattern = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
+var (
+	priceThresholdAbovePattern = regexp.MustCompile(`(?:高于|大于|超过|不低于|至少|起码)\s*([0-9]+(?:\.[0-9]+)?)\s*元?`)
+	priceThresholdBelowPattern = regexp.MustCompile(`(?:低于|小于|不超过|不高于)\s*([0-9]+(?:\.[0-9]+)?)\s*元?`)
+	priceWithinPattern         = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*元?(?:以内|以下)`)
+	priceFromPattern           = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*元?(?:以上)`)
+	englishWordPattern         = regexp.MustCompile(`\b[A-Za-z]{2,}\b`)
+	hanSpaceHanPattern         = regexp.MustCompile(`([\p{Han}])\s+([\p{Han}])`)
+)
+
+var englishReplyReplacements = []struct {
+	pattern *regexp.Regexp
+	value   string
+}{
+	{pattern: regexp.MustCompile(`(?i)\bpricing\b`), value: "价格"},
+	{pattern: regexp.MustCompile(`(?i)\bprices\b`), value: "价格"},
+	{pattern: regexp.MustCompile(`(?i)\bprice\b`), value: "价格"},
+	{pattern: regexp.MustCompile(`(?i)\bservice\b`), value: "服务"},
+	{pattern: regexp.MustCompile(`(?i)\bsupport\b`), value: "支持"},
+	{pattern: regexp.MustCompile(`(?i)\bdelivery\b`), value: "配送"},
+	{pattern: regexp.MustCompile(`(?i)\bshipping\b`), value: "配送"},
+	{pattern: regexp.MustCompile(`(?i)\bsales\b`), value: "销售"},
+	{pattern: regexp.MustCompile(`(?i)\bproduct\b`), value: "产品"},
+	{pattern: regexp.MustCompile(`(?i)\bproducts\b`), value: "产品"},
+	{pattern: regexp.MustCompile(`(?i)\bbrand\b`), value: "品牌"},
+}
+
+var allowedEnglishTokens = map[string]struct{}{
+	"ai":  {},
+	"AI":  {},
+	"sku": {},
+	"SKU": {},
+	"vip": {},
+	"VIP": {},
+}
 
 type AutoReplyService struct {
 	redisClient   *redis.Client
@@ -157,14 +193,15 @@ func (s *AutoReplyService) processVisitorMessage(ctx context.Context, event mess
 	if reply, ok := matchPresetReply(query); ok {
 		return s.createReply(ctx, event, reply)
 	}
+	structuredFacts := buildStructuredFacts(query, s.kb.ProductPrices())
 
 	results, err := s.searchKnowledge(ctx, query)
 	if err != nil {
 		return err
 	}
 	reply := s.unknownReply
-	if len(results) > 0 {
-		generatedReply, genErr := s.generateReply(ctx, query, results)
+	if len(results) > 0 || structuredFacts != "" {
+		generatedReply, genErr := s.generateReply(ctx, query, results, structuredFacts)
 		if genErr != nil {
 			s.logger.Warn("generate ai reply failed, fallback to unknown reply",
 				zap.Error(genErr),
@@ -262,12 +299,13 @@ func (s *AutoReplyService) isLatestVisitorMessage(ctx context.Context, conversat
 	return latest != nil && latest.ID == messageID && latest.SenderType == "visitor"
 }
 
-func (s *AutoReplyService) generateReply(ctx context.Context, question string, results []knowledgebase.SearchResult) (string, error) {
-	if len(results) == 0 {
+func (s *AutoReplyService) generateReply(ctx context.Context, question string, results []knowledgebase.SearchResult, structuredFacts string) (string, error) {
+	if len(results) == 0 && strings.TrimSpace(structuredFacts) == "" {
 		return s.unknownReply, nil
 	}
 
 	contextText := buildContext(results, maxPromptContext)
+	promptBody := buildPromptBody(contextText, structuredFacts, question)
 	reply, err := s.llmClient.ChatCompletion(ctx, []openai.ChatMessage{
 		{
 			Role: "system",
@@ -275,8 +313,13 @@ func (s *AutoReplyService) generateReply(ctx context.Context, question string, r
 				"你不是通用助手，你是青禾家居线上客服。"+
 					"你的职责是接待来访用户，介绍青禾家居相关的产品、品牌、配送、售后和服务信息。"+
 					"语气要自然、礼貌、简洁，像真实人工客服。"+
+					"回复时可以根据语境自然加入1到2个贴合语义的 emoji 表情，提升亲和力，但不要堆砌、不要每句话都加。"+
+					"除产品名称、品牌名、SKU、常见专有名词或必要英文缩写外，回复必须使用自然中文，不得夹杂英文单词或英文短语。"+
+					"像 pricing、price、service 这类表达一律改成中文。"+
 					"你只能根据提供的知识片段回答，不得补全、推断、猜测或编造任何信息。"+
 					"知识片段明确提到的信息，可以用自然中文直接转述，不要生硬复读。"+
+					"如果提供了结构化事实表，你要先基于该事实表完成比较、筛选、排序或统计，再组织自然回复。"+
+					"当结构化事实表已经足够支持答案时，不要再说“资料未提及”或“无法确认”。"+
 					"回复尽量控制在1到3句，优先直接回答用户问题。"+
 					"如果知识片段无法直接支持答案，你必须只回复：%s "+
 					"禁止输出分析过程、禁止输出<think>标签、禁止提及模型或训练数据。",
@@ -285,7 +328,7 @@ func (s *AutoReplyService) generateReply(ctx context.Context, question string, r
 		},
 		{
 			Role:    "user",
-			Content: "/no_think\n知识片段如下：\n" + contextText + "\n\n用户问题：" + question + "\n\n请直接用中文回答。",
+			Content: promptBody,
 		},
 	}, replyTemperature, replyMaxTokens)
 	if err != nil {
@@ -367,10 +410,40 @@ func fallbackSection(section string) string {
 
 func sanitizeModelReply(reply string, fallback string) string {
 	reply = thinkTagPattern.ReplaceAllString(reply, "")
+	reply = normalizeReplyLanguage(reply)
 	reply = strings.TrimSpace(reply)
 	if reply == "" {
 		return fallback
 	}
+	return reply
+}
+
+func normalizeReplyLanguage(reply string) string {
+	reply = strings.TrimSpace(reply)
+	if reply == "" {
+		return ""
+	}
+
+	for _, item := range englishReplyReplacements {
+		reply = item.pattern.ReplaceAllString(reply, item.value)
+	}
+
+	reply = englishWordPattern.ReplaceAllStringFunc(reply, func(token string) string {
+		if _, ok := allowedEnglishTokens[token]; ok {
+			return token
+		}
+		return ""
+	})
+
+	reply = regexp.MustCompile(`\s+`).ReplaceAllString(reply, " ")
+	for hanSpaceHanPattern.MatchString(reply) {
+		reply = hanSpaceHanPattern.ReplaceAllString(reply, `$1$2`)
+	}
+	reply = strings.ReplaceAll(reply, "（ ", "（")
+	reply = strings.ReplaceAll(reply, " ）", "）")
+	reply = strings.ReplaceAll(reply, "( ", "(")
+	reply = strings.ReplaceAll(reply, " )", ")")
+	reply = strings.TrimSpace(reply)
 	return reply
 }
 
@@ -413,7 +486,7 @@ func matchPresetReply(query string) (string, bool) {
 	}
 
 	if isExactMatch(compact, "你好", "您好", "hello", "hi", "哈喽", "嗨", "在吗", "有人吗", "在不在", "你好呀", "您好呀", "你好啊", "您好啊") {
-		return "您好，这里是青禾家居客服，很高兴为您服务。您想了解产品、材质、配送、售后，还是品牌信息？", true
+		return "您好呀，这里是青禾家居客服 😊 很高兴为您服务。您想了解产品、材质、配送、售后，还是品牌信息呢？", true
 	}
 	if containsAny(compact,
 		"你是谁",
@@ -428,15 +501,98 @@ func matchPresetReply(query string) (string, bool) {
 		"你们客服在吗",
 		"这是人工吗",
 	) {
-		return "您好，这里是青禾家居客服。我可以为您介绍青禾家居的产品、材质、配送、售后和品牌相关信息；如果遇到现有资料未明确说明的问题，我也会建议您联系人工客服进一步核实。", true
+		return "您好呀，我是青禾家居客服 😊 我可以为您介绍青禾家居的产品、材质、配送、售后和品牌相关信息；如果遇到现有资料暂未明确说明的问题，我也会提醒您联系人工客服进一步核实。", true
 	}
 	if isExactMatch(compact, "谢谢", "多谢", "感谢", "谢了", "thanks", "thankyou", "thankyouverymuch") {
-		return "不客气，这是我应该做的。您如果还想了解青禾家居的产品或服务信息，可以继续问我。", true
+		return "不客气呀，这是我应该做的 😊 如果您还想了解青禾家居的产品或服务信息，随时告诉我。", true
 	}
 	if isExactMatch(compact, "再见", "拜拜", "bye", "seeyou", "回头聊") {
-		return "好的，感谢您咨询青禾家居。后续如需了解更多信息，随时联系我。", true
+		return "好的，感谢您咨询青禾家居呀 🌿 后续如需了解更多信息，随时来找我。", true
 	}
 	return "", false
+}
+
+func buildStructuredFacts(query string, prices []knowledgebase.ProductPrice) string {
+	if len(prices) == 0 {
+		return ""
+	}
+	if !needsStructuredPriceFacts(query, prices) {
+		return ""
+	}
+
+	sorted := make([]knowledgebase.ProductPrice, len(prices))
+	copy(sorted, prices)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].PriceValue == sorted[j].PriceValue {
+			return sorted[i].Name < sorted[j].Name
+		}
+		return sorted[i].PriceValue > sorted[j].PriceValue
+	})
+
+	var builder strings.Builder
+	builder.WriteString("补充结构化事实如下：\n")
+	builder.WriteString("主推产品价格表：\n")
+	for _, item := range sorted {
+		builder.WriteString("- ")
+		builder.WriteString(item.Name)
+		builder.WriteString("：")
+		builder.WriteString(formatPriceValue(item.PriceValue))
+		builder.WriteString("（原文：")
+		builder.WriteString(item.PriceText)
+		builder.WriteString("）\n")
+	}
+	builder.WriteString("使用要求：\n")
+	builder.WriteString("- 如果用户询问最贵、最便宜、最高、最低、多少钱、价格高于/低于/以内/以上、主推产品数量等问题，必须先依据上表完成比较、筛选或统计，再回答。\n")
+	builder.WriteString("- 上表已经提供了可直接比较的价格事实时，不要回答“资料未提及”或“无法确认”。")
+	return strings.TrimSpace(builder.String())
+}
+
+func needsStructuredPriceFacts(query string, prices []knowledgebase.ProductPrice) bool {
+	compact := compactText(query)
+	if compact == "" {
+		return false
+	}
+	if containsAny(compact,
+		"最贵", "最便宜", "价格最高", "价格最低", "售价最高", "售价最低", "最高价", "最低价",
+		"多少钱", "价格", "售价", "零售价", "价位",
+		"多少个主推产品", "多少款主推产品", "一共多少个主推产品", "一共多少款主推产品", "主推产品有多少", "价格表里有多少产品", "价格表里有多少款产品",
+	) {
+		return true
+	}
+	if _, _, ok := parsePriceThresholdQuery(query); ok {
+		return true
+	}
+	for _, item := range prices {
+		if strings.Contains(normalizeText(query), item.Name) || strings.Contains(compact, compactText(item.Name)) {
+			return true
+		}
+	}
+	return false
+}
+
+func buildPromptBody(contextText string, structuredFacts string, question string) string {
+	var builder strings.Builder
+	builder.WriteString("/no_think\n")
+	if strings.TrimSpace(contextText) != "" {
+		builder.WriteString("知识片段如下：\n")
+		builder.WriteString(contextText)
+		builder.WriteString("\n\n")
+	}
+	if strings.TrimSpace(structuredFacts) != "" {
+		builder.WriteString(structuredFacts)
+		builder.WriteString("\n\n")
+	}
+	builder.WriteString("用户问题：")
+	builder.WriteString(question)
+	builder.WriteString("\n\n请直接用中文回答。")
+	return builder.String()
+}
+
+func formatPriceValue(value float64) string {
+	if value == float64(int64(value)) {
+		return fmt.Sprintf("%d元", int64(value))
+	}
+	return fmt.Sprintf("%.2f元", value)
 }
 
 func matchClarifyReply(query string) (string, bool) {
@@ -457,9 +613,44 @@ func matchClarifyReply(query string) (string, bool) {
 		"想了解一下",
 		"想咨询一下",
 	) {
-		return "可以的。您是想了解青禾家居的产品、材质、配送、售后，还是品牌信息？您告诉我具体方向后，我按现有资料为您介绍。", true
+		return "当然可以呀 😊 您是想了解青禾家居的产品、材质、配送、售后，还是品牌信息？您告诉我具体方向后，我按现有资料为您介绍。", true
 	}
 	return "", false
+}
+
+func parsePriceThresholdQuery(query string) (string, float64, bool) {
+	query = normalizeText(query)
+	if match := priceThresholdAbovePattern.FindStringSubmatch(query); len(match) == 2 {
+		value, err := strconv.ParseFloat(match[1], 64)
+		if err == nil {
+			if strings.Contains(query, "不低于") || strings.Contains(query, "至少") || strings.Contains(query, "起码") {
+				return "gte", value, true
+			}
+			return "gt", value, true
+		}
+	}
+	if match := priceThresholdBelowPattern.FindStringSubmatch(query); len(match) == 2 {
+		value, err := strconv.ParseFloat(match[1], 64)
+		if err == nil {
+			if strings.Contains(query, "不超过") || strings.Contains(query, "不高于") {
+				return "lte", value, true
+			}
+			return "lt", value, true
+		}
+	}
+	if match := priceWithinPattern.FindStringSubmatch(query); len(match) == 2 {
+		value, err := strconv.ParseFloat(match[1], 64)
+		if err == nil {
+			return "lte", value, true
+		}
+	}
+	if match := priceFromPattern.FindStringSubmatch(query); len(match) == 2 {
+		value, err := strconv.ParseFloat(match[1], 64)
+		if err == nil {
+			return "gte", value, true
+		}
+	}
+	return "", 0, false
 }
 
 func compactText(text string) string {

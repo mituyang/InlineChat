@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,6 +22,8 @@ const (
 	defaultChunkOverlap = 120
 	defaultEmbedBatch   = 16
 )
+
+var priceNumberPattern = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?`)
 
 type embedder interface {
 	CreateEmbeddings(ctx context.Context, inputs []string) ([][]float64, error)
@@ -40,6 +44,13 @@ type SearchResult struct {
 	Score   float64
 }
 
+type ProductPrice struct {
+	Name       string
+	PriceText  string
+	PriceValue float64
+	Section    string
+}
+
 type Status struct {
 	ChunkCount int
 	LoadedAt   time.Time
@@ -51,10 +62,11 @@ type Manager struct {
 	embedder embedder
 	logger   *zap.Logger
 
-	mu        sync.RWMutex
-	chunks    []Chunk
-	loadedAt  time.Time
-	lastError error
+	mu            sync.RWMutex
+	chunks        []Chunk
+	productPrices []ProductPrice
+	loadedAt      time.Time
+	lastError     error
 }
 
 func New(path string, embedder embedder, logger *zap.Logger) *Manager {
@@ -105,6 +117,8 @@ func (m *Manager) Reload(ctx context.Context) (Status, error) {
 		})
 	}
 
+	productPrices := extractProductPrices(string(raw))
+
 	status := Status{
 		ChunkCount: len(chunks),
 		LoadedAt:   time.Now(),
@@ -112,6 +126,7 @@ func (m *Manager) Reload(ctx context.Context) (Status, error) {
 
 	m.mu.Lock()
 	m.chunks = chunks
+	m.productPrices = productPrices
 	m.loadedAt = status.LoadedAt
 	m.lastError = nil
 	m.mu.Unlock()
@@ -191,6 +206,15 @@ func (m *Manager) Status() Status {
 		status.LastError = m.lastError.Error()
 	}
 	return status
+}
+
+func (m *Manager) ProductPrices() []ProductPrice {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	out := make([]ProductPrice, len(m.productPrices))
+	copy(out, m.productPrices)
+	return out
 }
 
 func (m *Manager) Ready() error {
@@ -354,6 +378,179 @@ func splitLongText(text string, maxChars int, overlap int) []string {
 
 func normalizeText(text string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+}
+
+func extractProductPrices(raw string) []ProductPrice {
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	sections := make([]string, 0, 6)
+	tableLines := make([]string, 0, 8)
+	prices := make([]ProductPrice, 0, 16)
+
+	flushTable := func() {
+		if len(tableLines) == 0 {
+			return
+		}
+		section := normalizeText(strings.Join(sections, " > "))
+		prices = append(prices, parseProductPriceTable(tableLines, section)...)
+		tableLines = nil
+	}
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			flushTable()
+			continue
+		}
+		if strings.HasPrefix(line, "#") {
+			flushTable()
+			level, title := parseHeading(line)
+			if title == "" {
+				continue
+			}
+			if level <= 0 {
+				level = 1
+			}
+			if level > len(sections)+1 {
+				level = len(sections) + 1
+			}
+			sections = append([]string(nil), sections[:level-1]...)
+			sections = append(sections, title)
+			continue
+		}
+		if isMarkdownTableLine(line) {
+			tableLines = append(tableLines, line)
+			continue
+		}
+		flushTable()
+	}
+	flushTable()
+
+	if len(prices) == 0 {
+		return nil
+	}
+
+	deduped := make([]ProductPrice, 0, len(prices))
+	seen := make(map[string]struct{}, len(prices))
+	for _, item := range prices {
+		key := normalizeText(item.Name)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, item)
+	}
+	return deduped
+}
+
+func parseProductPriceTable(lines []string, section string) []ProductPrice {
+	if len(lines) < 3 {
+		return nil
+	}
+
+	headers := parseMarkdownTableRow(lines[0])
+	if len(headers) == 0 {
+		return nil
+	}
+	if !isMarkdownSeparatorRow(parseMarkdownTableRow(lines[1])) {
+		return nil
+	}
+
+	nameIdx := findTableHeaderIndex(headers, "产品名称")
+	priceIdx := findTableHeaderIndex(headers, "建议零售价")
+	if nameIdx < 0 || priceIdx < 0 {
+		return nil
+	}
+
+	out := make([]ProductPrice, 0, len(lines)-2)
+	for _, line := range lines[2:] {
+		cells := parseMarkdownTableRow(line)
+		if len(cells) == 0 {
+			continue
+		}
+		name := tableCell(cells, nameIdx)
+		priceText := tableCell(cells, priceIdx)
+		priceValue, ok := parsePriceValue(priceText)
+		if !ok || name == "" {
+			continue
+		}
+		out = append(out, ProductPrice{
+			Name:       name,
+			PriceText:  priceText,
+			PriceValue: priceValue,
+			Section:    section,
+		})
+	}
+	return out
+}
+
+func isMarkdownTableLine(line string) bool {
+	line = strings.TrimSpace(line)
+	return strings.HasPrefix(line, "|") && strings.HasSuffix(line, "|")
+}
+
+func parseMarkdownTableRow(line string) []string {
+	line = strings.TrimSpace(line)
+	if line == "" || !strings.Contains(line, "|") {
+		return nil
+	}
+	parts := strings.Split(line, "|")
+	if len(parts) >= 2 {
+		parts = parts[1 : len(parts)-1]
+	}
+	cells := make([]string, 0, len(parts))
+	for _, part := range parts {
+		cells = append(cells, normalizeText(part))
+	}
+	return cells
+}
+
+func isMarkdownSeparatorRow(cells []string) bool {
+	if len(cells) == 0 {
+		return false
+	}
+	for _, cell := range cells {
+		if cell == "" {
+			return false
+		}
+		trimmed := strings.ReplaceAll(cell, ":", "")
+		trimmed = strings.ReplaceAll(trimmed, "-", "")
+		if trimmed != "" {
+			return false
+		}
+	}
+	return true
+}
+
+func findTableHeaderIndex(headers []string, target string) int {
+	target = normalizeText(target)
+	for idx, header := range headers {
+		if normalizeText(header) == target {
+			return idx
+		}
+	}
+	return -1
+}
+
+func tableCell(cells []string, idx int) string {
+	if idx < 0 || idx >= len(cells) {
+		return ""
+	}
+	return normalizeText(cells[idx])
+}
+
+func parsePriceValue(priceText string) (float64, bool) {
+	match := priceNumberPattern.FindString(strings.TrimSpace(priceText))
+	if match == "" {
+		return 0, false
+	}
+	value, err := strconv.ParseFloat(match, 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
 }
 
 func vectorNorm(vec []float64) float64 {
