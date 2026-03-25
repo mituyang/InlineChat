@@ -20,6 +20,56 @@ const THEME_STORAGE_KEY = "inlinechat.ui.theme";
 const ACK_TIMEOUT_MS = 5000;
 const MAX_MESSAGE_CONTENT_CHARS = 2000;
 const BASE_PAGE_TITLE = document.title || "InlineChat 客服工作台";
+const AI_INTENT_RULES = [
+  {
+    key: "complaint",
+    label: "投诉 / 情绪安抚",
+    detail: "访客情绪较强，先致歉稳住预期，再收集订单与问题经过。",
+    pattern: /(投诉|差评|生气|不满意|失望|太慢|一直没人|马上|尽快|着急|催一下|催单|扯皮)/i,
+  },
+  {
+    key: "refund",
+    label: "退款 / 售后",
+    detail: "优先确认订单号、退款原因与申请时间，避免往返追问。",
+    pattern: /(退款|退货|换货|售后|取消订单|取消掉|退款进度|退回去)/i,
+  },
+  {
+    key: "logistics",
+    label: "订单 / 物流",
+    detail: "先拿订单号或手机号，再同步发货、揽收或配送进度。",
+    pattern: /(订单|物流|快递|发货|配送|到货|什么时候到|催发|查一下单|运单)/i,
+  },
+  {
+    key: "recommendation",
+    label: "选购 / 推荐",
+    detail: "追问预算、使用场景和偏好，再给出更准确的推荐。",
+    pattern: /(推荐|哪个好|怎么选|区别|适合我|型号|规格|尺码|颜色|搭配)/i,
+  },
+  {
+    key: "price",
+    label: "价格 / 活动",
+    detail: "说明以页面实时活动为准，同时帮访客核对优惠与使用门槛。",
+    pattern: /(多少钱|价格|优惠|折扣|活动|券|满减|便宜一点|促销)/i,
+  },
+  {
+    key: "account",
+    label: "账号 / 登录",
+    detail: "让访客补充报错文案、操作步骤和账号信息，便于快速排查。",
+    pattern: /(登录|账号|验证码|注册|密码|收不到|绑定|解绑)/i,
+  },
+  {
+    key: "payment",
+    label: "支付 / 发票",
+    detail: "先确认订单号、支付时间和支付方式，再定位支付或开票问题。",
+    pattern: /(支付|付款|扣款|发票|开票|支付失败|支付成功)/i,
+  },
+  {
+    key: "manual",
+    label: "人工诉求",
+    detail: "访客明确希望人工介入，优先认领并说明你已接手。",
+    pattern: /(人工|真人|客服|转人工|有人吗)/i,
+  },
+];
 
 const state = {
   token: "",
@@ -124,6 +174,15 @@ const els = {
   quickReplyForm: document.getElementById("quickReplyForm"),
   quickReplyInput: document.getElementById("quickReplyInput"),
   resetQuickRepliesBtn: document.getElementById("resetQuickRepliesBtn"),
+
+  aiAssistBadge: document.getElementById("aiAssistBadge"),
+  aiIntentTitle: document.getElementById("aiIntentTitle"),
+  aiIntentDetail: document.getElementById("aiIntentDetail"),
+  aiActionTitle: document.getElementById("aiActionTitle"),
+  aiActionDetail: document.getElementById("aiActionDetail"),
+  aiConversationSummary: document.getElementById("aiConversationSummary"),
+  aiSuggestionList: document.getElementById("aiSuggestionList"),
+  aiLastReplyText: document.getElementById("aiLastReplyText"),
 };
 
 init();
@@ -135,6 +194,7 @@ async function init() {
   renderMessages([]);
   renderStats();
   renderQuickReplies();
+  renderAIAssist();
   renderQueueTabsMeta();
   renderQueueShortcuts();
   resetConversationDetail();
@@ -295,6 +355,14 @@ function bindEvents() {
     }
     const text = btn.dataset.text || "";
     insertQuickReply(text);
+  });
+
+  els.aiSuggestionList?.addEventListener("click", (event) => {
+    const btn = event.target.closest("button.quick-reply-chip");
+    if (!btn) {
+      return;
+    }
+    insertQuickReply(btn.dataset.text || "");
   });
 
   els.resetQuickRepliesBtn?.addEventListener("click", () => {
@@ -517,6 +585,7 @@ function applyAuthUI(loggedIn) {
     renderConversations([]);
     renderMessages([]);
     renderStats();
+    renderAIAssist();
     renderQueueTabsMeta();
     renderQueueShortcuts();
     renderTransferReminders([]);
@@ -533,6 +602,7 @@ function applyAuthUI(loggedIn) {
   }
   document.body.classList.remove("auth-guard");
   renderStats();
+  renderAIAssist();
   updateConversationActionState();
 }
 
@@ -1251,6 +1321,7 @@ function updateActiveConversationHeader(conversation) {
   els.detailUpdatedAt.textContent = formatTime(conversation.updated_at || conversation.created_at);
   els.detailWaitingDuration.textContent = formatDurationSince(conversation.updated_at || conversation.created_at);
   renderTransferReminders(collectPendingTransferConversations(state.statsConversations));
+  renderAIAssist();
   updateConversationActionState();
 }
 
@@ -1264,6 +1335,7 @@ function resetConversationDetail() {
   els.detailWaitingDuration.textContent = "-";
   els.detailWsState.textContent = "未连接";
   renderTransferReminders(collectPendingTransferConversations(state.statsConversations));
+  renderAIAssist();
   updateConversationActionState();
 }
 
@@ -1367,6 +1439,7 @@ function mergeMessages(items, options = {}) {
   renderMessages(state.messages, {
     forceScrollBottom: Boolean(options.forceScrollBottom),
   });
+  renderAIAssist();
 
   if (state.activeConversationId) {
     markConversationRead(state.activeConversationId, state.messages);
@@ -1834,6 +1907,7 @@ function renderMessages(items, options = {}) {
 
   if (!Array.isArray(items) || items.length === 0) {
     els.agentMessages.innerHTML = '<div class="empty">暂无消息</div>';
+    renderAIAssist();
     return;
   }
 
@@ -1854,9 +1928,10 @@ function renderMessages(items, options = {}) {
     }
 
     const mine = isMineMessage(item);
+    const ai = item.sender_type === "ai";
 
     const row = document.createElement("article");
-    row.className = `message-row ${mine ? "mine" : "other"}`;
+    row.className = `message-row ${mine ? "mine" : ai ? "ai" : "other"}`;
 
     const bubble = document.createElement("div");
     bubble.className = "message";
@@ -1890,6 +1965,7 @@ function renderMessages(items, options = {}) {
   if (shouldStickBottom) {
     els.agentMessages.scrollTop = els.agentMessages.scrollHeight;
   }
+  renderAIAssist();
 }
 
 function markConversationRead(conversationID, messages) {
@@ -1991,6 +2067,323 @@ function renderQuickReplies() {
     btn.textContent = reply;
     els.quickReplyList.appendChild(btn);
   }
+}
+
+function renderAIAssist() {
+  const conversation = state.activeConversation;
+  const messages = Array.isArray(state.messages) ? state.messages : [];
+
+  if (!conversation) {
+    if (els.aiAssistBadge) {
+      els.aiAssistBadge.textContent = "未分析";
+      els.aiAssistBadge.className = "assist-badge";
+    }
+    if (els.aiIntentTitle) {
+      els.aiIntentTitle.textContent = "请选择会话";
+    }
+    if (els.aiIntentDetail) {
+      els.aiIntentDetail.textContent = "AI 会根据最近消息提炼主要诉求。";
+    }
+    if (els.aiActionTitle) {
+      els.aiActionTitle.textContent = "等待会话";
+    }
+    if (els.aiActionDetail) {
+      els.aiActionDetail.textContent = "认领后可直接填入建议回复。";
+    }
+    if (els.aiConversationSummary) {
+      els.aiConversationSummary.textContent = "请选择会话后查看 AI 摘要。";
+    }
+    renderAISuggestionList([]);
+    if (els.aiLastReplyText) {
+      els.aiLastReplyText.textContent = "暂无 AI 回复";
+    }
+    return;
+  }
+
+  const insight = buildAIAssistInsight(conversation, messages);
+  if (els.aiAssistBadge) {
+    els.aiAssistBadge.textContent = insight.badgeText;
+    els.aiAssistBadge.className = `assist-badge ${insight.badgeTone}`;
+  }
+  if (els.aiIntentTitle) {
+    els.aiIntentTitle.textContent = insight.intentTitle;
+  }
+  if (els.aiIntentDetail) {
+    els.aiIntentDetail.textContent = insight.intentDetail;
+  }
+  if (els.aiActionTitle) {
+    els.aiActionTitle.textContent = insight.actionTitle;
+  }
+  if (els.aiActionDetail) {
+    els.aiActionDetail.textContent = insight.actionDetail;
+  }
+  if (els.aiConversationSummary) {
+    els.aiConversationSummary.textContent = insight.summary;
+  }
+  if (els.aiLastReplyText) {
+    els.aiLastReplyText.textContent = insight.lastAIReplyText;
+  }
+  renderAISuggestionList(insight.suggestions);
+}
+
+function renderAISuggestionList(items) {
+  if (!els.aiSuggestionList) {
+    return;
+  }
+  const list = Array.isArray(items) ? items.filter(Boolean) : [];
+  if (list.length === 0) {
+    els.aiSuggestionList.innerHTML = '<div class="empty">暂无建议回复</div>';
+    return;
+  }
+
+  els.aiSuggestionList.innerHTML = "";
+  for (const text of list) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "quick-reply-chip ai-reply-chip";
+    btn.dataset.text = text;
+    btn.textContent = text;
+    els.aiSuggestionList.appendChild(btn);
+  }
+}
+
+function buildAIAssistInsight(conversation, messages) {
+  const allMessages = Array.isArray(messages) ? messages : [];
+  const visitorMessages = allMessages.filter((item) => item.sender_type === "visitor");
+  const aiMessages = allMessages.filter((item) => item.sender_type === "ai");
+  const agentMessages = allMessages.filter((item) => item.sender_type === "agent");
+  const lastVisitorMessage = visitorMessages[visitorMessages.length - 1] || null;
+  const lastAIMessage = aiMessages[aiMessages.length - 1] || null;
+  const lastAgentMessage = agentMessages[agentMessages.length - 1] || null;
+  const intent = detectConversationIntent(visitorMessages, lastVisitorMessage);
+  const action = deriveAIAssistAction(conversation, intent, lastVisitorMessage, aiMessages, lastAgentMessage);
+
+  return {
+    badgeText: action.badgeText,
+    badgeTone: action.badgeTone,
+    intentTitle: intent.label,
+    intentDetail: intent.detail,
+    actionTitle: action.title,
+    actionDetail: action.detail,
+    summary: buildAIConversationSummary(conversation, {
+      intent,
+      lastVisitorMessage,
+      lastAIMessage,
+      visitorMessages,
+      aiMessages,
+      agentMessages,
+    }),
+    lastAIReplyText: lastAIMessage
+      ? `${formatMessageTime(lastAIMessage.created_at)} · ${lastAIMessage.content || ""}`
+      : "暂无 AI 回复",
+    suggestions: buildAISuggestedReplies(conversation, {
+      intent,
+      lastVisitorMessage,
+      lastAIMessage,
+      aiMessages,
+      agentMessages,
+    }),
+  };
+}
+
+function detectConversationIntent(visitorMessages, lastVisitorMessage) {
+  const recentVisitorText = [
+    String(lastVisitorMessage?.content || ""),
+    ...visitorMessages.slice(-3).map((item) => String(item?.content || "")),
+  ]
+    .join("\n")
+    .trim();
+
+  for (const rule of AI_INTENT_RULES) {
+    if (rule.pattern.test(recentVisitorText)) {
+      return {
+        key: rule.key,
+        label: rule.label,
+        detail: rule.detail,
+      };
+    }
+  }
+
+  if (String(lastVisitorMessage?.content || "").trim()) {
+    return {
+      key: "general",
+      label: "通用咨询",
+      detail: "先确认核心问题和必要信息，再给出下一步处理路径。",
+    };
+  }
+
+  return {
+    key: "idle",
+    label: "等待更多信息",
+    detail: "当前消息较少，适合先做欢迎和信息收集。",
+  };
+}
+
+function deriveAIAssistAction(conversation, intent, lastVisitorMessage, aiMessages, lastAgentMessage) {
+  const status = String(conversation?.status || "").trim().toLowerCase();
+  const assignedAgentID = Number(conversation?.assigned_agent_id || 0);
+  const pendingTransferTo = Number(conversation?.pending_transfer_to_agent_id || 0);
+  const meID = Number(state.me?.agent_id || 0);
+
+  if (status === "closed") {
+    return {
+      badgeText: "已关闭",
+      badgeTone: "muted",
+      title: "复盘归档",
+      detail: "会话已结束，可结合摘要补充备注或复盘常见问题。",
+    };
+  }
+
+  if (pendingTransferTo > 0 && meID > 0 && pendingTransferTo === meID && assignedAgentID !== meID) {
+    return {
+      badgeText: "待确认转接",
+      badgeTone: "warn",
+      title: "优先确认转接",
+      detail: "当前会话已转给你待确认，先确认后再继续发送消息。",
+    };
+  }
+
+  if (assignedAgentID <= 0) {
+    return {
+      badgeText: aiMessages.length > 0 ? "AI 已兜底" : "待认领",
+      badgeTone: aiMessages.length > 0 ? "success" : "warn",
+      title: "尽快认领会话",
+      detail: aiMessages.length > 0
+        ? "AI 已先行回复，建议你尽快接手，避免访客重复描述。"
+        : "当前无人接待，建议优先认领并在 60 秒内完成人工首响。",
+    };
+  }
+
+  if (assignedAgentID === meID) {
+    return {
+      badgeText: aiMessages.length > 0 ? "AI 协作中" : "人工接待中",
+      badgeTone: aiMessages.length > 0 ? "success" : "active",
+      title: intent.key === "complaint" ? "先安抚再核查" : "继续跟进",
+      detail:
+        intent.key === "complaint"
+          ? "先明确你已接手并表达歉意，再收集订单号与问题时间点。"
+          : lastVisitorMessage
+            ? "根据访客最近一条消息补齐关键信息，再给出明确下一步。"
+            : lastAgentMessage
+              ? "当前可继续推进核实、转接或关闭动作。"
+              : "适合先发送确认型回复，告诉访客你正在处理。",
+    };
+  }
+
+  return {
+    badgeText: "协作会话",
+    badgeTone: "muted",
+    title: "等待当前坐席处理",
+    detail: "该会话已被其他坐席接待，可重点关注需要你确认的转接提醒。",
+  };
+}
+
+function buildAIConversationSummary(conversation, context) {
+  const fragments = [];
+  const status = String(conversation?.status || "").trim().toLowerCase() === "closed" ? "已关闭" : "进行中";
+  fragments.push(`会话当前${status}，站点 ${conversation?.site_id || "-"}。`);
+
+  if (context.lastVisitorMessage?.content) {
+    fragments.push(`访客最近在问“${truncateText(context.lastVisitorMessage.content, 42)}”。`);
+  } else {
+    fragments.push("当前访客侧信息较少，适合先做欢迎和信息收集。");
+  }
+
+  if (context.intent?.key && context.intent.key !== "idle") {
+    fragments.push(`主要意图偏向${context.intent.label}。`);
+  }
+
+  if (context.aiMessages.length > 0) {
+    fragments.push(`AI 已回复 ${context.aiMessages.length} 次。`);
+  } else if (Number(conversation?.assigned_agent_id || 0) <= 0) {
+    fragments.push("当前仍未分配人工坐席。");
+  }
+
+  if (context.agentMessages.length > 0) {
+    fragments.push(`人工侧累计回复 ${context.agentMessages.length} 次。`);
+  }
+
+  return fragments.join("");
+}
+
+function buildAISuggestedReplies(conversation, context) {
+  const suggestions = [];
+  const intentKey = context.intent?.key || "general";
+  const status = String(conversation?.status || "").trim().toLowerCase();
+  const assignedAgentID = Number(conversation?.assigned_agent_id || 0);
+  const meID = Number(state.me?.agent_id || 0);
+
+  if (status === "closed") {
+    return [];
+  }
+
+  if (assignedAgentID > 0 && assignedAgentID !== meID) {
+    return [];
+  }
+
+  if (assignedAgentID <= 0) {
+    suggestions.push("您好，我先接手处理这个问题，请稍等，我先帮您核实。");
+  } else if (context.aiMessages.length > 0) {
+    suggestions.push("我已接手，下面由我继续为您跟进处理。");
+  }
+
+  if (intentKey === "complaint") {
+    suggestions.push("抱歉让您久等了，我先优先处理。麻烦把订单号和问题经过发我，我马上核实。");
+  } else if (intentKey === "refund") {
+    suggestions.push("收到，我先帮您确认退款/售后进度，请提供订单号和申请时间。");
+  } else if (intentKey === "logistics") {
+    suggestions.push("我先帮您查订单物流，请发我订单号或下单手机号。");
+  } else if (intentKey === "recommendation") {
+    suggestions.push("可以，我先根据您的预算、使用场景和偏好帮您推荐。");
+  } else if (intentKey === "price") {
+    suggestions.push("我先帮您核对这款商品当前的活动和优惠门槛，请稍等。");
+  } else if (intentKey === "account") {
+    suggestions.push("我先帮您排查账号问题，请把报错提示和操作步骤发我。");
+  } else if (intentKey === "payment") {
+    suggestions.push("我先帮您确认支付/开票状态，请提供订单号和支付时间。");
+  } else if (intentKey === "manual") {
+    suggestions.push("您好，我已经人工接入，接下来由我继续为您处理。");
+  }
+
+  if (context.lastVisitorMessage?.content) {
+    suggestions.push("收到您的信息，我正在核实中，稍后给您明确结果。");
+  }
+
+  for (const reply of state.quickReplies.slice(0, 3)) {
+    suggestions.push(reply);
+  }
+
+  return dedupeReplySuggestions(suggestions).slice(0, 5);
+}
+
+function dedupeReplySuggestions(items) {
+  const seen = new Set();
+  const result = [];
+  for (const item of items) {
+    const text = String(item || "").trim();
+    if (!text) {
+      continue;
+    }
+    const key = text.replace(/\s+/g, "");
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    result.push(text);
+  }
+  return result;
+}
+
+function truncateText(value, maxChars) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "";
+  }
+  const chars = Array.from(text);
+  if (chars.length <= maxChars) {
+    return text;
+  }
+  return `${chars.slice(0, maxChars).join("")}...`;
 }
 
 function addQuickReply() {

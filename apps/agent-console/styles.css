@@ -25,6 +25,9 @@
   --warn-text: #a25f0f;
   --offline-bg: #f1f5f9;
   --offline-text: #64748b;
+  --ai-soft: #eef6ff;
+  --ai-border: #bfdbfe;
+  --ai-text: #1d4ed8;
   --focus: rgba(34, 211, 238, 0.28);
   --shadow: 0 10px 24px rgba(15, 23, 42, 0.07);
 }
@@ -56,6 +59,9 @@
   --warn-text: #f0c475;
   --offline-bg: #223246;
   --offline-text: #a6bdd7;
+  --ai-soft: #132b4c;
+  --ai-border: #29528b;
+  --ai-text: #8bb8ff;
   --focus: rgba(34, 211, 238, 0.4);
   --shadow: 0 10px 26px rgba(0, 0, 0, 0.34);
 }
@@ -603,6 +609,11 @@ body.auth-guard .shell {
   align-items: flex-start;
 }
 
+.message-row.ai {
+  margin-right: auto;
+  align-items: flex-start;
+}
+
 .message-row.system {
   width: 100%;
   max-width: 100%;
@@ -626,6 +637,16 @@ body.auth-guard .shell {
 
 .message-row.other .message {
   background: var(--other);
+}
+
+.message-row.ai .message {
+  background: linear-gradient(180deg, var(--ai-soft), rgba(255, 255, 255, 0.96));
+  border: 1px solid var(--ai-border);
+  color: var(--text-main);
+}
+
+:root[data-theme="dark"] .message-row.ai .message {
+  background: linear-gradient(180deg, rgba(19, 43, 76, 0.96), rgba(17, 32, 51, 0.96));
 }
 
 .system-message {
@@ -679,10 +700,11 @@ body.auth-guard .shell {
 }
 
 .assist-panel {
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto auto auto 1fr;
 }
 
 .conversation-info,
+.ai-assist-panel,
 .quick-reply-panel,
 .playbook-panel {
   border: 1px solid var(--line);
@@ -729,6 +751,114 @@ body.auth-guard .shell {
   gap: 8px;
 }
 
+.assist-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #eef3f9;
+  color: #51657b;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.assist-badge.active {
+  background: #e8f2ff;
+  color: #1d4ed8;
+}
+
+.assist-badge.success {
+  background: #eafbf1;
+  color: #1b7a46;
+}
+
+.assist-badge.warn {
+  background: #fff6e8;
+  color: #a25f0f;
+}
+
+:root[data-theme="dark"] .assist-badge {
+  background: #1a2b41;
+  color: #a6bdd7;
+}
+
+:root[data-theme="dark"] .assist-badge.active {
+  background: #17365d;
+  color: #8bb8ff;
+}
+
+:root[data-theme="dark"] .assist-badge.success {
+  background: #113727;
+  color: #87d6a8;
+}
+
+:root[data-theme="dark"] .assist-badge.warn {
+  background: #3e2f10;
+  color: #f0c475;
+}
+
+.ai-assist-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.ai-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ai-signal-card {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+  display: grid;
+  gap: 4px;
+}
+
+:root[data-theme="dark"] .ai-signal-card {
+  background: linear-gradient(180deg, #16253a, #112033);
+}
+
+.ai-signal-card span,
+.ai-section-title {
+  color: var(--text-sub);
+  font-size: 11px;
+}
+
+.ai-signal-card strong {
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.ai-signal-card p,
+.ai-summary-block p {
+  margin: 0;
+  color: var(--text-sub);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ai-summary-block {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 9px 10px;
+  background: rgba(255, 255, 255, 0.56);
+  display: grid;
+  gap: 6px;
+}
+
+:root[data-theme="dark"] .ai-summary-block {
+  background: rgba(16, 32, 57, 0.58);
+}
+
+.ai-last-reply {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .quick-reply-list {
   margin-top: 8px;
   display: flex;
@@ -757,6 +887,18 @@ body.auth-guard .shell {
 .quick-reply-chip:hover {
   border-color: #84c3ec;
   background: #f0f8ff;
+}
+
+.ai-reply-chip {
+  border-color: var(--ai-border);
+  background: var(--ai-soft);
+  color: var(--ai-text);
+}
+
+:root[data-theme="dark"] .ai-reply-chip {
+  border-color: var(--ai-border);
+  background: rgba(19, 43, 76, 0.82);
+  color: var(--ai-text);
 }
 
 .quick-reply-form {
@@ -923,7 +1065,7 @@ button:focus-visible {
 
   .assist-panel {
     grid-column: 1 / -1;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     grid-template-rows: none;
     overflow: hidden;
   }
@@ -963,6 +1105,10 @@ button:focus-visible {
   }
 
   .assist-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-insight-grid {
     grid-template-columns: 1fr;
   }
 

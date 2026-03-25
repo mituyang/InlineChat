@@ -25,6 +25,9 @@ const state = {
   theme: "light",
   sites: [],
   agents: [],
+  siteAIConfigs: {},
+  selectedAISiteID: "",
+  siteAIConfigSeq: 0,
   siteSearch: "",
   agentSearch: "",
   agentStatusFilter: "all",
@@ -45,6 +48,8 @@ const els = {
   agentCount: document.getElementById("agentCount"),
   agentActiveCount: document.getElementById("agentActiveCount"),
   agentInactiveCount: document.getElementById("agentInactiveCount"),
+  aiEnabledSiteCount: document.getElementById("aiEnabledSiteCount"),
+  aiLastReloadAt: document.getElementById("aiLastReloadAt"),
   lastSyncAt: document.getElementById("lastSyncAt"),
 
   refreshSitesBtn: document.getElementById("refreshSitesBtn"),
@@ -67,6 +72,22 @@ const els = {
   agentDisplayNameInput: document.getElementById("agentDisplayNameInput"),
   agentList: document.getElementById("agentList"),
 
+  refreshAiBtn: document.getElementById("refreshAiBtn"),
+  aiSiteSelect: document.getElementById("aiSiteSelect"),
+  aiSiteStatusChip: document.getElementById("aiSiteStatusChip"),
+  aiReloadStatusChip: document.getElementById("aiReloadStatusChip"),
+  aiSelectedSiteLabel: document.getElementById("aiSelectedSiteLabel"),
+  aiSelectedSiteMeta: document.getElementById("aiSelectedSiteMeta"),
+  aiReplyModeLabel: document.getElementById("aiReplyModeLabel"),
+  aiUpdatedAt: document.getElementById("aiUpdatedAt"),
+  aiChunkCount: document.getElementById("aiChunkCount"),
+  aiReloadedAt: document.getElementById("aiReloadedAt"),
+  siteAiForm: document.getElementById("siteAiForm"),
+  aiEnabledInput: document.getElementById("aiEnabledInput"),
+  aiReplyModeSelect: document.getElementById("aiReplyModeSelect"),
+  saveAiConfigBtn: document.getElementById("saveAiConfigBtn"),
+  reloadAiBtn: document.getElementById("reloadAiBtn"),
+
   refreshAuditBtn: document.getElementById("refreshAuditBtn"),
   auditActorInput: document.getElementById("auditActorInput"),
   auditActionFilter: document.getElementById("auditActionFilter"),
@@ -82,6 +103,8 @@ async function init() {
   renderSites([]);
   renderAgents([]);
   renderStats();
+  renderAISiteOptions();
+  renderAIPanel();
   renderOperationFeed();
 
   const savedToken = readStaffToken();
@@ -132,6 +155,13 @@ function bindEvents() {
     setStatus("坐席列表已刷新");
   });
 
+  els.refreshAiBtn?.addEventListener("click", async () => {
+    const failedCount = await refreshSiteAIConfigs();
+    if (!failedCount) {
+      setStatus("AI 配置已刷新");
+    }
+  });
+
   els.siteSearchInput?.addEventListener("input", () => {
     state.siteSearch = (els.siteSearchInput.value || "").trim().toLowerCase();
     renderSites(state.sites);
@@ -163,6 +193,27 @@ function bindEvents() {
     await createAgent();
   });
 
+  els.aiSiteSelect?.addEventListener("change", async () => {
+    state.selectedAISiteID = normalizeSiteID(els.aiSiteSelect.value || "");
+    renderAIPanel();
+    if (
+      state.selectedAISiteID &&
+      !state.siteAIConfigs[state.selectedAISiteID]?.loaded &&
+      !state.siteAIConfigs[state.selectedAISiteID]?.loading
+    ) {
+      await refreshSingleSiteAIConfig(state.selectedAISiteID);
+    }
+  });
+
+  els.siteAiForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    await saveSelectedSiteAIConfig();
+  });
+
+  els.reloadAiBtn?.addEventListener("click", async () => {
+    await reloadSelectedSiteAIKnowledge();
+  });
+
   els.siteList?.addEventListener("click", async (event) => {
     const target = event.target.closest("button");
     if (!target) {
@@ -181,6 +232,11 @@ function bindEvents() {
       } catch (error) {
         setStatus(error.message || "复制嵌入脚本失败", true);
       }
+      return;
+    }
+
+    if (target.classList.contains("focus-ai-btn")) {
+      focusAISite(siteID);
       return;
     }
 
@@ -257,14 +313,18 @@ function applyAuthUI(loggedIn) {
     }
     state.sites = [];
     state.agents = [];
+    state.siteAIConfigs = {};
+    state.selectedAISiteID = "";
     state.auditActorID = "";
     state.auditAction = "";
     state.auditResourceType = "";
     state.operationFeed = [];
     renderSites([]);
     renderAgentSiteOptions();
+    renderAISiteOptions();
     renderAgents([]);
     renderStats();
+    renderAIPanel();
     renderOperationFeed();
     setSensitiveControlsEnabled(false);
     document.body.classList.add("auth-guard");
@@ -278,6 +338,7 @@ function applyAuthUI(loggedIn) {
     }
   }
   setSensitiveControlsEnabled(isSuperAdmin());
+  renderAIPanel();
   document.body.classList.remove("auth-guard");
 }
 
@@ -391,9 +452,13 @@ async function refreshSites() {
   }
   const data = await apiRequest("/api/admin/v1/admin/sites?limit=100", { auth: true });
   state.sites = Array.isArray(data.items) ? data.items : [];
+  ensureSelectedAISite();
   renderSites(state.sites);
   renderAgentSiteOptions();
+  renderAISiteOptions();
   renderStats();
+  renderAIPanel();
+  await refreshSiteAIConfigs({ silent: true });
   if (els.lastSyncAt) {
     els.lastSyncAt.textContent = formatTime(Date.now());
   }
@@ -661,6 +726,15 @@ function validateAgentPassword(password) {
 function renderStats() {
   const active = state.agents.filter((agent) => String(agent.status || "") === "active").length;
   const inactive = state.agents.length - active;
+  const aiEnabled = state.sites.filter((site) => Boolean(state.siteAIConfigs[normalizeSiteID(site.site_id || "")]?.enabled)).length;
+  const latestAIReloadAt = state.sites.reduce((latest, site) => {
+    const config = state.siteAIConfigs[normalizeSiteID(site.site_id || "")];
+    const time = Date.parse(config?.last_reload_at || "");
+    if (Number.isNaN(time)) {
+      return latest;
+    }
+    return latest == null || time > latest ? time : latest;
+  }, null);
 
   els.siteCount.textContent = String(state.sites.length || 0);
   els.agentCount.textContent = String(state.agents.length || 0);
@@ -669,6 +743,12 @@ function renderStats() {
   }
   if (els.agentInactiveCount) {
     els.agentInactiveCount.textContent = String(inactive);
+  }
+  if (els.aiEnabledSiteCount) {
+    els.aiEnabledSiteCount.textContent = String(aiEnabled);
+  }
+  if (els.aiLastReloadAt) {
+    els.aiLastReloadAt.textContent = latestAIReloadAt == null ? "--" : formatTime(latestAIReloadAt);
   }
 }
 
@@ -737,6 +817,428 @@ function renderAgentSiteOptions() {
   }
 }
 
+function renderAISiteOptions() {
+  if (!els.aiSiteSelect) {
+    return;
+  }
+
+  const previousValue = normalizeSiteID(state.selectedAISiteID || els.aiSiteSelect.value || "");
+  const options = ['<option value="">请选择站点</option>'];
+  for (const site of state.sites) {
+    const siteID = normalizeSiteID(site.site_id || "");
+    if (!siteID) {
+      continue;
+    }
+    const aiEnabled = Boolean(state.siteAIConfigs[siteID]?.enabled);
+    const label = `${siteID} · ${String(site.name || "未命名站点").trim() || "未命名站点"}${aiEnabled ? " · AI 已启用" : ""}`;
+    options.push(`<option value="${escapeHTML(siteID)}">${escapeHTML(label)}</option>`);
+  }
+  els.aiSiteSelect.innerHTML = options.join("");
+
+  if (previousValue && state.sites.some((site) => normalizeSiteID(site.site_id || "") === previousValue)) {
+    els.aiSiteSelect.value = previousValue;
+    state.selectedAISiteID = previousValue;
+    return;
+  }
+
+  ensureSelectedAISite();
+  els.aiSiteSelect.value = state.selectedAISiteID || "";
+}
+
+function ensureSelectedAISite() {
+  if (state.selectedAISiteID && state.sites.some((site) => normalizeSiteID(site.site_id || "") === state.selectedAISiteID)) {
+    return;
+  }
+  const firstActiveSite = state.sites.find((site) => String(site.status || "").toLowerCase() === "active");
+  state.selectedAISiteID = normalizeSiteID(firstActiveSite?.site_id || state.sites[0]?.site_id || "");
+}
+
+function defaultSiteAIConfig(siteID) {
+  return {
+    site_id: siteID,
+    enabled: false,
+    reply_mode: "unassigned_auto_reply",
+    updated_at: "",
+    last_reload_at: "",
+    chunk_count: 0,
+    loaded: false,
+    loading: false,
+    saving: false,
+    reloading: false,
+    error: "",
+  };
+}
+
+function normalizeSiteAIConfig(siteID, payload, fallback = {}) {
+  const base = defaultSiteAIConfig(siteID);
+  return {
+    ...base,
+    ...fallback,
+    site_id: siteID,
+    enabled: Boolean(payload?.enabled),
+    reply_mode: String(payload?.reply_mode || fallback.reply_mode || base.reply_mode),
+    updated_at: String(payload?.updated_at || fallback.updated_at || ""),
+    last_reload_at: String(payload?.last_reload_at || fallback.last_reload_at || ""),
+    chunk_count: Number(payload?.chunk_count || fallback.chunk_count || 0),
+    loaded: true,
+    loading: false,
+    saving: false,
+    reloading: false,
+    error: "",
+  };
+}
+
+function patchSiteAIConfig(siteID, patch) {
+  const normalizedSiteID = normalizeSiteID(siteID);
+  if (!normalizedSiteID) {
+    return;
+  }
+  state.siteAIConfigs = {
+    ...state.siteAIConfigs,
+    [normalizedSiteID]: {
+      ...defaultSiteAIConfig(normalizedSiteID),
+      ...(state.siteAIConfigs[normalizedSiteID] || {}),
+      ...patch,
+      site_id: normalizedSiteID,
+    },
+  };
+}
+
+async function refreshSiteAIConfigs(options = {}) {
+  const siteIDs = state.sites.map((site) => normalizeSiteID(site.site_id || "")).filter(Boolean);
+  const seq = state.siteAIConfigSeq + 1;
+  state.siteAIConfigSeq = seq;
+
+  const loadingConfigs = {};
+  for (const siteID of siteIDs) {
+    loadingConfigs[siteID] = {
+      ...defaultSiteAIConfig(siteID),
+      ...(state.siteAIConfigs[siteID] || {}),
+      loading: true,
+      error: "",
+    };
+  }
+  state.siteAIConfigs = loadingConfigs;
+  renderSites(state.sites);
+  renderAISiteOptions();
+  renderStats();
+  renderAIPanel();
+
+  if (siteIDs.length === 0) {
+    return 0;
+  }
+
+  const results = await Promise.allSettled(
+    siteIDs.map((siteID) => apiRequest(`/api/admin/v1/admin/sites/${encodeURIComponent(siteID)}/ai-config`, { auth: true }))
+  );
+  if (seq !== state.siteAIConfigSeq) {
+    return;
+  }
+
+  let failedCount = 0;
+  const resolvedConfigs = {};
+  for (let index = 0; index < siteIDs.length; index += 1) {
+    const siteID = siteIDs[index];
+    const current = loadingConfigs[siteID] || defaultSiteAIConfig(siteID);
+    const result = results[index];
+    if (result.status === "fulfilled") {
+      resolvedConfigs[siteID] = normalizeSiteAIConfig(siteID, result.value, current);
+      continue;
+    }
+
+    failedCount += 1;
+    resolvedConfigs[siteID] = {
+      ...current,
+      loading: false,
+      error: result.reason?.message || "加载失败",
+    };
+  }
+
+  state.siteAIConfigs = resolvedConfigs;
+  ensureSelectedAISite();
+  renderSites(state.sites);
+  renderAISiteOptions();
+  renderStats();
+  renderAIPanel();
+
+  if (failedCount > 0 && !options.silent) {
+    setStatus(`有 ${failedCount} 个站点的 AI 配置加载失败`, true);
+  }
+  return failedCount;
+}
+
+async function refreshSingleSiteAIConfig(siteID, options = {}) {
+  const normalizedSiteID = normalizeSiteID(siteID);
+  if (!normalizedSiteID) {
+    return;
+  }
+
+  patchSiteAIConfig(normalizedSiteID, {
+    loading: true,
+    error: "",
+  });
+  renderSites(state.sites);
+  renderAISiteOptions();
+  renderStats();
+  renderAIPanel();
+
+  try {
+    const data = await apiRequest(`/api/admin/v1/admin/sites/${encodeURIComponent(normalizedSiteID)}/ai-config`, {
+      auth: true,
+    });
+    patchSiteAIConfig(normalizedSiteID, normalizeSiteAIConfig(normalizedSiteID, data, state.siteAIConfigs[normalizedSiteID]));
+    renderSites(state.sites);
+    renderAISiteOptions();
+    renderStats();
+    renderAIPanel();
+  } catch (error) {
+    patchSiteAIConfig(normalizedSiteID, {
+      loading: false,
+      error: error.message || "加载失败",
+    });
+    renderSites(state.sites);
+    renderAISiteOptions();
+    renderStats();
+    renderAIPanel();
+    if (!options.silent) {
+      setStatus(error.message || "AI 配置加载失败", true);
+    }
+  }
+}
+
+function focusAISite(siteID) {
+  const normalizedSiteID = normalizeSiteID(siteID);
+  if (!normalizedSiteID) {
+    return;
+  }
+  state.selectedAISiteID = normalizedSiteID;
+  renderAISiteOptions();
+  renderAIPanel();
+  if (!state.siteAIConfigs[normalizedSiteID]?.loaded && !state.siteAIConfigs[normalizedSiteID]?.loading) {
+    void refreshSingleSiteAIConfig(normalizedSiteID, { silent: true });
+  }
+}
+
+async function saveSelectedSiteAIConfig() {
+  const siteID = normalizeSiteID(state.selectedAISiteID || els.aiSiteSelect?.value || "");
+  if (!siteID) {
+    setStatus("请先选择站点", true);
+    return;
+  }
+  if (!isSuperAdmin()) {
+    setStatus("仅超级管理员可保存 AI 配置", true);
+    return;
+  }
+
+  const current = state.siteAIConfigs[siteID] || defaultSiteAIConfig(siteID);
+  patchSiteAIConfig(siteID, {
+    saving: true,
+    error: "",
+  });
+  renderSites(state.sites);
+  renderAISiteOptions();
+  renderAIPanel();
+
+  try {
+    const payload = {
+      enabled: Boolean(els.aiEnabledInput?.checked),
+      reply_mode: String(els.aiReplyModeSelect?.value || current.reply_mode || "unassigned_auto_reply"),
+    };
+    const data = await apiRequest(`/api/admin/v1/admin/sites/${encodeURIComponent(siteID)}/ai-config`, {
+      method: "PATCH",
+      auth: true,
+      body: payload,
+    });
+    patchSiteAIConfig(siteID, normalizeSiteAIConfig(siteID, data, current));
+    renderSites(state.sites);
+    renderAISiteOptions();
+    renderStats();
+    renderAIPanel();
+    await refreshAuditLogs();
+    setStatus(`站点 ${siteID} AI 配置已保存`);
+  } catch (error) {
+    patchSiteAIConfig(siteID, {
+      saving: false,
+      error: error.message || "保存失败",
+    });
+    renderSites(state.sites);
+    renderAISiteOptions();
+    renderAIPanel();
+    setStatus(error.message || "保存 AI 配置失败", true);
+  }
+}
+
+async function reloadSelectedSiteAIKnowledge() {
+  const siteID = normalizeSiteID(state.selectedAISiteID || els.aiSiteSelect?.value || "");
+  if (!siteID) {
+    setStatus("请先选择站点", true);
+    return;
+  }
+
+  patchSiteAIConfig(siteID, {
+    reloading: true,
+    error: "",
+  });
+  renderAIPanel();
+
+  try {
+    const data = await apiRequest(`/api/admin/v1/admin/sites/${encodeURIComponent(siteID)}/ai/reload`, {
+      method: "POST",
+      auth: true,
+    });
+    patchSiteAIConfig(siteID, {
+      ...normalizeSiteAIConfig(siteID, state.siteAIConfigs[siteID], state.siteAIConfigs[siteID]),
+      chunk_count: Number(data?.chunk_count || 0),
+      last_reload_at: String(data?.reloaded_at || ""),
+      reloading: false,
+      error: "",
+    });
+    renderSites(state.sites);
+    renderAISiteOptions();
+    renderStats();
+    renderAIPanel();
+    setStatus(`站点 ${siteID} 知识库已重载，共 ${Number(data?.chunk_count || 0)} 个分块`);
+  } catch (error) {
+    patchSiteAIConfig(siteID, {
+      reloading: false,
+      error: error.message || "重载失败",
+    });
+    renderAIPanel();
+    setStatus(error.message || "重载知识库失败", true);
+  }
+}
+
+function formatSiteAIStatus(siteID) {
+  const config = state.siteAIConfigs[normalizeSiteID(siteID)] || null;
+  if (!config) {
+    return "AI 配置待加载";
+  }
+  if (config.loading) {
+    return "AI 配置加载中";
+  }
+  if (config.error) {
+    return "AI 配置加载失败";
+  }
+  if (!config.loaded) {
+    return "AI 配置待加载";
+  }
+  if (!config.enabled) {
+    return "AI 未启用";
+  }
+  return "AI 已启用 · 未分配会话自动回复";
+}
+
+function describeReplyMode(value) {
+  if (String(value || "") === "unassigned_auto_reply") {
+    return "未分配自动回复";
+  }
+  return "未配置";
+}
+
+function renderAIPanel() {
+  const siteID = normalizeSiteID(state.selectedAISiteID || els.aiSiteSelect?.value || "");
+  const site = state.sites.find((item) => normalizeSiteID(item.site_id || "") === siteID) || null;
+  const config = siteID ? state.siteAIConfigs[siteID] || defaultSiteAIConfig(siteID) : null;
+  const canSave = isSuperAdmin() && Boolean(site) && !config?.loading && !config?.saving;
+  const canReload = Boolean(site) && !config?.loading && !config?.reloading;
+
+  if (els.aiSelectedSiteLabel) {
+    els.aiSelectedSiteLabel.textContent = site ? String(site.name || site.site_id || "-") : "-";
+  }
+  if (els.aiSelectedSiteMeta) {
+    if (!site) {
+      els.aiSelectedSiteMeta.textContent = "请选择站点后查看 AI 配置";
+    } else {
+      els.aiSelectedSiteMeta.textContent = `site_id=${site.site_id} · domain=${site.domain || "-"}`;
+    }
+  }
+  if (els.aiReplyModeLabel) {
+    els.aiReplyModeLabel.textContent = config ? describeReplyMode(config.reply_mode) : "-";
+  }
+  if (els.aiUpdatedAt) {
+    if (!site) {
+      els.aiUpdatedAt.textContent = "配置尚未加载";
+    } else if (config?.loading) {
+      els.aiUpdatedAt.textContent = "AI 配置加载中";
+    } else if (config?.error) {
+      els.aiUpdatedAt.textContent = `加载失败：${config.error}`;
+    } else if (config?.updated_at) {
+      els.aiUpdatedAt.textContent = `配置更新时间 ${formatTime(config.updated_at)}`;
+    } else if (config?.loaded) {
+      els.aiUpdatedAt.textContent = "当前使用默认配置";
+    } else {
+      els.aiUpdatedAt.textContent = "配置尚未加载";
+    }
+  }
+  if (els.aiChunkCount) {
+    els.aiChunkCount.textContent = config?.chunk_count ? String(config.chunk_count) : "--";
+  }
+  if (els.aiReloadedAt) {
+    if (!site) {
+      els.aiReloadedAt.textContent = "尚未触发重载";
+    } else if (config?.reloading) {
+      els.aiReloadedAt.textContent = "知识库重载中";
+    } else if (config?.last_reload_at) {
+      els.aiReloadedAt.textContent = `最近重载 ${formatTime(config.last_reload_at)}`;
+    } else {
+      els.aiReloadedAt.textContent = "尚未触发重载";
+    }
+  }
+
+  if (els.aiEnabledInput) {
+    els.aiEnabledInput.checked = Boolean(config?.enabled);
+    els.aiEnabledInput.disabled = !canSave;
+  }
+  if (els.aiReplyModeSelect) {
+    els.aiReplyModeSelect.value = String(config?.reply_mode || "unassigned_auto_reply");
+    els.aiReplyModeSelect.disabled = !canSave;
+  }
+  if (els.saveAiConfigBtn) {
+    els.saveAiConfigBtn.disabled = !canSave;
+  }
+  if (els.reloadAiBtn) {
+    els.reloadAiBtn.disabled = !canReload;
+  }
+
+  if (els.aiSiteStatusChip) {
+    const siteChipText = !site
+      ? "未选择站点"
+      : config?.loading
+        ? "AI 配置加载中"
+        : config?.error
+          ? "配置异常"
+          : config?.enabled
+            ? "AI 已启用"
+            : config?.loaded
+              ? "AI 未启用"
+              : "AI 待加载";
+    els.aiSiteStatusChip.textContent = siteChipText;
+    els.aiSiteStatusChip.className = `pill ${
+      !site || config?.loading
+        ? "muted"
+        : config?.error
+          ? "danger"
+          : config?.enabled
+            ? "success"
+            : !config?.loaded
+              ? "muted"
+              : "muted"
+    }`;
+  }
+
+  if (els.aiReloadStatusChip) {
+    const reloadText = !site
+      ? "知识库未同步"
+      : config?.reloading
+        ? "知识库重载中"
+        : config?.last_reload_at
+          ? `已重载 ${formatTime(config.last_reload_at)}`
+          : "知识库未同步";
+    els.aiReloadStatusChip.textContent = reloadText;
+    els.aiReloadStatusChip.className = `pill ${config?.reloading ? "loading" : config?.last_reload_at ? "success" : "muted"}`;
+  }
+}
+
 function renderSites(items) {
   const list = filteredSites(items);
   if (list.length === 0) {
@@ -747,6 +1249,7 @@ function renderSites(items) {
   els.siteList.innerHTML = "";
   for (const site of list) {
     const siteID = String(site.site_id || "");
+    const normalizedSiteID = normalizeSiteID(siteID);
     const snippet = buildEmbedSnippet(siteID);
     const demoURL = "/app/demo/";
     const status = String(site.status || "").toLowerCase();
@@ -754,18 +1257,21 @@ function renderSites(items) {
     const statusActionLabel = status === "active" ? "停用站点" : "启用站点";
     const canManage = isSuperAdmin();
     const disabledAttr = canManage ? "" : "disabled";
+    const aiStatus = formatSiteAIStatus(normalizedSiteID);
     const node = document.createElement("article");
     node.className = "item";
     node.innerHTML = `
       <strong>${escapeHTML(site.name || "-")}</strong>
       <div class="meta">site_id=${escapeHTML(siteID || "-")} · domain=${escapeHTML(site.domain || "-")}</div>
       <div class="meta">widget_key=${escapeHTML(site.widget_key || "-")} · status=${escapeHTML(site.status || "-")}</div>
+      <div class="meta">${escapeHTML(aiStatus)}</div>
       <a class="demo-link" href="${demoURL}" target="_blank" rel="noreferrer">打开 Demo 预览</a>
       <div class="snippet-box">
         <div class="snippet-title">嵌入脚本</div>
         <pre class="snippet-code">${escapeHTML(snippet)}</pre>
         <div class="item-actions">
           <button type="button" class="ghost copy-snippet-btn" data-site-id="${escapeHTML(siteID)}">复制嵌入脚本</button>
+          <button type="button" class="ghost focus-ai-btn" data-site-id="${escapeHTML(siteID)}">AI 配置</button>
           <button
             type="button"
             class="ghost site-status-btn"

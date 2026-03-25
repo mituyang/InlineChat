@@ -39,6 +39,14 @@
           <strong id="agentInactiveCount">0</strong>
         </article>
         <article class="stat card">
+          <span>AI 已启用站点</span>
+          <strong id="aiEnabledSiteCount">0</strong>
+        </article>
+        <article class="stat card">
+          <span>最近知识库重载</span>
+          <strong id="aiLastReloadAt">--</strong>
+        </article>
+        <article class="stat card">
           <span>最近同步</span>
           <strong id="lastSyncAt">--</strong>
         </article>
@@ -123,6 +131,64 @@
           <div id="agentList" class="list"></div>
         </section>
 
+        <section class="card panel panel-ai" id="aiPanel">
+          <div class="panel-head">
+            <h2>AI 控制台</h2>
+            <button id="refreshAiBtn" type="button" class="ghost">刷新</button>
+          </div>
+
+          <div class="panel-tools two-col">
+            <select id="aiSiteSelect" aria-label="选择 AI 配置站点">
+              <option value="">请选择站点</option>
+            </select>
+            <div class="ai-chip-row">
+              <span id="aiSiteStatusChip" class="pill muted">AI 未启用</span>
+              <span id="aiReloadStatusChip" class="pill muted">知识库未同步</span>
+            </div>
+          </div>
+
+          <div class="ai-overview-grid">
+            <article class="ai-kpi">
+              <span>当前站点</span>
+              <strong id="aiSelectedSiteLabel">-</strong>
+              <p id="aiSelectedSiteMeta">请选择站点后查看 AI 配置</p>
+            </article>
+            <article class="ai-kpi">
+              <span>回复策略</span>
+              <strong id="aiReplyModeLabel">-</strong>
+              <p id="aiUpdatedAt">配置尚未加载</p>
+            </article>
+            <article class="ai-kpi">
+              <span>知识库分块</span>
+              <strong id="aiChunkCount">--</strong>
+              <p id="aiReloadedAt">尚未触发重载</p>
+            </article>
+          </div>
+
+          <form id="siteAiForm" class="form-grid">
+            <label class="toggle-field">
+              <span>AI 自动接待</span>
+              <input id="aiEnabledInput" type="checkbox" />
+              <em>仅影响未分配会话的自动回复</em>
+            </label>
+            <label>
+              回复策略
+              <select id="aiReplyModeSelect">
+                <option value="unassigned_auto_reply">仅未分配会话自动回复</option>
+              </select>
+            </label>
+            <div class="item-actions ai-actions">
+              <button id="saveAiConfigBtn" type="submit">保存 AI 配置</button>
+              <button id="reloadAiBtn" type="button" class="ghost">重载知识库</button>
+            </div>
+          </form>
+
+          <div class="ai-note-list">
+            <div>启用后，访客在坐席认领前可先收到 AI 自动回复。</div>
+            <div>知识库内容更新后可手动重载，便于新答案即时生效。</div>
+          </div>
+        </section>
+
         <section class="card panel panel-ops">
           <div class="panel-head">
             <h2>审计日志</h2>
@@ -135,6 +201,7 @@
                 <option value="">全部动作</option>
                 <option value="site.create">site.create</option>
                 <option value="site.update_status">site.update_status</option>
+                <option value="site.update_ai_config">site.update_ai_config</option>
                 <option value="site.rotate_widget_key">site.rotate_widget_key</option>
                 <option value="agent.create">agent.create</option>
                 <option value="agent.update_status">agent.update_status</option>
@@ -144,6 +211,7 @@
               <select id="auditResourceFilter">
                 <option value="">全部资源</option>
                 <option value="site">site</option>
+                <option value="site_ai_config">site_ai_config</option>
                 <option value="agent">agent</option>
               </select>
             </div>

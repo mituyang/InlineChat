@@ -166,6 +166,43 @@
             </form>
           </section>
 
+          <section class="ai-assist-panel">
+            <div class="quick-reply-toolbar">
+              <h3>AI 协作</h3>
+              <span id="aiAssistBadge" class="assist-badge">未分析</span>
+            </div>
+
+            <div class="ai-insight-grid">
+              <article class="ai-signal-card">
+                <span>访客意图</span>
+                <strong id="aiIntentTitle">请选择会话</strong>
+                <p id="aiIntentDetail">AI 会根据最近消息提炼主要诉求。</p>
+              </article>
+              <article class="ai-signal-card">
+                <span>建议动作</span>
+                <strong id="aiActionTitle">等待会话</strong>
+                <p id="aiActionDetail">认领后可直接填入建议回复。</p>
+              </article>
+            </div>
+
+            <div class="ai-summary-block">
+              <div class="ai-section-title">对话摘要</div>
+              <p id="aiConversationSummary">请选择会话后查看 AI 摘要。</p>
+            </div>
+
+            <div class="ai-summary-block">
+              <div class="ai-section-title">建议回复</div>
+              <div id="aiSuggestionList" class="quick-reply-list">
+                <div class="empty">暂无建议回复</div>
+              </div>
+            </div>
+
+            <div class="ai-summary-block">
+              <div class="ai-section-title">最近 AI 回复</div>
+              <p id="aiLastReplyText" class="ai-last-reply">暂无 AI 回复</p>
+            </div>
+          </section>
+
           <section class="playbook-panel">
             <h3>接待建议</h3>
             <ul>
