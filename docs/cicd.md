@@ -14,11 +14,19 @@
 - 核心步骤：
   - 检出代码
   - 安装 Go
-  - 安装 Node
+  - 安装 `protoc` 与 Go gRPC 插件
   - `cp .env.example .env`
+  - 执行 `make config`
+  - 执行 `make env-lint`
+  - 执行 `make proto-check`
+  - 安装 Node
   - 使用 `npm ci` 安装 `tests/e2e` 依赖（命中 lockfile + cache）
   - 安装 Playwright Chromium
   - 执行 `make verify-all`
+- 前置门禁：
+  - `make config`
+  - `make env-lint`
+  - `make proto-check`
 - `make verify-all` 覆盖：
   - `env-lint`
   - `quality`
@@ -41,11 +49,18 @@
   - 且该次 `CI` 来自 `main`
   - 才执行自动镜像构建
 - 自动构建行为：
-  - `build-and-push-images` 构建并推送 5 个服务镜像到 GHCR
+  - `build-and-push-images` 构建并推送 6 个服务镜像到 GHCR
   - `workflow_run` 场景下：
     - checkout 使用 `github.event.workflow_run.head_sha`
     - 默认标签使用该 `head_sha` 生成 `sha-<12位commit>`
     - 仅 `main` 分支额外推送 `main` 标签
+- 当前纳入 CD 的服务：
+  - `chat-service`
+  - `auth-service`
+  - `admin-service`
+  - `realtime-service`
+  - `gateway-service`
+  - `ai-service`
 - 手动触发（`workflow_dispatch`）保留：
   - `release_action`: `deploy | rollback`
   - `environment`: `staging | production`

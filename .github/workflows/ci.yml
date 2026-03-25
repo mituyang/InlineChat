@@ -21,8 +21,51 @@ env:
   NODE_VERSION: "20.x"
 
 jobs:
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+          cache-dependency-path: |
+            **/go.sum
+
+      - name: 安装 Protocol Buffers 编译器
+        uses: arduino/setup-protoc@v3
+        with:
+          version: "27.3"
+
+      - name: 安装 protoc Go 插件
+        shell: bash
+        run: |
+          set -euo pipefail
+          go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.5
+          go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: 准备环境变量
+        run: cp .env.example .env
+
+      - name: 校验 compose 配置
+        run: make config
+
+      - name: 校验环境变量模板
+        run: make env-lint
+
+      - name: 校验 proto 生成一致性
+        run: make proto-check
+
   verify-all:
     name: verify-all
+    needs:
+      - preflight
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:

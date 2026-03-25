@@ -131,11 +131,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          services=(chat-service auth-service admin-service realtime-service gateway-service)
+          services=(chat-service auth-service admin-service realtime-service gateway-service ai-service)
           for service in "${services[@]}"; do
             case "$service" in
               gateway-service)
                 dockerfile="services/gateway-service/Dockerfile"
+                context="."
+                ;;
+              ai-service)
+                dockerfile="services/ai-service/Dockerfile"
                 context="."
                 ;;
               *)
@@ -185,7 +189,8 @@ jobs:
                 "auth-service",
                 "admin-service",
                 "realtime-service",
-                "gateway-service"
+                "gateway-service",
+                "ai-service"
               ]
             }' > dist/image-manifest.json
 
@@ -260,7 +265,7 @@ jobs:
           TARGET_TAG: ${{ steps.release-meta.outputs.target_tag }}
         run: |
           set -euo pipefail
-          services=(chat-service auth-service admin-service realtime-service gateway-service)
+          services=(chat-service auth-service admin-service realtime-service gateway-service ai-service)
           for service in "${services[@]}"; do
             image="${IMAGE_REPO}/${service}:${TARGET_TAG}"
             echo "验证镜像: ${image}"

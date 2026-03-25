@@ -19,7 +19,7 @@ COVERAGE_THRESHOLD_ALL ?= 12
 MIN_COVERED_PACKAGES ?= 10
 MIN_TOTAL_PACKAGES ?= 20
 
-.PHONY: help ensure-env config schema-check prepare-db up up-fg down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover env-lint quality e2e-ui verify-all proto build-local image-build smoke integration full-regression mvp-release
+.PHONY: help ensure-env config schema-check prepare-db up up-fg down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover env-lint quality e2e-ui verify-all proto proto-check build-local image-build smoke integration full-regression mvp-release
 
 help:
 	@echo "可用命令:"
@@ -41,6 +41,7 @@ help:
 	@echo "  make test-race      运行后端 Go race 测试"
 	@echo "  make test-cover     校验覆盖率门禁（有覆盖包平均值 + 最小包数）"
 	@echo "  make env-lint       校验 .env 与 .env.example 配置键一致性"
+	@echo "  make proto-check    校验 proto 生成代码与仓库一致"
 	@echo "  make quality        执行完整质量门禁（lint + test + test-race + test-cover）"
 	@echo "  make e2e-ui         执行前端 Playwright E2E（需先安装 tests/e2e 依赖）"
 	@echo "  make verify-all     CI 全量验收入口（本地默认禁用，可用 VERIFY_ALLOW_LOCAL=1 临时开启）"
@@ -226,3 +227,6 @@ mvp-release: ensure-env test integration
 
 proto:
 	./scripts/gen-proto.sh
+
+proto-check:
+	./scripts/proto-check.sh
