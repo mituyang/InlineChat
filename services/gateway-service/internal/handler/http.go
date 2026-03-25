@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"context"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"inlinechat/services/gateway-service/internal/aiclient"
 	"inlinechat/services/gateway-service/internal/grpcclient"
 	"inlinechat/services/gateway-service/internal/ratelimit"
 )
@@ -14,6 +16,7 @@ const maxMessageContentChars = 2000
 // HTTPHandler 负责承接网关入口请求，并分发到 chat/auth/admin 三类上游。
 type HTTPHandler struct {
 	clients         *grpcclient.Clients
+	aiClient        aiReloader
 	callTimeout     time.Duration
 	loginLimiter    *ratelimit.Limiter
 	visitorLimiter  *ratelimit.Limiter
@@ -21,6 +24,10 @@ type HTTPHandler struct {
 	adminLimiter    *ratelimit.Limiter
 	widgetIndexHTML []byte
 	now             func() time.Time
+}
+
+type aiReloader interface {
+	Reload(ctx context.Context, siteID string) (*aiclient.ReloadResponse, error)
 }
 
 func NewHTTPHandler(clients *grpcclient.Clients, callTimeout time.Duration) *HTTPHandler {
@@ -50,6 +57,10 @@ func (h *HTTPHandler) SetWidgetIndexHTML(indexHTML []byte) {
 		return
 	}
 	h.widgetIndexHTML = append([]byte(nil), indexHTML...)
+}
+
+func (h *HTTPHandler) SetAIClient(client aiReloader) {
+	h.aiClient = client
 }
 
 func (h *HTTPHandler) RegisterRoutes(r *gin.Engine) {

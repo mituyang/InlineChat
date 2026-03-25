@@ -34,6 +34,7 @@ type Config struct {
 	AuthServiceName              string
 	AdminServiceName             string
 	RealtimeServiceName          string
+	AIServiceName                string
 	GRPCDialTimeoutSec           int
 	GRPCCallTimeoutSec           int
 }
@@ -66,6 +67,7 @@ func Load() (Config, error) {
 		AuthServiceName:              strings.TrimSpace(getEnv("AUTH_SERVICE_NAME", "auth-service")),
 		AdminServiceName:             strings.TrimSpace(getEnv("ADMIN_SERVICE_NAME", "admin-service")),
 		RealtimeServiceName:          strings.TrimSpace(getEnv("REALTIME_SERVICE_NAME", "realtime-service")),
+		AIServiceName:                strings.TrimSpace(getEnv("AI_SERVICE_NAME", "ai-service")),
 		GRPCDialTimeoutSec:           getIntEnv("GRPC_DIAL_TIMEOUT_SEC", 8),
 		GRPCCallTimeoutSec:           getIntEnv("GRPC_CALL_TIMEOUT_SEC", 8),
 	}
@@ -112,8 +114,8 @@ func Load() (Config, error) {
 	if cfg.ETCDDialTimeoutSec <= 0 {
 		return Config{}, fmt.Errorf("ETCD_DIAL_TIMEOUT_SEC must be greater than 0")
 	}
-	if cfg.ChatServiceName == "" || cfg.AuthServiceName == "" || cfg.AdminServiceName == "" || cfg.RealtimeServiceName == "" {
-		return Config{}, fmt.Errorf("CHAT_SERVICE_NAME AUTH_SERVICE_NAME ADMIN_SERVICE_NAME REALTIME_SERVICE_NAME are required")
+	if cfg.ChatServiceName == "" || cfg.AuthServiceName == "" || cfg.AdminServiceName == "" || cfg.RealtimeServiceName == "" || cfg.AIServiceName == "" {
+		return Config{}, fmt.Errorf("CHAT_SERVICE_NAME AUTH_SERVICE_NAME ADMIN_SERVICE_NAME REALTIME_SERVICE_NAME AI_SERVICE_NAME are required")
 	}
 	if cfg.GRPCDialTimeoutSec <= 0 {
 		return Config{}, fmt.Errorf("GRPC_DIAL_TIMEOUT_SEC must be greater than 0")

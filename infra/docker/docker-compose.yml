@@ -258,6 +258,54 @@ services:
     volumes:
       - ../../services/admin-service/migrations:/migrations:ro
 
+  ai-service:
+    build:
+      context: ../..
+      dockerfile: services/ai-service/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      chat-service:
+        condition: service_healthy
+      admin-service:
+        condition: service_healthy
+      etcd:
+        condition: service_healthy
+    environment:
+      HTTP_PORT: ${AI_HTTP_PORT}
+      LOG_LEVEL: ${AI_LOG_LEVEL}
+      REDIS_ADDR: ${REDIS_ADDR}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: ${REDIS_DB}
+      ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
+      ETCD_DIAL_TIMEOUT_SEC: ${ETCD_DIAL_TIMEOUT_SEC}
+      ETCD_REGISTER_TTL_SEC: ${ETCD_REGISTER_TTL_SEC}
+      DISCOVERY_PREFIX: ${DISCOVERY_PREFIX}
+      CHAT_SERVICE_NAME: ${CHAT_SERVICE_NAME}
+      ADMIN_SERVICE_NAME: ${ADMIN_SERVICE_NAME}
+      SERVICE_NAME: ${AI_SERVICE_NAME}
+      SERVICE_ADVERTISE_HTTP_ENDPOINT: ${AI_SERVICE_ADVERTISE_HTTP_ENDPOINT}
+      AI_GRPC_DIAL_TIMEOUT_SEC: ${AI_GRPC_DIAL_TIMEOUT_SEC}
+      AI_GRPC_CALL_TIMEOUT_SEC: ${AI_GRPC_CALL_TIMEOUT_SEC}
+      AI_LLM_BASE_URL: ${AI_LLM_BASE_URL}
+      AI_LLM_MODEL: ${AI_LLM_MODEL}
+      AI_EMBEDDING_BASE_URL: ${AI_EMBEDDING_BASE_URL}
+      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL}
+      AI_KB_PATH: ${AI_KB_PATH}
+      AI_RETRIEVE_TOP_K: ${AI_RETRIEVE_TOP_K}
+      AI_MIN_SIMILARITY: ${AI_MIN_SIMILARITY}
+      AI_UNKNOWN_REPLY: ${AI_UNKNOWN_REPLY}
+      AI_HTTP_TIMEOUT_MS: ${AI_HTTP_TIMEOUT_MS}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${AI_HTTP_PORT}/readyz >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    ports:
+      - "${AI_HTTP_PORT}:${AI_HTTP_PORT}"
+
   gateway-service:
     build:
       context: ../..
@@ -271,6 +319,8 @@ services:
       auth-service:
         condition: service_healthy
       admin-service:
+        condition: service_healthy
+      ai-service:
         condition: service_healthy
       etcd:
         condition: service_healthy
@@ -299,6 +349,7 @@ services:
       AUTH_SERVICE_NAME: ${AUTH_SERVICE_NAME}
       ADMIN_SERVICE_NAME: ${ADMIN_SERVICE_NAME}
       REALTIME_SERVICE_NAME: ${REALTIME_SERVICE_NAME}
+      AI_SERVICE_NAME: ${AI_SERVICE_NAME}
       GRPC_DIAL_TIMEOUT_SEC: ${GRPC_DIAL_TIMEOUT_SEC}
       GRPC_CALL_TIMEOUT_SEC: ${GRPC_CALL_TIMEOUT_SEC}
     healthcheck:

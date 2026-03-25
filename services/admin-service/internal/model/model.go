@@ -13,6 +13,18 @@ type Site struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+type SiteAIConfig struct {
+	SiteID    string    `gorm:"primaryKey;size:64;not null" json:"site_id"`
+	Enabled   bool      `gorm:"not null;default:false" json:"enabled"`
+	ReplyMode string    `gorm:"size:64;not null" json:"reply_mode"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (SiteAIConfig) TableName() string {
+	return "site_ai_configs"
+}
+
 type Agent struct {
 	ID           uint64    `gorm:"primaryKey" json:"id"`
 	Email        string    `gorm:"size:190;not null;uniqueIndex" json:"email"`

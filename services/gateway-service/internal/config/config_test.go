@@ -63,7 +63,7 @@ func TestLoadValidationFailures(t *testing.T) {
 		{name: "invalid redis fail threshold", key: "RATE_LIMIT_REDIS_FAIL_THRESHOLD", value: "0", errMessage: "RATE_LIMIT_REDIS_FAIL_THRESHOLD must be greater than 0"},
 		{name: "invalid redis circuit window", key: "RATE_LIMIT_REDIS_CIRCUIT_OPEN_SEC", value: "0", errMessage: "RATE_LIMIT_REDIS_CIRCUIT_OPEN_SEC must be greater than 0"},
 		{name: "invalid etcd timeout", key: "ETCD_DIAL_TIMEOUT_SEC", value: "0", errMessage: "ETCD_DIAL_TIMEOUT_SEC must be greater than 0"},
-		{name: "missing service name", key: "CHAT_SERVICE_NAME", value: "   ", errMessage: "CHAT_SERVICE_NAME AUTH_SERVICE_NAME ADMIN_SERVICE_NAME REALTIME_SERVICE_NAME are required"},
+		{name: "missing service name", key: "CHAT_SERVICE_NAME", value: "   ", errMessage: "CHAT_SERVICE_NAME AUTH_SERVICE_NAME ADMIN_SERVICE_NAME REALTIME_SERVICE_NAME AI_SERVICE_NAME are required"},
 		{name: "invalid grpc dial timeout", key: "GRPC_DIAL_TIMEOUT_SEC", value: "0", errMessage: "GRPC_DIAL_TIMEOUT_SEC must be greater than 0"},
 		{name: "invalid grpc call timeout", key: "GRPC_CALL_TIMEOUT_SEC", value: "0", errMessage: "GRPC_CALL_TIMEOUT_SEC must be greater than 0"},
 	}
@@ -133,6 +133,7 @@ func setGatewayConfigEnv(t *testing.T) {
 	t.Setenv("AUTH_SERVICE_NAME", "auth-service")
 	t.Setenv("ADMIN_SERVICE_NAME", "admin-service")
 	t.Setenv("REALTIME_SERVICE_NAME", "realtime-service")
+	t.Setenv("AI_SERVICE_NAME", "ai-service")
 	t.Setenv("GRPC_DIAL_TIMEOUT_SEC", "8")
 	t.Setenv("GRPC_CALL_TIMEOUT_SEC", "8")
 }

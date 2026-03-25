@@ -412,7 +412,7 @@ function countConversationUnreadMessages(messages) {
     return 0;
   }
   return messages.reduce((sum, item) => {
-    if (item?.sender_type !== "agent") {
+    if (item?.sender_type !== "agent" && item?.sender_type !== "ai") {
       return sum;
     }
     if (item.status === "read") {
@@ -713,6 +713,11 @@ function updateSessionUI() {
   const hasConversation = Boolean(state.conversationID);
   const isClosed = state.conversationStatus === "closed";
   const canSend = !state.sendPending && ((hasConversation && !isClosed) || state.composeMode);
+  const aiServing =
+    hasConversation &&
+    !isClosed &&
+    !state.composeMode &&
+    state.messages.some((item) => String(item?.sender_type || "").trim().toLowerCase() === "ai");
 
   if (state.composeMode) {
     els.contentInput.placeholder = "请输入消息，发送后将创建新会话";
@@ -742,6 +747,11 @@ function updateSessionUI() {
     els.sessionNotice.hidden = false;
     if (els.sessionNoticeText) {
       els.sessionNoticeText.textContent = `会话 #${state.conversationID} 已关闭，无法继续发送消息。`;
+    }
+  } else if (aiServing) {
+    els.sessionNotice.hidden = false;
+    if (els.sessionNoticeText) {
+      els.sessionNoticeText.textContent = "当前为 AI 接待。";
     }
   } else {
     els.sessionNotice.hidden = true;
@@ -1290,7 +1300,7 @@ function connectWebSocket() {
             const senderType = String(data.payload.message.sender_type || "")
               .trim()
               .toLowerCase();
-            if (senderType === "agent" || senderType === "system") {
+            if (senderType === "agent" || senderType === "ai" || senderType === "system") {
               scheduleConversationMetaSync();
             }
           }
@@ -2061,7 +2071,7 @@ function renderMessages(items) {
     if (state.composeMode) {
       els.messages.innerHTML = '<div class="empty">请输入消息，发送后将创建新会话。</div>';
     } else {
-      els.messages.innerHTML = '<div class="empty">你好，我是在线客服助手，请输入消息。</div>';
+      els.messages.innerHTML = '<div class="empty">你好，我是AI顾问，请输入消息。</div>';
     }
     notifyHostUnreadCount();
     return;
@@ -2203,7 +2213,11 @@ function formatTime(value) {
 function formatMessageMeta(message, isSelf) {
   const timeText = formatTime(message?.created_at);
   if (!isSelf) {
-    return timeText;
+    const label = message?.sender_type === "ai" ? "AI顾问" : "";
+    if (label && timeText) {
+      return `${label} ${timeText}`;
+    }
+    return label || timeText;
   }
 
   const statusText = formatMessageStatus(message?.status);

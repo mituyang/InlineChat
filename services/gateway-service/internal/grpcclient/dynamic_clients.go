@@ -362,6 +362,18 @@ func (c *dynamicAdminClient) RotateSiteWidgetKey(ctx context.Context, in *adminv
 	})
 }
 
+func (c *dynamicAdminClient) GetSiteAIConfig(ctx context.Context, in *adminv1.GetSiteAIConfigRequest, opts ...grpc.CallOption) (*adminv1.SiteAIConfig, error) {
+	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.SiteAIConfig, error) {
+		return client.GetSiteAIConfig(ctx, in, opts...)
+	})
+}
+
+func (c *dynamicAdminClient) UpdateSiteAIConfig(ctx context.Context, in *adminv1.UpdateSiteAIConfigRequest, opts ...grpc.CallOption) (*adminv1.SiteAIConfig, error) {
+	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.SiteAIConfig, error) {
+		return client.UpdateSiteAIConfig(ctx, in, opts...)
+	})
+}
+
 func (c *dynamicAdminClient) GetSiteBySiteID(ctx context.Context, in *adminv1.GetSiteBySiteIDRequest, opts ...grpc.CallOption) (*adminv1.Site, error) {
 	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.Site, error) {
 		return client.GetSiteBySiteID(ctx, in, opts...)

@@ -302,6 +302,7 @@ type fakePublisher struct {
 	calls                int
 	lastMessage          *model.Message
 	rangeStatusCalls     int
+	rangeSenderTypes     []string
 	lastRangeSenderType  string
 	lastRangeUpToMessage uint64
 	lastRangeStatus      string
@@ -319,6 +320,7 @@ func (p *fakePublisher) PublishMessageCreated(_ context.Context, message *model.
 
 func (p *fakePublisher) PublishMessageStatusRange(_ context.Context, _ uint64, senderType string, upToMessageID uint64, status string) error {
 	p.rangeStatusCalls++
+	p.rangeSenderTypes = append(p.rangeSenderTypes, senderType)
 	p.lastRangeSenderType = senderType
 	p.lastRangeUpToMessage = upToMessageID
 	p.lastRangeStatus = status
@@ -1172,6 +1174,65 @@ func TestMarkMessagesReadVisitorTokenMismatch(t *testing.T) {
 	}
 	if err.Error() != "visitor token does not match conversation" {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestMarkMessagesReadVisitorMarksAgentAndAI(t *testing.T) {
+	svc, _, messageRepo, publisher := testChatServiceWithConversations(map[uint64]*model.Conversation{
+		1: {ID: 1, SiteID: "site_demo", VisitorToken: "vt_1", Status: "open"},
+	})
+	_ = messageRepo.Create(context.Background(), &model.Message{
+		ConversationID: 1,
+		SenderType:     "agent",
+		Content:        "a1",
+		ClientMsgID:    "m_1",
+		Status:         MessageStatusSent,
+	})
+	_ = messageRepo.Create(context.Background(), &model.Message{
+		ConversationID: 1,
+		SenderType:     "ai",
+		Content:        "ai1",
+		ClientMsgID:    "m_2",
+		Status:         MessageStatusSent,
+	})
+	_ = messageRepo.Create(context.Background(), &model.Message{
+		ConversationID: 1,
+		SenderType:     "visitor",
+		Content:        "v1",
+		ClientMsgID:    "m_3",
+		Status:         MessageStatusSent,
+	})
+
+	updatedCount, err := svc.MarkMessagesRead(context.Background(), MarkMessagesReadInput{
+		ConversationID:    1,
+		LastReadMessageID: 3,
+		ActorType:         "visitor",
+		VisitorToken:      "vt_1",
+	})
+	if err != nil {
+		t.Fatalf("MarkMessagesRead failed: %v", err)
+	}
+	if updatedCount != 2 {
+		t.Fatalf("expected updated_count=2, got %d", updatedCount)
+	}
+
+	msg1, _ := messageRepo.GetByID(context.Background(), 1, 1)
+	msg2, _ := messageRepo.GetByID(context.Background(), 1, 2)
+	msg3, _ := messageRepo.GetByID(context.Background(), 1, 3)
+	if msg1.Status != MessageStatusRead {
+		t.Fatalf("agent message should be read, got %s", msg1.Status)
+	}
+	if msg2.Status != MessageStatusRead {
+		t.Fatalf("ai message should be read, got %s", msg2.Status)
+	}
+	if msg3.Status != MessageStatusSent {
+		t.Fatalf("visitor message should remain sent, got %s", msg3.Status)
+	}
+	if publisher.rangeStatusCalls != 2 {
+		t.Fatalf("expected two read-range publishes, got %d", publisher.rangeStatusCalls)
+	}
+	if len(publisher.rangeSenderTypes) != 2 || publisher.rangeSenderTypes[0] != "agent" || publisher.rangeSenderTypes[1] != "ai" {
+		t.Fatalf("unexpected sender types: %+v", publisher.rangeSenderTypes)
 	}
 }
 

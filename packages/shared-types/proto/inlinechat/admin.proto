@@ -11,6 +11,8 @@ service AdminGatewayService {
   rpc GetSiteByDomain(GetSiteByDomainRequest) returns (Site);
   rpc UpdateSiteStatus(UpdateSiteStatusRequest) returns (Site);
   rpc RotateSiteWidgetKey(RotateSiteWidgetKeyRequest) returns (Site);
+  rpc GetSiteAIConfig(GetSiteAIConfigRequest) returns (SiteAIConfig);
+  rpc UpdateSiteAIConfig(UpdateSiteAIConfigRequest) returns (SiteAIConfig);
   rpc CreateAgent(CreateAgentRequest) returns (Agent);
   rpc GetAgentByID(GetAgentByIDRequest) returns (Agent);
   rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
@@ -50,6 +52,17 @@ message UpdateSiteStatusRequest {
 message RotateSiteWidgetKeyRequest {
   string authorization = 1;
   string site_id = 2;
+}
+
+message GetSiteAIConfigRequest {
+  string site_id = 1;
+}
+
+message UpdateSiteAIConfigRequest {
+  string authorization = 1;
+  string site_id = 2;
+  bool enabled = 3;
+  string reply_mode = 4;
 }
 
 message CreateAgentRequest {
@@ -107,6 +120,13 @@ message Site {
   string status = 6;
   string created_at = 7;
   string updated_at = 8;
+}
+
+message SiteAIConfig {
+  string site_id = 1;
+  bool enabled = 2;
+  string reply_mode = 3;
+  string updated_at = 4;
 }
 
 message Agent {

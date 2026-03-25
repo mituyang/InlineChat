@@ -2712,7 +2712,11 @@ function formatMessageTime(value) {
 function formatMessageMeta(message, mine) {
   const timeText = formatMessageTime(message?.created_at);
   if (!mine) {
-    return timeText;
+    const label = message?.sender_type === "ai" ? "AI顾问" : "";
+    if (label && timeText) {
+      return `${label} ${timeText}`;
+    }
+    return label || timeText;
   }
   const statusText = formatMessageStatus(message?.status);
   if (timeText && statusText) {

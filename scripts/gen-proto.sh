@@ -16,6 +16,8 @@ GATEWAY_AUTH_OUT="$ROOT_DIR/services/gateway-service/internal/gen/authv1"
 ADMIN_OUT="$ROOT_DIR/services/admin-service/internal/gen/adminv1"
 REALTIME_ADMIN_OUT="$ROOT_DIR/services/realtime-service/internal/gen/adminv1"
 GATEWAY_ADMIN_OUT="$ROOT_DIR/services/gateway-service/internal/gen/adminv1"
+AI_CHAT_OUT="$ROOT_DIR/services/ai-service/internal/gen/chatv1"
+AI_ADMIN_OUT="$ROOT_DIR/services/ai-service/internal/gen/adminv1"
 
 if ! command -v protoc >/dev/null 2>&1; then
 	echo "未找到 protoc，请先安装 Protocol Buffers 编译器。"
@@ -33,7 +35,7 @@ if ! command -v protoc-gen-go-grpc >/dev/null 2>&1; then
 fi
 
 mkdir -p "$CHAT_OUT" "$REALTIME_OUT"
-mkdir -p "$GATEWAY_CHAT_OUT" "$AUTH_OUT" "$REALTIME_AUTH_OUT" "$GATEWAY_AUTH_OUT" "$ADMIN_OUT" "$REALTIME_ADMIN_OUT" "$GATEWAY_ADMIN_OUT"
+mkdir -p "$GATEWAY_CHAT_OUT" "$AUTH_OUT" "$REALTIME_AUTH_OUT" "$GATEWAY_AUTH_OUT" "$ADMIN_OUT" "$REALTIME_ADMIN_OUT" "$GATEWAY_ADMIN_OUT" "$AI_CHAT_OUT" "$AI_ADMIN_OUT"
 
 generate_proto() {
 	local proto_file="$1"
@@ -62,6 +64,9 @@ generate_proto "inlinechat/chat.proto" "$REALTIME_OUT" "inlinechat/services/real
 echo "生成 gateway-service chat gRPC 代码..."
 generate_proto "inlinechat/chat.proto" "$GATEWAY_CHAT_OUT" "inlinechat/services/gateway-service/internal/gen/chatv1"
 
+echo "生成 ai-service chat gRPC 代码..."
+generate_proto "inlinechat/chat.proto" "$AI_CHAT_OUT" "inlinechat/services/ai-service/internal/gen/chatv1"
+
 echo "生成 auth-service gRPC 代码..."
 generate_proto "inlinechat/auth.proto" "$AUTH_OUT" "inlinechat/services/auth-service/internal/gen/authv1"
 
@@ -79,5 +84,8 @@ generate_proto "inlinechat/admin.proto" "$REALTIME_ADMIN_OUT" "inlinechat/servic
 
 echo "生成 gateway-service admin gRPC 代码..."
 generate_proto "inlinechat/admin.proto" "$GATEWAY_ADMIN_OUT" "inlinechat/services/gateway-service/internal/gen/adminv1"
+
+echo "生成 ai-service admin gRPC 代码..."
+generate_proto "inlinechat/admin.proto" "$AI_ADMIN_OUT" "inlinechat/services/ai-service/internal/gen/adminv1"
 
 echo "完成。"

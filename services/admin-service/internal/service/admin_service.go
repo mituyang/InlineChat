@@ -19,13 +19,16 @@ var ErrConflict = errors.New("conflict")
 var ErrNotFound = errors.New("not found")
 var ErrInvalidSession = errors.New("invalid session")
 
+const SiteAIReplyModeUnassignedAutoReply = "unassigned_auto_reply"
+
 type AdminService struct {
 	// 站点、坐席、超管、审计四类数据统一由 admin-service 管控。
-	siteRepo       repository.SiteRepository
-	agentRepo      repository.AgentRepository
-	superAdminRepo repository.SuperAdminRepository
-	auditRepo      repository.AuditLogRepository
-	bcryptCost     int
+	siteRepo         repository.SiteRepository
+	siteAIConfigRepo repository.SiteAIConfigRepository
+	agentRepo        repository.AgentRepository
+	superAdminRepo   repository.SuperAdminRepository
+	auditRepo        repository.AuditLogRepository
+	bcryptCost       int
 }
 
 type CreateSiteInput struct {
@@ -60,6 +63,12 @@ type RotateSiteWidgetKeyInput struct {
 	SiteID string
 }
 
+type UpdateSiteAIConfigInput struct {
+	SiteID    string
+	Enabled   bool
+	ReplyMode string
+}
+
 type UpdateAgentStatusInput struct {
 	AgentID uint64
 	Status  string
@@ -85,17 +94,19 @@ type ListAuditLogsInput struct {
 // New 构建后台管理域服务。
 func New(
 	siteRepo repository.SiteRepository,
+	siteAIConfigRepo repository.SiteAIConfigRepository,
 	agentRepo repository.AgentRepository,
 	superAdminRepo repository.SuperAdminRepository,
 	auditRepo repository.AuditLogRepository,
 	bcryptCost int,
 ) *AdminService {
 	return &AdminService{
-		siteRepo:       siteRepo,
-		agentRepo:      agentRepo,
-		superAdminRepo: superAdminRepo,
-		auditRepo:      auditRepo,
-		bcryptCost:     bcryptCost,
+		siteRepo:         siteRepo,
+		siteAIConfigRepo: siteAIConfigRepo,
+		agentRepo:        agentRepo,
+		superAdminRepo:   superAdminRepo,
+		auditRepo:        auditRepo,
+		bcryptCost:       bcryptCost,
 	}
 }
 
@@ -231,6 +242,89 @@ func (s *AdminService) RotateSiteWidgetKey(ctx context.Context, in RotateSiteWid
 	}
 	_ = s.writeAuditLog(ctx, actor, "site.rotate_widget_key", "site", site.SiteID, "轮换站点 widget_key")
 	return site, nil
+}
+
+func (s *AdminService) GetSiteAIConfig(ctx context.Context, siteID string) (*model.SiteAIConfig, error) {
+	siteID = strings.TrimSpace(siteID)
+	if siteID == "" {
+		return nil, fmt.Errorf("site_id is required")
+	}
+
+	if _, err := s.siteRepo.GetBySiteID(ctx, siteID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	if s.siteAIConfigRepo == nil {
+		return &model.SiteAIConfig{
+			SiteID:    siteID,
+			Enabled:   false,
+			ReplyMode: SiteAIReplyModeUnassignedAutoReply,
+		}, nil
+	}
+
+	config, err := s.siteAIConfigRepo.GetBySiteID(ctx, siteID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return &model.SiteAIConfig{
+				SiteID:    siteID,
+				Enabled:   false,
+				ReplyMode: SiteAIReplyModeUnassignedAutoReply,
+			}, nil
+		}
+		return nil, err
+	}
+	return config, nil
+}
+
+func (s *AdminService) UpdateSiteAIConfig(ctx context.Context, in UpdateSiteAIConfigInput, actor ActorContext) (*model.SiteAIConfig, error) {
+	siteID := strings.TrimSpace(in.SiteID)
+	if siteID == "" {
+		return nil, fmt.Errorf("site_id is required")
+	}
+	replyMode, err := normalizeSiteAIReplyMode(in.ReplyMode)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := s.siteRepo.GetBySiteID(ctx, siteID); err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	if s.siteAIConfigRepo == nil {
+		return nil, fmt.Errorf("site ai config repository is unavailable")
+	}
+
+	current, err := s.siteAIConfigRepo.GetBySiteID(ctx, siteID)
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		return nil, err
+	}
+
+	config := &model.SiteAIConfig{
+		SiteID:    siteID,
+		Enabled:   in.Enabled,
+		ReplyMode: replyMode,
+	}
+	if current != nil {
+		config.CreatedAt = current.CreatedAt
+	}
+
+	if err := s.siteAIConfigRepo.Upsert(ctx, config); err != nil {
+		return nil, err
+	}
+	_ = s.writeAuditLog(
+		ctx,
+		actor,
+		"site.update_ai_config",
+		"site_ai_config",
+		siteID,
+		fmt.Sprintf("更新站点 AI 配置 enabled=%t reply_mode=%s", in.Enabled, replyMode),
+	)
+	return s.GetSiteAIConfig(ctx, siteID)
 }
 
 func (s *AdminService) CreateAgent(ctx context.Context, in CreateAgentInput) (*model.Agent, error) {
@@ -535,6 +629,17 @@ func normalizeSiteStatus(raw string) (string, error) {
 		return "", fmt.Errorf("invalid site status")
 	}
 	return status, nil
+}
+
+func normalizeSiteAIReplyMode(raw string) (string, error) {
+	replyMode := strings.ToLower(strings.TrimSpace(raw))
+	if replyMode == "" {
+		replyMode = SiteAIReplyModeUnassignedAutoReply
+	}
+	if replyMode != SiteAIReplyModeUnassignedAutoReply {
+		return "", fmt.Errorf("invalid reply_mode")
+	}
+	return replyMode, nil
 }
 
 func normalizeAgentStatus(raw string) (string, error) {

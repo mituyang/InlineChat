@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	adminv1 "inlinechat/services/gateway-service/internal/gen/adminv1"
+	"inlinechat/services/gateway-service/internal/middleware"
 )
 
 func (h *HTTPHandler) registerAdminRoutes(r *gin.Engine) {
@@ -16,6 +17,9 @@ func (h *HTTPHandler) registerAdminRoutes(r *gin.Engine) {
 	adminV1.GET("/sites", h.listSites)
 	adminV1.PATCH("/sites/:site_id/status", h.updateSiteStatus)
 	adminV1.POST("/sites/:site_id/rotate-widget-key", h.rotateSiteWidgetKey)
+	adminV1.GET("/sites/:site_id/ai-config", h.getSiteAIConfig)
+	adminV1.PATCH("/sites/:site_id/ai-config", h.updateSiteAIConfig)
+	adminV1.POST("/sites/:site_id/ai/reload", h.reloadSiteAIKnowledge)
 	adminV1.POST("/agents", h.createAgent)
 	adminV1.GET("/agents", h.listAgents)
 	adminV1.PATCH("/agents/:id/status", h.updateAgentStatus)
@@ -166,6 +170,97 @@ func (h *HTTPHandler) rotateSiteWidgetKey(c *gin.Context) {
 	c.JSON(http.StatusOK, siteToJSON(resp))
 }
 
+func (h *HTTPHandler) getSiteAIConfig(c *gin.Context) {
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if !h.applyAdminRateLimit(c, "get_site_ai_config", actor.GetAgentId()) {
+		return
+	}
+
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	resp, err := h.clients.Admin.GetSiteAIConfig(ctx, &adminv1.GetSiteAIConfigRequest{
+		SiteId: c.Param("site_id"),
+	})
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, siteAIConfigToJSON(resp))
+}
+
+func (h *HTTPHandler) updateSiteAIConfig(c *gin.Context) {
+	var req updateSiteAIConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		abortBadRequest(c, err.Error())
+		return
+	}
+
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if actor.GetRole() != "super_admin" {
+		abortForbidden(c, "super_admin role required")
+		return
+	}
+	if !h.applyAdminRateLimit(c, "update_site_ai_config", actor.GetAgentId()) {
+		return
+	}
+
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	resp, err := h.clients.Admin.UpdateSiteAIConfig(ctx, &adminv1.UpdateSiteAIConfigRequest{
+		Authorization: c.GetHeader("Authorization"),
+		SiteId:        c.Param("site_id"),
+		Enabled:       req.Enabled,
+		ReplyMode:     req.ReplyMode,
+	})
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, siteAIConfigToJSON(resp))
+}
+
+func (h *HTTPHandler) reloadSiteAIKnowledge(c *gin.Context) {
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if !h.applyAdminRateLimit(c, "reload_site_ai_knowledge", actor.GetAgentId()) {
+		return
+	}
+	if h.aiClient == nil {
+		middleware.AbortWithError(c, http.StatusServiceUnavailable, "service_unavailable", "ai reload service is unavailable")
+		return
+	}
+
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	resp, err := h.aiClient.Reload(ctx, c.Param("site_id"))
+	if err != nil {
+		middleware.AbortWithError(c, http.StatusBadGateway, "upstream_error", err.Error())
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"site_id":     resp.SiteID,
+		"chunk_count": resp.ChunkCount,
+		"reloaded_at": resp.ReloadedAt,
+	})
+}
+
 type createAgentRequest struct {
 	AgentID     string `json:"agent_id" binding:"required,len=4,numeric"`
 	SiteID      string `json:"site_id" binding:"required,min=4,max=64"`
@@ -177,6 +272,11 @@ type createAgentRequest struct {
 
 type updateSiteStatusRequest struct {
 	Status string `json:"status" binding:"required,oneof=active disabled"`
+}
+
+type updateSiteAIConfigRequest struct {
+	Enabled   bool   `json:"enabled"`
+	ReplyMode string `json:"reply_mode" binding:"omitempty,oneof=unassigned_auto_reply"`
 }
 
 type updateAgentStatusRequest struct {

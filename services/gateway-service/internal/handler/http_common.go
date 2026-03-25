@@ -456,6 +456,15 @@ func siteToJSON(item *adminv1.Site) gin.H {
 	}
 }
 
+func siteAIConfigToJSON(item *adminv1.SiteAIConfig) gin.H {
+	return gin.H{
+		"site_id":    item.GetSiteId(),
+		"enabled":    item.GetEnabled(),
+		"reply_mode": item.GetReplyMode(),
+		"updated_at": item.GetUpdatedAt(),
+	}
+}
+
 func adminAgentToJSON(item *adminv1.Agent) gin.H {
 	return gin.H{
 		"id":           item.GetId(),

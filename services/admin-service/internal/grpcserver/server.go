@@ -92,6 +92,34 @@ func (s *AdminGatewayServer) RotateSiteWidgetKey(ctx context.Context, req *admin
 	return toSitePB(site), nil
 }
 
+func (s *AdminGatewayServer) GetSiteAIConfig(ctx context.Context, req *adminv1.GetSiteAIConfigRequest) (*adminv1.SiteAIConfig, error) {
+	config, err := s.adminService.GetSiteAIConfig(ctx, req.GetSiteId())
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return toSiteAIConfigPB(config), nil
+}
+
+func (s *AdminGatewayServer) UpdateSiteAIConfig(ctx context.Context, req *adminv1.UpdateSiteAIConfigRequest) (*adminv1.SiteAIConfig, error) {
+	claims, err := s.requireAdmin(ctx, req.GetAuthorization())
+	if err != nil {
+		return nil, err
+	}
+	if claims.Role != "super_admin" {
+		return nil, status.Error(codes.PermissionDenied, "super_admin role required")
+	}
+
+	config, svcErr := s.adminService.UpdateSiteAIConfig(ctx, service.UpdateSiteAIConfigInput{
+		SiteID:    req.GetSiteId(),
+		Enabled:   req.GetEnabled(),
+		ReplyMode: req.GetReplyMode(),
+	}, toActorContext(claims))
+	if svcErr != nil {
+		return nil, mapError(svcErr)
+	}
+	return toSiteAIConfigPB(config), nil
+}
+
 func (s *AdminGatewayServer) ListSites(ctx context.Context, req *adminv1.ListSitesRequest) (*adminv1.ListSitesResponse, error) {
 	if _, err := s.requireAdmin(ctx, req.GetAuthorization()); err != nil {
 		return nil, err
@@ -388,6 +416,21 @@ func toSitePB(site *model.Site) *adminv1.Site {
 		CreatedAt: site.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt: site.UpdatedAt.Format(time.RFC3339Nano),
 	}
+}
+
+func toSiteAIConfigPB(config *model.SiteAIConfig) *adminv1.SiteAIConfig {
+	if config == nil {
+		return &adminv1.SiteAIConfig{}
+	}
+	payload := &adminv1.SiteAIConfig{
+		SiteId:    config.SiteID,
+		Enabled:   config.Enabled,
+		ReplyMode: config.ReplyMode,
+	}
+	if !config.UpdatedAt.IsZero() {
+		payload.UpdatedAt = config.UpdatedAt.Format(time.RFC3339Nano)
+	}
+	return payload
 }
 
 func toAgentPB(agent *model.Agent) *adminv1.Agent {

@@ -41,6 +41,11 @@ type updateSiteStatusRequest struct {
 	Status string `json:"status" binding:"required,oneof=active disabled"`
 }
 
+type updateSiteAIConfigRequest struct {
+	Enabled   bool   `json:"enabled"`
+	ReplyMode string `json:"reply_mode" binding:"omitempty,oneof=unassigned_auto_reply"`
+}
+
 type updateAgentStatusRequest struct {
 	Status string `json:"status" binding:"required,oneof=active inactive"`
 }
@@ -55,6 +60,8 @@ func (h *HTTPHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/sites", h.listSites)
 	rg.PATCH("/sites/:site_id/status", h.updateSiteStatus)
 	rg.POST("/sites/:site_id/rotate-widget-key", h.rotateSiteWidgetKey)
+	rg.GET("/sites/:site_id/ai-config", h.getSiteAIConfig)
+	rg.PATCH("/sites/:site_id/ai-config", h.updateSiteAIConfig)
 	rg.POST("/agents", h.createAgent)
 	rg.GET("/agents", h.listAgents)
 	rg.PATCH("/agents/:id/status", h.updateAgentStatus)
@@ -131,6 +138,47 @@ func (h *HTTPHandler) rotateSiteWidgetKey(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, site)
+}
+
+func (h *HTTPHandler) getSiteAIConfig(c *gin.Context) {
+	config, err := h.adminService.GetSiteAIConfig(c.Request.Context(), c.Param("site_id"))
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, config)
+}
+
+func (h *HTTPHandler) updateSiteAIConfig(c *gin.Context) {
+	claims, ok := requireSuperAdminClaims(c)
+	if !ok {
+		return
+	}
+
+	var req updateSiteAIConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	config, err := h.adminService.UpdateSiteAIConfig(c.Request.Context(), service.UpdateSiteAIConfigInput{
+		SiteID:    c.Param("site_id"),
+		Enabled:   req.Enabled,
+		ReplyMode: req.ReplyMode,
+	}, extractActorWithClaims(c, claims))
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, config)
 }
 
 func (h *HTTPHandler) listSites(c *gin.Context) {

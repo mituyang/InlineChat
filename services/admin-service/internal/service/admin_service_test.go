@@ -111,6 +111,33 @@ func (r *fakeAgentRepository) GetByID(_ context.Context, id uint64) (*model.Agen
 	return nil, repository.ErrNotFound
 }
 
+type fakeSiteAIConfigRepository struct {
+	items       []model.SiteAIConfig
+	upsertCalls int
+}
+
+func (r *fakeSiteAIConfigRepository) GetBySiteID(_ context.Context, siteID string) (*model.SiteAIConfig, error) {
+	for i := range r.items {
+		if r.items[i].SiteID == siteID {
+			out := r.items[i]
+			return &out, nil
+		}
+	}
+	return nil, repository.ErrNotFound
+}
+
+func (r *fakeSiteAIConfigRepository) Upsert(_ context.Context, config *model.SiteAIConfig) error {
+	r.upsertCalls++
+	for i := range r.items {
+		if r.items[i].SiteID == config.SiteID {
+			r.items[i] = *config
+			return nil
+		}
+	}
+	r.items = append(r.items, *config)
+	return nil
+}
+
 type fakeSuperAdminRepository struct {
 	items []model.SuperAdmin
 }
@@ -161,7 +188,7 @@ func newTestAdminServiceWithSuperAdminRepo(
 	agentRepo repository.AgentRepository,
 	superAdminRepo repository.SuperAdminRepository,
 ) *AdminService {
-	return New(siteRepo, agentRepo, superAdminRepo, &fakeAuditLogRepository{}, 10)
+	return New(siteRepo, &fakeSiteAIConfigRepository{}, agentRepo, superAdminRepo, &fakeAuditLogRepository{}, 10)
 }
 
 func TestCreateAgentDefaultRoleAndHashPassword(t *testing.T) {

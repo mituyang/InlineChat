@@ -28,6 +28,8 @@ type AdminGatewayServiceClient interface {
 	GetSiteByDomain(ctx context.Context, in *GetSiteByDomainRequest, opts ...grpc.CallOption) (*Site, error)
 	UpdateSiteStatus(ctx context.Context, in *UpdateSiteStatusRequest, opts ...grpc.CallOption) (*Site, error)
 	RotateSiteWidgetKey(ctx context.Context, in *RotateSiteWidgetKeyRequest, opts ...grpc.CallOption) (*Site, error)
+	GetSiteAIConfig(ctx context.Context, in *GetSiteAIConfigRequest, opts ...grpc.CallOption) (*SiteAIConfig, error)
+	UpdateSiteAIConfig(ctx context.Context, in *UpdateSiteAIConfigRequest, opts ...grpc.CallOption) (*SiteAIConfig, error)
 	CreateAgent(ctx context.Context, in *CreateAgentRequest, opts ...grpc.CallOption) (*Agent, error)
 	GetAgentByID(ctx context.Context, in *GetAgentByIDRequest, opts ...grpc.CallOption) (*Agent, error)
 	ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error)
@@ -93,6 +95,24 @@ func (c *adminGatewayServiceClient) UpdateSiteStatus(ctx context.Context, in *Up
 func (c *adminGatewayServiceClient) RotateSiteWidgetKey(ctx context.Context, in *RotateSiteWidgetKeyRequest, opts ...grpc.CallOption) (*Site, error) {
 	out := new(Site)
 	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/RotateSiteWidgetKey", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminGatewayServiceClient) GetSiteAIConfig(ctx context.Context, in *GetSiteAIConfigRequest, opts ...grpc.CallOption) (*SiteAIConfig, error) {
+	out := new(SiteAIConfig)
+	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/GetSiteAIConfig", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminGatewayServiceClient) UpdateSiteAIConfig(ctx context.Context, in *UpdateSiteAIConfigRequest, opts ...grpc.CallOption) (*SiteAIConfig, error) {
+	out := new(SiteAIConfig)
+	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/UpdateSiteAIConfig", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +192,8 @@ type AdminGatewayServiceServer interface {
 	GetSiteByDomain(context.Context, *GetSiteByDomainRequest) (*Site, error)
 	UpdateSiteStatus(context.Context, *UpdateSiteStatusRequest) (*Site, error)
 	RotateSiteWidgetKey(context.Context, *RotateSiteWidgetKeyRequest) (*Site, error)
+	GetSiteAIConfig(context.Context, *GetSiteAIConfigRequest) (*SiteAIConfig, error)
+	UpdateSiteAIConfig(context.Context, *UpdateSiteAIConfigRequest) (*SiteAIConfig, error)
 	CreateAgent(context.Context, *CreateAgentRequest) (*Agent, error)
 	GetAgentByID(context.Context, *GetAgentByIDRequest) (*Agent, error)
 	ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error)
@@ -203,6 +225,12 @@ func (UnimplementedAdminGatewayServiceServer) UpdateSiteStatus(context.Context, 
 }
 func (UnimplementedAdminGatewayServiceServer) RotateSiteWidgetKey(context.Context, *RotateSiteWidgetKeyRequest) (*Site, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RotateSiteWidgetKey not implemented")
+}
+func (UnimplementedAdminGatewayServiceServer) GetSiteAIConfig(context.Context, *GetSiteAIConfigRequest) (*SiteAIConfig, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSiteAIConfig not implemented")
+}
+func (UnimplementedAdminGatewayServiceServer) UpdateSiteAIConfig(context.Context, *UpdateSiteAIConfigRequest) (*SiteAIConfig, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateSiteAIConfig not implemented")
 }
 func (UnimplementedAdminGatewayServiceServer) CreateAgent(context.Context, *CreateAgentRequest) (*Agent, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateAgent not implemented")
@@ -342,6 +370,42 @@ func _AdminGatewayService_RotateSiteWidgetKey_Handler(srv interface{}, ctx conte
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AdminGatewayServiceServer).RotateSiteWidgetKey(ctx, req.(*RotateSiteWidgetKeyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminGatewayService_GetSiteAIConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSiteAIConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminGatewayServiceServer).GetSiteAIConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/inlinechat.admin.v1.AdminGatewayService/GetSiteAIConfig",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminGatewayServiceServer).GetSiteAIConfig(ctx, req.(*GetSiteAIConfigRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminGatewayService_UpdateSiteAIConfig_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateSiteAIConfigRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminGatewayServiceServer).UpdateSiteAIConfig(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/inlinechat.admin.v1.AdminGatewayService/UpdateSiteAIConfig",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminGatewayServiceServer).UpdateSiteAIConfig(ctx, req.(*UpdateSiteAIConfigRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -502,6 +566,14 @@ var AdminGatewayService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RotateSiteWidgetKey",
 			Handler:    _AdminGatewayService_RotateSiteWidgetKey_Handler,
+		},
+		{
+			MethodName: "GetSiteAIConfig",
+			Handler:    _AdminGatewayService_GetSiteAIConfig_Handler,
+		},
+		{
+			MethodName: "UpdateSiteAIConfig",
+			Handler:    _AdminGatewayService_UpdateSiteAIConfig_Handler,
 		},
 		{
 			MethodName: "CreateAgent",

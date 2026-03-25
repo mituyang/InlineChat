@@ -300,7 +300,7 @@ func (s *ChatService) ListConversations(ctx context.Context, input ListConversat
 
 // CreateMessage 对输入和权限做校验，并通过 client_msg_id 提供幂等写入能力。
 func (s *ChatService) CreateMessage(ctx context.Context, input CreateMessageInput) (*model.Message, error) {
-	if input.SenderType != "visitor" && input.SenderType != "agent" && input.SenderType != "system" {
+	if input.SenderType != "visitor" && input.SenderType != "agent" && input.SenderType != "system" && input.SenderType != "ai" {
 		return nil, fmt.Errorf("invalid sender_type")
 	}
 	if strings.TrimSpace(input.Content) == "" {
@@ -432,7 +432,7 @@ func (s *ChatService) MarkMessagesRead(ctx context.Context, input MarkMessagesRe
 		}
 
 		// 谁上报已读，就推进“对侧发送者”的消息状态为 read。
-		targetSenderType := "visitor"
+		targetSenderTypes := []string{"visitor"}
 		if actorType == "visitor" {
 			if strings.TrimSpace(input.VisitorToken) == "" {
 				return fmt.Errorf("visitor_token is required")
@@ -440,26 +440,30 @@ func (s *ChatService) MarkMessagesRead(ctx context.Context, input MarkMessagesRe
 			if conversation.VisitorToken != input.VisitorToken {
 				return fmt.Errorf("visitor token does not match conversation")
 			}
-			targetSenderType = "agent"
+			targetSenderTypes = []string{"agent", "ai"}
 		} else {
 			if input.ActorAgentID == 0 {
 				return fmt.Errorf("actor_agent_id is required")
 			}
 		}
 
-		rows, err := s.messageRepo.MarkReadByConversationAndSender(txCtx, input.ConversationID, targetSenderType, input.LastReadMessageID)
-		if err != nil {
-			return err
-		}
-		if rows < 0 {
-			rows = 0
-		}
-		if rows > 0 {
-			if err := s.emitMessageStatusRange(txCtx, input.ConversationID, targetSenderType, input.LastReadMessageID, MessageStatusRead); err != nil {
+		var totalRows int64
+		for _, targetSenderType := range targetSenderTypes {
+			rows, err := s.messageRepo.MarkReadByConversationAndSender(txCtx, input.ConversationID, targetSenderType, input.LastReadMessageID)
+			if err != nil {
 				return err
 			}
+			if rows < 0 {
+				rows = 0
+			}
+			if rows > 0 {
+				if err := s.emitMessageStatusRange(txCtx, input.ConversationID, targetSenderType, input.LastReadMessageID, MessageStatusRead); err != nil {
+					return err
+				}
+			}
+			totalRows += rows
 		}
-		updatedRows = rows
+		updatedRows = totalRows
 		return nil
 	})
 	if err != nil {

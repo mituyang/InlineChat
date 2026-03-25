@@ -17,6 +17,7 @@ import (
 
 	shareddiscovery "inlinechat/packages/discovery"
 	httpmiddleware "inlinechat/packages/httpmiddleware"
+	"inlinechat/services/gateway-service/internal/aiclient"
 	"inlinechat/services/gateway-service/internal/config"
 	"inlinechat/services/gateway-service/internal/grpcclient"
 	"inlinechat/services/gateway-service/internal/handler"
@@ -71,6 +72,10 @@ func main() {
 	if err != nil {
 		appLogger.Fatal("failed to resolve realtime-service http target from etcd", zap.Error(err), zap.String("service_name", cfg.RealtimeServiceName))
 	}
+	initialAITarget, err := shareddiscovery.ResolveWithRetry(resolver, cfg.AIServiceName, "http", 30*time.Second)
+	if err != nil {
+		appLogger.Fatal("failed to resolve ai-service http target from etcd", zap.Error(err), zap.String("service_name", cfg.AIServiceName))
+	}
 
 	// 3) /ws 走动态反向代理，每次请求实时解析 realtime-service 的最新地址。
 	realtimeProxy, err := proxy.NewDynamicReverseProxy(func(ctx context.Context) (string, error) {
@@ -98,11 +103,17 @@ func main() {
 		}
 	}()
 
+	aiClient, err := aiclient.NewDynamic(resolver, cfg.AIServiceName, callTimeout)
+	if err != nil {
+		appLogger.Fatal("failed to init ai-service client", zap.Error(err))
+	}
+
 	appLogger.Info("resolved upstream endpoints via etcd",
 		zap.String("chat_grpc_target", chatTarget),
 		zap.String("auth_grpc_target", authTarget),
 		zap.String("admin_grpc_target", adminTarget),
 		zap.String("realtime_http_target", initialRealtimeTarget),
+		zap.String("ai_http_target", initialAITarget),
 	)
 
 	limitTTL := time.Duration(cfg.RateLimitKeyTTLMins) * time.Minute
@@ -159,6 +170,7 @@ func main() {
 	httpHandler := handler.NewHTTPHandler(clients, callTimeout)
 	httpHandler.SetRateLimiters(loginLimiter, visitorLimiter)
 	httpHandler.SetStaffRateLimiters(agentLimiter, adminLimiter)
+	httpHandler.SetAIClient(aiClient)
 	metrics := httpmiddleware.NewHTTPMetrics("gateway-service", nil)
 
 	r := gin.New()
@@ -183,6 +195,7 @@ func main() {
 			{name: cfg.AuthServiceName, protocol: "grpc", key: "auth_grpc"},
 			{name: cfg.AdminServiceName, protocol: "grpc", key: "admin_grpc"},
 			{name: cfg.RealtimeServiceName, protocol: "http", key: "realtime_http"},
+			{name: cfg.AIServiceName, protocol: "http", key: "ai_http"},
 		}
 		upstreams := make(gin.H, len(checks))
 		failures := make(gin.H)

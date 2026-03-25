@@ -87,10 +87,11 @@ func main() {
 	queryTimeout := time.Duration(cfg.MySQLQueryTimeoutMS) * time.Millisecond
 
 	siteRepo := repository.NewSiteRepository(db, queryTimeout)
+	siteAIConfigRepo := repository.NewSiteAIConfigRepository(db, queryTimeout)
 	agentRepo := repository.NewAgentRepository(db, queryTimeout)
 	superAdminRepo := repository.NewSuperAdminRepository(db, queryTimeout)
 	auditRepo := repository.NewAuditLogRepository(db, queryTimeout)
-	adminSvc := service.New(siteRepo, agentRepo, superAdminRepo, auditRepo, cfg.BCryptCost)
+	adminSvc := service.New(siteRepo, siteAIConfigRepo, agentRepo, superAdminRepo, auditRepo, cfg.BCryptCost)
 	h := handler.NewHTTPHandler(adminSvc)
 	authz := middleware.NewAuthz(cfg.JWTSecret, cfg.JWTPreviousSecret, cfg.JWTIssuer, agentRepo, superAdminRepo)
 	metrics := httpmiddleware.NewHTTPMetrics("admin-service", nil)
