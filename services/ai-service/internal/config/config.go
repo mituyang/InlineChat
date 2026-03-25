@@ -35,6 +35,7 @@ type Config struct {
 	AIMinSimilarity              float64
 	AIUnknownReply               string
 	AIHTTPTimeoutMS              int
+	AIDisableExternalReadiness   bool
 }
 
 func Load() (Config, error) {
@@ -66,6 +67,7 @@ func Load() (Config, error) {
 		AIMinSimilarity:              getFloatEnv("AI_MIN_SIMILARITY", 0.35),
 		AIUnknownReply:               getEnv("AI_UNKNOWN_REPLY", "当前资料未提及，我暂时无法确认，请联系人工客服。"),
 		AIHTTPTimeoutMS:              getIntEnv("AI_HTTP_TIMEOUT_MS", 15000),
+		AIDisableExternalReadiness:   getBoolEnv("AI_DISABLE_EXTERNAL_READINESS", false),
 	}
 
 	if cfg.RedisAddr == "" {
@@ -147,6 +149,21 @@ func getFloatEnv(key string, fallback float64) float64 {
 		return fallback
 	}
 	return n
+}
+
+func getBoolEnv(key string, fallback bool) bool {
+	v := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	if v == "" {
+		return fallback
+	}
+	switch v {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func splitAndTrim(raw string) []string {

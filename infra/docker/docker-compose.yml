@@ -297,6 +297,7 @@ services:
       AI_MIN_SIMILARITY: ${AI_MIN_SIMILARITY}
       AI_UNKNOWN_REPLY: ${AI_UNKNOWN_REPLY}
       AI_HTTP_TIMEOUT_MS: ${AI_HTTP_TIMEOUT_MS}
+      AI_DISABLE_EXTERNAL_READINESS: ${AI_DISABLE_EXTERNAL_READINESS}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:${AI_HTTP_PORT}/readyz >/dev/null 2>&1 || exit 1"]
       interval: 10s

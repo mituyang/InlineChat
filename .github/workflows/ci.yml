@@ -51,7 +51,9 @@ jobs:
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: 准备环境变量
-        run: cp .env.example .env
+        run: |
+          cp .env.example .env
+          sed -i 's/^AI_DISABLE_EXTERNAL_READINESS=.*/AI_DISABLE_EXTERNAL_READINESS=true/' .env
 
       - name: 校验 compose 配置
         run: make config

@@ -127,7 +127,12 @@ func main() {
 	llmClient := openai.New(cfg.AILLMBaseURL, cfg.AILLMModel, cfg.AILLMAPIKey, httpTimeout)
 	embeddingClient := openai.New(cfg.AIEmbeddingBaseURL, cfg.AIEmbeddingModel, cfg.AIEmbeddingAPIKey, httpTimeout)
 	kbManager := knowledgebase.New(cfg.AIKBPath, embeddingClient, appLogger)
-	if _, err := kbManager.Reload(context.Background()); err != nil {
+	if cfg.AIDisableExternalReadiness {
+		appLogger.Warn("ai-service external readiness disabled",
+			zap.Bool("ai_disable_external_readiness", true),
+			zap.String("reason", "skip llm/embedding and knowledge-base readiness for ci or mock environments"),
+		)
+	} else if _, err := kbManager.Reload(context.Background()); err != nil {
 		appLogger.Warn("initial knowledge base load failed", zap.Error(err), zap.String("path", cfg.AIKBPath))
 	}
 
@@ -209,14 +214,16 @@ func main() {
 		} else if strings.TrimSpace(target) == "" {
 			failures["admin_grpc"] = "empty target"
 		}
-		if err := llmClient.Ready(checkCtx); err != nil {
-			failures["llm"] = err.Error()
-		}
-		if err := embeddingClient.Ready(checkCtx); err != nil {
-			failures["embedding"] = err.Error()
-		}
-		if err := kbManager.Ready(); err != nil {
-			failures["knowledge_base"] = err.Error()
+		if !cfg.AIDisableExternalReadiness {
+			if err := llmClient.Ready(checkCtx); err != nil {
+				failures["llm"] = err.Error()
+			}
+			if err := embeddingClient.Ready(checkCtx); err != nil {
+				failures["embedding"] = err.Error()
+			}
+			if err := kbManager.Ready(); err != nil {
+				failures["knowledge_base"] = err.Error()
+			}
 		}
 
 		if len(failures) > 0 {
@@ -230,10 +237,11 @@ func main() {
 
 		status := kbManager.Status()
 		c.JSON(http.StatusOK, gin.H{
-			"service":     "ai-service",
-			"status":      "ready",
-			"chunk_count": status.ChunkCount,
-			"loaded_at":   status.LoadedAt.Format(time.RFC3339Nano),
+			"service":                    "ai-service",
+			"status":                     "ready",
+			"chunk_count":                status.ChunkCount,
+			"loaded_at":                  status.LoadedAt.Format(time.RFC3339Nano),
+			"external_readiness_skipped": cfg.AIDisableExternalReadiness,
 		})
 	})
 	r.GET("/metrics", httpmiddleware.MetricsHandler(nil))
