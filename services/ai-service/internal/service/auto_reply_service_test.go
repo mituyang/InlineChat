@@ -173,6 +173,31 @@ func TestBuildStructuredFacts(t *testing.T) {
 	}
 }
 
+func TestBuildTermContextReply(t *testing.T) {
+	results := []knowledgebase.SearchResult{
+		{
+			ID:      1,
+			Section: "25.1 产品 SKU 速查表",
+			Text:    "SKU 速查表用于查看不同产品对应的 SKU 编号。",
+		},
+		{
+			ID:      2,
+			Section: "4. 品牌策略",
+			Text:    "品牌强调少而稳定的 SKU 策略，避免过度复杂。",
+		},
+	}
+
+	reply, ok := buildTermContextReply("sku是啥", results)
+	if !ok {
+		t.Fatalf("buildTermContextReply() match = false, want true")
+	}
+	for _, part := range []string{"SKU", "产品编号", "采购报价"} {
+		if !strings.Contains(reply, part) {
+			t.Fatalf("buildTermContextReply() = %q, want contains %q", reply, part)
+		}
+	}
+}
+
 func TestParsePriceThresholdQuery(t *testing.T) {
 	tests := []struct {
 		query    string
@@ -212,14 +237,104 @@ func TestBuildPromptBody(t *testing.T) {
 	}
 }
 
+func TestBuildDeterministicReply(t *testing.T) {
+	prices := []knowledgebase.ProductPrice{
+		{Name: "云感记忆棉枕", PriceText: "¥159", PriceValue: 159},
+		{Name: "暮岚针织四件套", PriceText: "¥399", PriceValue: 399},
+		{Name: "柔雾珐琅锅", PriceText: "¥329", PriceValue: 329},
+		{Name: "可折叠收纳柜", PriceText: "¥199 起", PriceValue: 199},
+		{Name: "溪木砧板套组", PriceText: "¥129", PriceValue: 129},
+	}
+
+	tests := []struct {
+		name      string
+		query     string
+		wantParts []string
+	}{
+		{
+			name:      "highest-price",
+			query:     "最昂贵产品是啥",
+			wantParts: []string{"暮岚针织四件套", "¥399"},
+		},
+		{
+			name:      "lowest-price",
+			query:     "最便宜的是哪个",
+			wantParts: []string{"溪木砧板套组", "¥129"},
+		},
+		{
+			name:      "single-product-price",
+			query:     "柔雾珐琅锅多少钱",
+			wantParts: []string{"柔雾珐琅锅", "¥329"},
+		},
+		{
+			name:      "threshold-price",
+			query:     "价格高于300元的有哪些",
+			wantParts: []string{"暮岚针织四件套", "柔雾珐琅锅", "2款"},
+		},
+		{
+			name:      "product-count",
+			query:     "一共多少款主推产品",
+			wantParts: []string{"共5款", "云感记忆棉枕", "溪木砧板套组"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := buildDeterministicReply(tt.query, prices)
+			if !ok {
+				t.Fatalf("buildDeterministicReply() match = false")
+			}
+			for _, part := range tt.wantParts {
+				if !strings.Contains(got, part) {
+					t.Fatalf("buildDeterministicReply() = %q, want contains %q", got, part)
+				}
+			}
+		})
+	}
+}
+
 func TestNormalizeReplyLanguage(t *testing.T) {
-	got := normalizeReplyLanguage("如果您需要更详细的 pricing 信息，建议咨询客服 service 哦 😊")
+	got := normalizeReplyLanguage("最贵产品是啥", "如果您需要更详细的 pricing 信息，建议咨询客服 service 哦 😊")
 	if strings.Contains(strings.ToLower(got), "pricing") || strings.Contains(strings.ToLower(got), "service") {
 		t.Fatalf("normalizeReplyLanguage() = %q, still contains english word", got)
 	}
 	for _, part := range []string{"价格信息", "客服", "😊"} {
 		if !strings.Contains(got, part) {
 			t.Fatalf("normalizeReplyLanguage() = %q, want contains %q", got, part)
+		}
+	}
+}
+
+func TestNormalizeReplyLanguageKeepsEnglishForTermQuestion(t *testing.T) {
+	got := normalizeReplyLanguage("sku是啥", "SKU 是 Stock Keeping Unit 的缩写，常用于产品编号。")
+	for _, part := range []string{"SKU", "Stock Keeping Unit"} {
+		if !strings.Contains(got, part) {
+			t.Fatalf("normalizeReplyLanguage() = %q, want contains %q", got, part)
+		}
+	}
+}
+
+func TestNormalizeReplyLanguageKeepsEmailAndDomain(t *testing.T) {
+	got := normalizeReplyLanguage("怎么开发票", "如需开具发票，请联系企业采购邮箱 b2b@qinghehome.cn 或访问 qinghehome.cn。")
+	for _, part := range []string{"b2b@qinghehome.cn", "qinghehome.cn"} {
+		if !strings.Contains(got, part) {
+			t.Fatalf("normalizeReplyLanguage() = %q, want contains %q", got, part)
+		}
+	}
+}
+
+func TestExtractQuestionTerms(t *testing.T) {
+	got := extractQuestionTerms("b2b 是什么意思，SKU 又是什么")
+	for _, part := range []string{"b2b", "SKU"} {
+		found := false
+		for _, item := range got {
+			if item == part {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("extractQuestionTerms() = %#v, want contains %q", got, part)
 		}
 	}
 }

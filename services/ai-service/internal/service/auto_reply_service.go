@@ -40,6 +40,10 @@ var (
 	priceWithinPattern         = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*元?(?:以内|以下)`)
 	priceFromPattern           = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*元?(?:以上)`)
 	englishWordPattern         = regexp.MustCompile(`\b[A-Za-z]{2,}\b`)
+	termTokenPattern           = regexp.MustCompile(`\b[A-Za-z][A-Za-z0-9+.-]{1,}\b`)
+	emailPattern               = regexp.MustCompile(`(?i)\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b`)
+	domainPattern              = regexp.MustCompile(`(?i)\b(?:[A-Z0-9-]+\.)+[A-Z]{2,}\b`)
+	hyphenCodePattern          = regexp.MustCompile(`\b[A-Za-z0-9]+(?:-[A-Za-z0-9]+){1,}\b`)
 	hanSpaceHanPattern         = regexp.MustCompile(`([\p{Han}])\s+([\p{Han}])`)
 )
 
@@ -193,11 +197,17 @@ func (s *AutoReplyService) processVisitorMessage(ctx context.Context, event mess
 	if reply, ok := matchPresetReply(query); ok {
 		return s.createReply(ctx, event, reply)
 	}
+	if reply, ok := buildDeterministicReply(query, s.kb.ProductPrices()); ok {
+		return s.createReply(ctx, event, reply)
+	}
 	structuredFacts := buildStructuredFacts(query, s.kb.ProductPrices())
 
 	results, err := s.searchKnowledge(ctx, query)
 	if err != nil {
 		return err
+	}
+	if reply, ok := buildTermContextReply(query, results); ok {
+		return s.createReply(ctx, event, reply)
 	}
 	reply := s.unknownReply
 	if len(results) > 0 || structuredFacts != "" {
@@ -214,7 +224,7 @@ func (s *AutoReplyService) processVisitorMessage(ctx context.Context, event mess
 	} else if clarifyReply, ok := matchClarifyReply(query); ok {
 		reply = clarifyReply
 	}
-	reply = sanitizeModelReply(reply, s.unknownReply)
+	reply = sanitizeModelReply(query, reply, s.unknownReply)
 
 	return s.createReply(ctx, event, reply)
 }
@@ -408,9 +418,9 @@ func fallbackSection(section string) string {
 	return section
 }
 
-func sanitizeModelReply(reply string, fallback string) string {
+func sanitizeModelReply(question string, reply string, fallback string) string {
 	reply = thinkTagPattern.ReplaceAllString(reply, "")
-	reply = normalizeReplyLanguage(reply)
+	reply = normalizeReplyLanguage(question, reply)
 	reply = strings.TrimSpace(reply)
 	if reply == "" {
 		return fallback
@@ -418,23 +428,28 @@ func sanitizeModelReply(reply string, fallback string) string {
 	return reply
 }
 
-func normalizeReplyLanguage(reply string) string {
+func normalizeReplyLanguage(question string, reply string) string {
 	reply = strings.TrimSpace(reply)
 	if reply == "" {
 		return ""
 	}
 
+	reply, protected := protectLiteralTerms(reply)
+
 	for _, item := range englishReplyReplacements {
 		reply = item.pattern.ReplaceAllString(reply, item.value)
 	}
 
-	reply = englishWordPattern.ReplaceAllStringFunc(reply, func(token string) string {
-		if _, ok := allowedEnglishTokens[token]; ok {
-			return token
-		}
-		return ""
-	})
+	if !shouldPreserveEnglishTerms(question) {
+		reply = englishWordPattern.ReplaceAllStringFunc(reply, func(token string) string {
+			if _, ok := allowedEnglishTokens[token]; ok {
+				return token
+			}
+			return ""
+		})
+	}
 
+	reply = restoreLiteralTerms(reply, protected)
 	reply = regexp.MustCompile(`\s+`).ReplaceAllString(reply, " ")
 	for hanSpaceHanPattern.MatchString(reply) {
 		reply = hanSpaceHanPattern.ReplaceAllString(reply, `$1$2`)
@@ -444,6 +459,40 @@ func normalizeReplyLanguage(reply string) string {
 	reply = strings.ReplaceAll(reply, "( ", "(")
 	reply = strings.ReplaceAll(reply, " )", ")")
 	reply = strings.TrimSpace(reply)
+	return reply
+}
+
+func shouldPreserveEnglishTerms(question string) bool {
+	compact := compactText(question)
+	if compact == "" {
+		return false
+	}
+	if !regexp.MustCompile(`[A-Za-z]`).MatchString(question) {
+		return false
+	}
+	return containsAny(compact, "是啥", "是什么", "什么意思", "缩写", "全称", "怎么读")
+}
+
+func protectLiteralTerms(reply string) (string, []string) {
+	protected := make([]string, 0, 8)
+	replace := func(pattern *regexp.Regexp, input string) string {
+		return pattern.ReplaceAllStringFunc(input, func(match string) string {
+			placeholder := fmt.Sprintf("〔保留项%d〕", len(protected))
+			protected = append(protected, match)
+			return placeholder
+		})
+	}
+
+	reply = replace(emailPattern, reply)
+	reply = replace(domainPattern, reply)
+	reply = replace(hyphenCodePattern, reply)
+	return reply, protected
+}
+
+func restoreLiteralTerms(reply string, protected []string) string {
+	for i, item := range protected {
+		reply = strings.ReplaceAll(reply, fmt.Sprintf("〔保留项%d〕", i), item)
+	}
 	return reply
 }
 
@@ -542,7 +591,7 @@ func buildStructuredFacts(query string, prices []knowledgebase.ProductPrice) str
 		builder.WriteString("）\n")
 	}
 	builder.WriteString("使用要求：\n")
-	builder.WriteString("- 如果用户询问最贵、最便宜、最高、最低、多少钱、价格高于/低于/以内/以上、主推产品数量等问题，必须先依据上表完成比较、筛选或统计，再回答。\n")
+	builder.WriteString("- 如果用户询问最贵、最便宜、最昂贵、最高、最低、多少钱、价格高于/低于/以内/以上、主推产品数量等问题，必须先依据上表完成比较、筛选或统计，再回答。\n")
 	builder.WriteString("- 上表已经提供了可直接比较的价格事实时，不要回答“资料未提及”或“无法确认”。")
 	return strings.TrimSpace(builder.String())
 }
@@ -553,7 +602,7 @@ func needsStructuredPriceFacts(query string, prices []knowledgebase.ProductPrice
 		return false
 	}
 	if containsAny(compact,
-		"最贵", "最便宜", "价格最高", "价格最低", "售价最高", "售价最低", "最高价", "最低价",
+		"最贵", "最便宜", "最昂贵", "最便宜", "价格最高", "价格最低", "售价最高", "售价最低", "最高价", "最低价",
 		"多少钱", "价格", "售价", "零售价", "价位",
 		"多少个主推产品", "多少款主推产品", "一共多少个主推产品", "一共多少款主推产品", "主推产品有多少", "价格表里有多少产品", "价格表里有多少款产品",
 	) {
@@ -588,11 +637,265 @@ func buildPromptBody(contextText string, structuredFacts string, question string
 	return builder.String()
 }
 
+func buildTermContextReply(query string, results []knowledgebase.SearchResult) (string, bool) {
+	if len(results) == 0 {
+		return "", false
+	}
+	if !isTermDefinitionQuestion(query) {
+		return "", false
+	}
+
+	terms := extractQuestionTerms(query)
+	if len(terms) == 0 {
+		return "", false
+	}
+
+	term := terms[0]
+	contexts := collectTermContexts(term, results)
+	if len(contexts) == 0 {
+		return "", false
+	}
+
+	switch inferTermCategory(term, contexts) {
+	case "product-code":
+		return fmt.Sprintf("按当前资料，%s 在这里主要作为产品编号或商品管理标识使用，常见于产品参数卡、SKU 速查表和采购报价场景中。😊", term), true
+	case "contact":
+		return fmt.Sprintf("按当前资料，%s 主要出现在联系方式相关场景中，用于邮箱、域名或对外联系口径。😊", term), true
+	case "brand-name":
+		return fmt.Sprintf("按当前资料，%s 在这里主要作为品牌英文名称或品牌相关标识使用。😊", term), true
+	default:
+		return fmt.Sprintf("按当前资料，%s 主要出现在这些场景：%s。如果您想看它对应的具体条目或上下文，我也可以继续帮您查。😊", term, strings.Join(contexts, "、")), true
+	}
+}
+
+func buildDeterministicReply(query string, prices []knowledgebase.ProductPrice) (string, bool) {
+	if len(prices) == 0 {
+		return "", false
+	}
+
+	compact := compactText(query)
+	if compact == "" {
+		return "", false
+	}
+
+	sorted := sortProductPrices(prices)
+
+	switch {
+	case isHighestPriceQuestion(compact):
+		item := sorted[0]
+		return fmt.Sprintf("青禾家居当前主推产品里，价格最高的是%s，建议零售价为%s 😊", item.Name, item.PriceText), true
+	case isLowestPriceQuestion(compact):
+		item := sorted[len(sorted)-1]
+		return fmt.Sprintf("青禾家居当前主推产品里，价格最低的是%s，建议零售价为%s 😊", item.Name, item.PriceText), true
+	case isProductCountQuestion(compact):
+		names := make([]string, 0, len(sorted))
+		for _, item := range sorted {
+			names = append(names, item.Name)
+		}
+		return fmt.Sprintf("按当前资料，青禾家居重点展示的主推产品共%d款，分别是%s。😊", len(sorted), strings.Join(names, "、")), true
+	}
+
+	if mode, value, ok := parsePriceThresholdQuery(query); ok {
+		filtered := filterProductPricesByThreshold(sorted, mode, value)
+		if len(filtered) == 0 {
+			return fmt.Sprintf("按当前资料，主推产品里没有符合%s%s条件的产品。😊", describeThresholdMode(mode), formatPriceValue(value)), true
+		}
+		items := make([]string, 0, len(filtered))
+		for _, item := range filtered {
+			items = append(items, fmt.Sprintf("%s（%s）", item.Name, item.PriceText))
+		}
+		return fmt.Sprintf("按当前资料，主推产品里%s%s的有%d款：%s。😊", describeThresholdMode(mode), formatPriceValue(value), len(filtered), strings.Join(items, "、")), true
+	}
+
+	if isAskingPrice(compact) {
+		matches := matchProductsInQuery(query, sorted)
+		if len(matches) == 1 {
+			item := matches[0]
+			return fmt.Sprintf("%s的建议零售价为%s 😊", item.Name, item.PriceText), true
+		}
+	}
+
+	return "", false
+}
+
 func formatPriceValue(value float64) string {
 	if value == float64(int64(value)) {
 		return fmt.Sprintf("%d元", int64(value))
 	}
 	return fmt.Sprintf("%.2f元", value)
+}
+
+func sortProductPrices(prices []knowledgebase.ProductPrice) []knowledgebase.ProductPrice {
+	sorted := make([]knowledgebase.ProductPrice, len(prices))
+	copy(sorted, prices)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].PriceValue == sorted[j].PriceValue {
+			return sorted[i].Name < sorted[j].Name
+		}
+		return sorted[i].PriceValue > sorted[j].PriceValue
+	})
+	return sorted
+}
+
+func isHighestPriceQuestion(compact string) bool {
+	return containsAny(compact, "最贵", "最昂贵", "价格最高", "售价最高", "最高价")
+}
+
+func isLowestPriceQuestion(compact string) bool {
+	return containsAny(compact, "最便宜", "价格最低", "售价最低", "最低价")
+}
+
+func isProductCountQuestion(compact string) bool {
+	return containsAny(compact,
+		"多少个主推产品", "多少款主推产品", "一共多少个主推产品", "一共多少款主推产品", "主推产品有多少", "价格表里有多少产品", "价格表里有多少款产品",
+	)
+}
+
+func isTermDefinitionQuestion(query string) bool {
+	compact := compactText(query)
+	if compact == "" {
+		return false
+	}
+	if !termTokenPattern.MatchString(query) {
+		return false
+	}
+	return containsAny(compact, "是啥", "是什么", "什么意思", "啥意思", "缩写", "全称", "怎么理解", "含义", "代表什么", "是什么东西")
+}
+
+func extractQuestionTerms(query string) []string {
+	matches := termTokenPattern.FindAllString(query, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(matches))
+	out := make([]string, 0, len(matches))
+	for _, item := range matches {
+		key := strings.ToLower(strings.TrimSpace(item))
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func collectTermContexts(term string, results []knowledgebase.SearchResult) []string {
+	termLower := strings.ToLower(term)
+	seen := map[string]struct{}{}
+	out := make([]string, 0, 3)
+	for _, item := range results {
+		section := fallbackSection(item.Section)
+		textLower := strings.ToLower(item.Text)
+		sectionLower := strings.ToLower(section)
+		if !strings.Contains(textLower, termLower) && !strings.Contains(sectionLower, termLower) {
+			continue
+		}
+
+		candidates := []string{}
+		switch {
+		case strings.Contains(item.Text, "SKU 编号") || strings.Contains(item.Text, "SKU 速查表") || strings.Contains(item.Text, "常销 SKU") || strings.Contains(item.Text, "标准 SKU"):
+			candidates = append(candidates, "产品编号与商品管理")
+		case strings.Contains(item.Text, "邮箱") || strings.Contains(item.Text, "域名") || strings.Contains(item.Text, "官网域名口径"):
+			candidates = append(candidates, "联系方式与对外联系口径")
+		case strings.Contains(item.Text, "英文名称") || strings.Contains(item.Text, "核心商标"):
+			candidates = append(candidates, "品牌英文名称与品牌标识")
+		}
+		candidates = append(candidates, section)
+
+		for _, candidate := range candidates {
+			candidate = strings.TrimSpace(candidate)
+			if candidate == "" {
+				continue
+			}
+			if _, ok := seen[candidate]; ok {
+				continue
+			}
+			seen[candidate] = struct{}{}
+			out = append(out, candidate)
+			if len(out) >= 3 {
+				return out
+			}
+		}
+	}
+	return out
+}
+
+func inferTermCategory(term string, contexts []string) string {
+	termLower := strings.ToLower(term)
+	if termLower == "sku" {
+		return "product-code"
+	}
+	for _, item := range contexts {
+		switch {
+		case strings.Contains(item, "商品管理") || strings.Contains(item, "产品编号"):
+			return "product-code"
+		case strings.Contains(item, "联系方式") || strings.Contains(item, "联系口径"):
+			return "contact"
+		case strings.Contains(item, "英文名称") || strings.Contains(item, "品牌标识"):
+			return "brand-name"
+		}
+	}
+	return ""
+}
+
+func isAskingPrice(compact string) bool {
+	return containsAny(compact, "多少钱", "价格", "售价", "零售价", "价位")
+}
+
+func matchProductsInQuery(query string, prices []knowledgebase.ProductPrice) []knowledgebase.ProductPrice {
+	normalized := normalizeText(query)
+	compact := compactText(query)
+	matches := make([]knowledgebase.ProductPrice, 0, 2)
+	for _, item := range prices {
+		if strings.Contains(normalized, item.Name) || strings.Contains(compact, compactText(item.Name)) {
+			matches = append(matches, item)
+		}
+	}
+	return matches
+}
+
+func filterProductPricesByThreshold(prices []knowledgebase.ProductPrice, mode string, value float64) []knowledgebase.ProductPrice {
+	out := make([]knowledgebase.ProductPrice, 0, len(prices))
+	for _, item := range prices {
+		switch mode {
+		case "gt":
+			if item.PriceValue > value {
+				out = append(out, item)
+			}
+		case "gte":
+			if item.PriceValue >= value {
+				out = append(out, item)
+			}
+		case "lt":
+			if item.PriceValue < value {
+				out = append(out, item)
+			}
+		case "lte":
+			if item.PriceValue <= value {
+				out = append(out, item)
+			}
+		}
+	}
+	return out
+}
+
+func describeThresholdMode(mode string) string {
+	switch mode {
+	case "gt":
+		return "高于"
+	case "gte":
+		return "不低于"
+	case "lt":
+		return "低于"
+	case "lte":
+		return "不超过"
+	default:
+		return ""
+	}
 }
 
 func matchClarifyReply(query string) (string, bool) {
