@@ -90,7 +90,9 @@ jobs:
           cache-dependency-path: tests/e2e/package-lock.json
 
       - name: 准备环境变量
-        run: cp .env.example .env
+        run: |
+          cp .env.example .env
+          sed -i 's/^AI_DISABLE_EXTERNAL_READINESS=.*/AI_DISABLE_EXTERNAL_READINESS=true/' .env
 
       - name: 安装 E2E 依赖
         run: npm --prefix tests/e2e ci
