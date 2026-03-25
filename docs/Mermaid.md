@@ -7,8 +7,8 @@ flowchart TB
     HOST[业务网站]
     WIDGET[widget-chat iframe]
     CUSTOMER[customer-console]
-    AGENT[agent-console]
-    ADMIN[admin-console]
+    AGENT[console-web agent]
+    ADMIN[console-web admin]
   end
 
   subgraph ACCESS[接入层]

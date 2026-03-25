@@ -15,8 +15,7 @@
 - `etcd`: 服务注册与发现中心，gateway/realtime 通过它解析上游地址。
 
 ## 前端目录
-- `apps/agent-console`: 客服工作台源码目录。
-- `apps/admin-console`: 管理后台源码目录。
+- `apps/console-web`: 客服工作台与管理后台的 `Vue3 + Vite` 源码目录。
 - `apps/customer-console`: 访客调试页源码目录。
 - `apps/staff-login`: 员工统一登录页源码目录。
 - `apps/widget-chat`: Widget 聊天窗（iframe）源码目录。

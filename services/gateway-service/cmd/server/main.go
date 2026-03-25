@@ -236,6 +236,12 @@ func main() {
 	r.GET("/app/agent", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/app/agent/")
 	})
+	r.GET("/app/agent-vue", func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, "/app/agent/")
+	})
+	r.GET("/app/agent-vue/", func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, "/app/agent/")
+	})
 	r.GET("/app/staff-login", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/app/staff-login/")
 	})
@@ -243,6 +249,12 @@ func main() {
 		c.Redirect(http.StatusMovedPermanently, "/app/widget/")
 	})
 	r.GET("/app/admin", func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, "/app/admin/")
+	})
+	r.GET("/app/admin-vue", func(c *gin.Context) {
+		c.Redirect(http.StatusMovedPermanently, "/app/admin/")
+	})
+	r.GET("/app/admin-vue/", func(c *gin.Context) {
 		c.Redirect(http.StatusMovedPermanently, "/app/admin/")
 	})
 	r.GET("/app/demo", func(c *gin.Context) {
@@ -253,7 +265,7 @@ func main() {
 	})
 
 	registerStaticRoute(r, appLogger, "/app/customer", []string{"./public/customer", "./apps/customer-console", "../../apps/customer-console"})
-	registerStaticRoute(r, appLogger, "/app/agent", []string{"./public/agent", "./apps/agent-console", "../../apps/agent-console"})
+	registerStaticRoute(r, appLogger, "/app/agent", []string{"./public/agent", "./apps/console-web/dist/agent", "../../apps/console-web/dist/agent"})
 	registerStaticRoute(r, appLogger, "/app/staff-login", []string{"./public/staff-login", "./apps/staff-login", "../../apps/staff-login"})
 	widgetDir, err := resolveStaticDir("./public/widget", "./apps/widget-chat", "../../apps/widget-chat")
 	if err != nil {
@@ -261,7 +273,7 @@ func main() {
 	} else {
 		mountWidgetRoute(r, appLogger, httpHandler, widgetDir)
 	}
-	registerStaticRoute(r, appLogger, "/app/admin", []string{"./public/admin", "./apps/admin-console", "../../apps/admin-console"})
+	registerStaticRoute(r, appLogger, "/app/admin", []string{"./public/admin", "./apps/console-web/dist/admin", "../../apps/console-web/dist/admin"})
 	registerStaticRoute(r, appLogger, "/app/demo", []string{"./public/demo", "./apps/demo-site", "../../apps/demo-site"})
 	registerStaticRoute(r, appLogger, "/app/api-docs", []string{"./public/api-docs", "./apps/api-docs", "../../apps/api-docs"})
 	registerStaticRoute(r, appLogger, "/sdk", []string{"./public/sdk", "./apps/widget-sdk", "../../apps/widget-sdk"})

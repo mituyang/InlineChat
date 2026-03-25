@@ -4,3 +4,5 @@ AGENTS.md
 .cache/
 .vscode/
 services/*/.bin/
+apps/console-web/node_modules/
+apps/console-web/dist/
