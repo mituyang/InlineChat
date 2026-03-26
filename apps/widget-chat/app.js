@@ -749,10 +749,7 @@ function updateSessionUI() {
       els.sessionNoticeText.textContent = `会话 #${state.conversationID} 已关闭，无法继续发送消息。`;
     }
   } else if (aiServing) {
-    els.sessionNotice.hidden = false;
-    if (els.sessionNoticeText) {
-      els.sessionNoticeText.textContent = "当前为 AI 接待。";
-    }
+    els.sessionNotice.hidden = true;
   } else {
     els.sessionNotice.hidden = true;
   }
@@ -1254,6 +1251,76 @@ async function refreshMessages() {
   const data = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${state.conversationID}/messages?limit=200`));
   const items = Array.isArray(data.items) ? data.items : [];
   mergeMessages(items);
+}
+
+function hasAIMessage(items) {
+  return Array.isArray(items)
+    ? items.some((item) => String(item?.sender_type || "").trim().toLowerCase() === "ai")
+    : false;
+}
+
+function shouldRenderAITypingIndicator(items) {
+  if (!state.conversationID || state.composeMode || state.conversationStatus === "closed") {
+    return false;
+  }
+  if (!Array.isArray(items) || items.length === 0 || !hasAIMessage(items)) {
+    return false;
+  }
+
+  let lastIndex = -1;
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const senderType = String(items[index]?.sender_type || "").trim().toLowerCase();
+    if (senderType && senderType !== "system") {
+      lastIndex = index;
+      break;
+    }
+  }
+  if (lastIndex < 0) {
+    return false;
+  }
+
+  const lastMessage = items[lastIndex];
+  if (String(lastMessage?.sender_type || "").trim().toLowerCase() !== "visitor") {
+    return false;
+  }
+  if (String(lastMessage?.status || "").trim().toLowerCase() === "failed") {
+    return false;
+  }
+
+  for (let index = lastIndex - 1; index >= 0; index -= 1) {
+    const senderType = String(items[index]?.sender_type || "").trim().toLowerCase();
+    if (!senderType || senderType === "system") {
+      continue;
+    }
+    if (senderType === "visitor") {
+      continue;
+    }
+    return senderType === "ai";
+  }
+
+  return false;
+}
+
+function appendAITypingIndicator() {
+  const row = document.createElement("article");
+  row.className = "message-row other typing-row";
+
+  const bubble = document.createElement("div");
+  bubble.className = "message typing";
+  bubble.textContent = "ai顾问正在输入～";
+
+  const dots = document.createElement("span");
+  dots.className = "typing-dots";
+  dots.setAttribute("aria-hidden", "true");
+  for (let index = 0; index < 3; index += 1) {
+    const dot = document.createElement("span");
+    dot.className = "typing-dot";
+    dots.appendChild(dot);
+  }
+  bubble.appendChild(dots);
+
+  row.appendChild(bubble);
+  els.messages.appendChild(row);
 }
 
 function connectWebSocket() {
@@ -2078,6 +2145,7 @@ function renderMessages(items) {
   }
 
   els.messages.innerHTML = "";
+  const showAITypingIndicator = shouldRenderAITypingIndicator(items);
 
   for (const item of items) {
     const isSystem = item.sender_type === "system";
@@ -2125,6 +2193,10 @@ function renderMessages(items) {
     row.appendChild(bubble);
     row.appendChild(meta);
     els.messages.appendChild(row);
+  }
+
+  if (showAITypingIndicator) {
+    appendAITypingIndicator();
   }
 
   els.messages.scrollTop = els.messages.scrollHeight;
