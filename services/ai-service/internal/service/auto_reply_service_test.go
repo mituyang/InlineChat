@@ -78,7 +78,7 @@ func TestCompactText(t *testing.T) {
 }
 
 func TestBuildSearchQueries(t *testing.T) {
-	got := buildSearchQueries("你们是做什么的")
+	got := buildSearchQueries("你们是做什么的", nil, nil)
 	if len(got) < 2 {
 		t.Fatalf("buildSearchQueries() len = %d, want >= 2", len(got))
 	}
@@ -95,6 +95,80 @@ func TestBuildSearchQueries(t *testing.T) {
 	}
 	if !foundRewrite {
 		t.Fatalf("buildSearchQueries() = %#v, want rewritten query", got)
+	}
+}
+
+func TestBuildSearchQueriesFuzzyRewrite(t *testing.T) {
+	got := buildSearchQueries("你们的品拍故事", []string{
+		"品牌",
+		"品牌定位",
+		"品牌介绍",
+		"售后服务",
+	}, nil)
+
+	for _, want := range []string{
+		"你们的品牌故事",
+		"青禾家居的品拍故事",
+		"青禾家居的品牌故事",
+	} {
+		found := false
+		for _, item := range got {
+			if item == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("buildSearchQueries() = %#v, want contains %q", got, want)
+		}
+	}
+}
+
+func TestBuildSearchQueriesFuzzyFeaturedProductIntent(t *testing.T) {
+	got := buildSearchQueries("讲讲你们最好的蛋品", []string{
+		"核心单品",
+		"主推产品",
+		"明星产品资料",
+		"单品",
+	}, nil)
+
+	for _, want := range []string{
+		"讲讲你们最好的单品",
+		"青禾家居主推产品有哪些",
+		"介绍一下青禾家居重点推荐的核心单品",
+	} {
+		found := false
+		for _, item := range got {
+			if item == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("buildSearchQueries() = %#v, want contains %q", got, want)
+		}
+	}
+}
+
+func TestBuildSearchQueriesYearRewrite(t *testing.T) {
+	got := buildSearchQueries("23年你们做了啥", nil, []knowledgebase.YearMilestone{
+		{Year: 2023, Title: "多仓履约网络建立"},
+	})
+
+	for _, want := range []string{
+		"2023年你们做了啥",
+		"2023 年 多仓履约网络建立",
+	} {
+		found := false
+		for _, item := range got {
+			if item == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("buildSearchQueries() = %#v, want contains %q", got, want)
+		}
 	}
 }
 
@@ -280,7 +354,7 @@ func TestBuildDeterministicReply(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, ok := buildDeterministicReply(tt.query, prices)
+			got, ok := buildDeterministicReply(tt.query, prices, nil)
 			if !ok {
 				t.Fatalf("buildDeterministicReply() match = false")
 			}
@@ -290,6 +364,62 @@ func TestBuildDeterministicReply(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBuildDeterministicReplyFeaturedProducts(t *testing.T) {
+	prices := []knowledgebase.ProductPrice{
+		{Name: "云感记忆棉枕", PriceText: "¥159", PriceValue: 159},
+		{Name: "暮岚针织四件套", PriceText: "¥399", PriceValue: 399},
+		{Name: "极简落地灯", PriceText: "¥239", PriceValue: 239},
+	}
+
+	got, ok := buildDeterministicReply("讲讲你们最好的蛋品", prices, []string{
+		"核心单品",
+		"主推产品",
+		"单品",
+	})
+	if !ok {
+		t.Fatalf("buildDeterministicReply() match = false")
+	}
+	for _, part := range []string{"没有唯一能被定义为“最好”", "云感记忆棉枕", "暮岚针织四件套", "极简落地灯"} {
+		if !strings.Contains(got, part) {
+			t.Fatalf("buildDeterministicReply() = %q, want contains %q", got, part)
+		}
+	}
+}
+
+func TestBuildYearMilestoneReply(t *testing.T) {
+	reply, ok := buildYearMilestoneReply("23年你们做了啥", []knowledgebase.YearMilestone{
+		{
+			Year:    2023,
+			Title:   "多仓履约网络建立",
+			Summary: "完成杭州、佛山、武汉、成都四地仓配布局，提升不同区域订单的发货效率，减少跨区域调拨带来的时效波动。",
+		},
+	})
+	if !ok {
+		t.Fatalf("buildYearMilestoneReply() match = false")
+	}
+	for _, part := range []string{"2023 年", "多仓履约网络建立", "杭州", "佛山", "武汉", "成都"} {
+		if !strings.Contains(reply, part) {
+			t.Fatalf("buildYearMilestoneReply() = %q, want contains %q", reply, part)
+		}
+	}
+}
+
+func TestBuildYearMilestoneReplyMissingYear(t *testing.T) {
+	reply, ok := buildYearMilestoneReply("2024年你们做了啥", []knowledgebase.YearMilestone{
+		{Year: 2019, Title: "品牌成立"},
+		{Year: 2021, Title: "照明与厨房类目扩展"},
+		{Year: 2023, Title: "多仓履约网络建立"},
+	})
+	if !ok {
+		t.Fatalf("buildYearMilestoneReply() match = false")
+	}
+	for _, part := range []string{"未单独记录 2024 年", "2019年", "2021年", "2023年"} {
+		if !strings.Contains(reply, part) {
+			t.Fatalf("buildYearMilestoneReply() = %q, want contains %q", reply, part)
+		}
 	}
 }
 

@@ -115,7 +115,7 @@ a {
 }
 
 .console-shell {
-  max-width: 1600px;
+  width: 100%;
   margin: 0 auto;
   display: grid;
   gap: 16px;
@@ -267,7 +267,7 @@ a {
 }
 
 .workspace.agent {
-  grid-template-columns: 320px minmax(0, 1fr) 340px;
+  grid-template-columns: 300px minmax(0, 1fr) 300px;
 }
 
 .workspace.admin {

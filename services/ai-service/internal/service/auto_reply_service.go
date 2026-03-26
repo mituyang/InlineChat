@@ -30,6 +30,7 @@ const (
 	replyMaxTokens    = 256
 	maxPromptContext  = 4800
 	replyModeAutoOnly = "unassigned_auto_reply"
+	maxFuzzyRewrites  = 3
 )
 
 var thinkTagPattern = regexp.MustCompile(`(?s)<think>.*?</think>`)
@@ -39,6 +40,7 @@ var (
 	priceThresholdBelowPattern = regexp.MustCompile(`(?:低于|小于|不超过|不高于)\s*([0-9]+(?:\.[0-9]+)?)\s*元?`)
 	priceWithinPattern         = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*元?(?:以内|以下)`)
 	priceFromPattern           = regexp.MustCompile(`([0-9]+(?:\.[0-9]+)?)\s*元?(?:以上)`)
+	yearMentionPattern         = regexp.MustCompile(`(20[0-9]{2}|[0-9]{2})\s*年`)
 	englishWordPattern         = regexp.MustCompile(`\b[A-Za-z]{2,}\b`)
 	termTokenPattern           = regexp.MustCompile(`\b[A-Za-z][A-Za-z0-9+.-]{1,}\b`)
 	emailPattern               = regexp.MustCompile(`(?i)\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}\b`)
@@ -197,7 +199,10 @@ func (s *AutoReplyService) processVisitorMessage(ctx context.Context, event mess
 	if reply, ok := matchPresetReply(query); ok {
 		return s.createReply(ctx, event, reply)
 	}
-	if reply, ok := buildDeterministicReply(query, s.kb.ProductPrices()); ok {
+	if reply, ok := buildYearMilestoneReply(query, s.kb.YearMilestones()); ok {
+		return s.createReply(ctx, event, reply)
+	}
+	if reply, ok := buildDeterministicReply(query, s.kb.ProductPrices(), s.kb.Terms()); ok {
 		return s.createReply(ctx, event, reply)
 	}
 	structuredFacts := buildStructuredFacts(query, s.kb.ProductPrices())
@@ -230,9 +235,8 @@ func (s *AutoReplyService) processVisitorMessage(ctx context.Context, event mess
 }
 
 func (s *AutoReplyService) searchKnowledge(ctx context.Context, query string) ([]knowledgebase.SearchResult, error) {
-	candidates := buildSearchQueries(query)
-	merged := make([]knowledgebase.SearchResult, 0, s.retrieveTopK)
-	seen := make(map[int]struct{}, s.retrieveTopK)
+	candidates := buildSearchQueries(query, s.kb.Terms(), s.kb.YearMilestones())
+	mergedByID := make(map[int]knowledgebase.SearchResult, s.retrieveTopK)
 
 	for _, candidate := range candidates {
 		results, err := s.kb.Search(ctx, candidate, s.retrieveTopK, s.minSimilarity)
@@ -240,14 +244,17 @@ func (s *AutoReplyService) searchKnowledge(ctx context.Context, query string) ([
 			return nil, err
 		}
 		for _, item := range results {
-			if _, ok := seen[item.ID]; ok {
-				continue
+			existing, ok := mergedByID[item.ID]
+			if !ok || item.Score > existing.Score {
+				mergedByID[item.ID] = item
 			}
-			seen[item.ID] = struct{}{}
-			merged = append(merged, item)
 		}
 	}
 
+	merged := make([]knowledgebase.SearchResult, 0, len(mergedByID))
+	for _, item := range mergedByID {
+		merged = append(merged, item)
+	}
 	if len(merged) == 0 {
 		return nil, nil
 	}
@@ -500,13 +507,14 @@ func normalizeText(text string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
 }
 
-func buildSearchQueries(query string) []string {
+func buildSearchQueries(query string, retrievalTerms []string, yearMilestones []knowledgebase.YearMilestone) []string {
 	normalized := normalizeText(query)
 	if normalized == "" {
 		return nil
 	}
 
-	queries := []string{normalized}
+	baseQueries := []string{normalized}
+	baseQueries = append(baseQueries, buildYearSearchQueries(normalized, yearMilestones)...)
 	rewritten := normalized
 	replacer := strings.NewReplacer(
 		"你们家", "青禾家居",
@@ -519,13 +527,427 @@ func buildSearchQueries(query string) []string {
 	rewritten = replacer.Replace(rewritten)
 	rewritten = normalizeText(rewritten)
 	if rewritten != "" && rewritten != normalized {
-		queries = append(queries, rewritten)
+		baseQueries = append(baseQueries, rewritten)
 	}
 
-	if !strings.Contains(normalized, "青禾家居") {
-		queries = append(queries, normalizeText("青禾家居 "+normalized))
+	queries := make([]string, 0, len(baseQueries)*3)
+	for _, baseQuery := range uniqueStrings(baseQueries) {
+		variants := []string{baseQuery}
+		variants = append(variants, buildFuzzyRewriteQueries(baseQuery, retrievalTerms)...)
+		for _, variant := range uniqueStrings(variants) {
+			queries = append(queries, variant)
+			if isFeaturedProductIntent(compactText(variant)) {
+				queries = append(queries,
+					"青禾家居主推产品有哪些",
+					"介绍一下青禾家居重点推荐的核心单品",
+				)
+			}
+		}
+		if !strings.Contains(baseQuery, "青禾家居") {
+			queries = append(queries, normalizeText("青禾家居 "+baseQuery))
+		}
 	}
 	return uniqueStrings(queries)
+}
+
+func buildYearSearchQueries(query string, milestones []knowledgebase.YearMilestone) []string {
+	year, ok := extractReferencedYear(query, milestones)
+	if !ok {
+		return nil
+	}
+
+	out := make([]string, 0, 3)
+	expanded := normalizeYearQuery(query, year)
+	if expanded != "" && expanded != query {
+		out = append(out, expanded)
+	}
+	if milestone, ok := findYearMilestoneByYear(milestones, year); ok && milestone.Title != "" {
+		out = append(out, normalizeText(fmt.Sprintf("%d 年 %s", year, milestone.Title)))
+	}
+	return uniqueStrings(out)
+}
+
+func buildYearMilestoneReply(query string, milestones []knowledgebase.YearMilestone) (string, bool) {
+	year, ok := extractReferencedYear(query, milestones)
+	if !ok {
+		return "", false
+	}
+
+	normalized := normalizeYearQuery(query, year)
+	if !isYearMilestoneIntent(compactText(normalized)) {
+		return "", false
+	}
+
+	milestone, ok := findYearMilestoneByYear(milestones, year)
+	if !ok {
+		years := listMilestoneYears(milestones)
+		if len(years) == 0 {
+			return "", false
+		}
+		return fmt.Sprintf("按当前资料，知识库里未单独记录 %d 年的年度里程碑；目前明确列出的年份节点有 %s。😊", year, strings.Join(years, "、")), true
+	}
+
+	switch {
+	case milestone.Title != "" && milestone.Summary != "":
+		return fmt.Sprintf("按当前资料，%d 年青禾家居的里程碑是%s：%s 😊", year, milestone.Title, milestone.Summary), true
+	case milestone.Summary != "":
+		return fmt.Sprintf("按当前资料，%d 年青禾家居%s 😊", year, milestone.Summary), true
+	case milestone.Title != "":
+		return fmt.Sprintf("按当前资料，%d 年青禾家居的里程碑是%s 😊", year, milestone.Title), true
+	default:
+		return "", false
+	}
+}
+
+func extractReferencedYear(query string, milestones []knowledgebase.YearMilestone) (int, bool) {
+	match := yearMentionPattern.FindStringSubmatch(query)
+	if len(match) != 2 {
+		return 0, false
+	}
+	raw := strings.TrimSpace(match[1])
+	year, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	if len(raw) == 4 {
+		return year, true
+	}
+	return resolveShortYear(year, milestones), true
+}
+
+func resolveShortYear(year int, milestones []knowledgebase.YearMilestone) int {
+	candidates := []int{2000 + year, 1900 + year}
+	for _, candidate := range candidates {
+		if _, ok := findYearMilestoneByYear(milestones, candidate); ok {
+			return candidate
+		}
+	}
+	if year <= 29 {
+		return 2000 + year
+	}
+	return 1900 + year
+}
+
+func normalizeYearQuery(query string, year int) string {
+	return normalizeText(yearMentionPattern.ReplaceAllString(query, fmt.Sprintf("%d年", year)))
+}
+
+func findYearMilestoneByYear(milestones []knowledgebase.YearMilestone, year int) (knowledgebase.YearMilestone, bool) {
+	for _, item := range milestones {
+		if item.Year == year {
+			return item, true
+		}
+	}
+	return knowledgebase.YearMilestone{}, false
+}
+
+func listMilestoneYears(milestones []knowledgebase.YearMilestone) []string {
+	out := make([]string, 0, len(milestones))
+	for _, item := range milestones {
+		out = append(out, fmt.Sprintf("%d年", item.Year))
+	}
+	return out
+}
+
+func isYearMilestoneIntent(compact string) bool {
+	if compact == "" {
+		return false
+	}
+	if !containsAny(compact,
+		"做了啥", "做了什么", "做过什么", "干了啥", "干了什么", "发生了什么",
+		"有什么动作", "有什么进展", "有什么变化", "里程碑", "历程", "发展",
+		"那年", "这一年", "那一年", "当年",
+	) {
+		return false
+	}
+	if containsAny(compact, "价格", "售价", "多少钱", "材质", "尺寸", "配送", "发货", "售后") {
+		return false
+	}
+	return true
+}
+
+type preparedRetrievalTerm struct {
+	Text    string
+	Compact string
+}
+
+type fuzzyRewriteCandidate struct {
+	Text  string
+	Score float64
+}
+
+func buildFuzzyRewriteQueries(query string, retrievalTerms []string) []string {
+	terms := prepareRetrievalTerms(retrievalTerms)
+	if len(terms) == 0 {
+		return nil
+	}
+
+	normalized := normalizeText(query)
+	if normalized == "" {
+		return nil
+	}
+
+	runes := []rune(normalized)
+	rewrites := make(map[string]float64, maxFuzzyRewrites*2)
+	for start := 0; start < len(runes); start++ {
+		if !unicode.Is(unicode.Han, runes[start]) {
+			continue
+		}
+		end := start
+		for end < len(runes) && unicode.Is(unicode.Han, runes[end]) {
+			end++
+		}
+		collectSequenceRewriteCandidates(runes, normalized, start, end, terms, rewrites)
+		start = end - 1
+	}
+
+	if len(rewrites) == 0 {
+		return nil
+	}
+
+	candidates := make([]fuzzyRewriteCandidate, 0, len(rewrites))
+	for text, score := range rewrites {
+		candidates = append(candidates, fuzzyRewriteCandidate{Text: text, Score: score})
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].Score == candidates[j].Score {
+			ri := len([]rune(candidates[i].Text))
+			rj := len([]rune(candidates[j].Text))
+			if ri == rj {
+				return candidates[i].Text < candidates[j].Text
+			}
+			return ri < rj
+		}
+		return candidates[i].Score > candidates[j].Score
+	})
+
+	out := make([]string, 0, maxFuzzyRewrites)
+	for _, item := range candidates {
+		out = append(out, item.Text)
+		if len(out) >= maxFuzzyRewrites {
+			break
+		}
+	}
+	return out
+}
+
+func prepareRetrievalTerms(terms []string) []preparedRetrievalTerm {
+	out := make([]preparedRetrievalTerm, 0, len(terms))
+	seen := make(map[string]struct{}, len(terms))
+	for _, term := range terms {
+		compact := compactText(term)
+		runes := []rune(compact)
+		if len(runes) < 2 || len(runes) > 8 {
+			continue
+		}
+		if !containsHanTerm(compact) {
+			continue
+		}
+		if _, ok := seen[compact]; ok {
+			continue
+		}
+		seen[compact] = struct{}{}
+		out = append(out, preparedRetrievalTerm{
+			Text:    normalizeText(term),
+			Compact: compact,
+		})
+		if len(out) >= 256 {
+			break
+		}
+	}
+	return out
+}
+
+func collectSequenceRewriteCandidates(queryRunes []rune, original string, seqStart int, seqEnd int, terms []preparedRetrievalTerm, rewrites map[string]float64) {
+	seq := queryRunes[seqStart:seqEnd]
+	maxWindow := 6
+	if maxWindow > len(seq) {
+		maxWindow = len(seq)
+	}
+	for size := 2; size <= maxWindow; size++ {
+		for offset := 0; offset+size <= len(seq); offset++ {
+			fragment := string(seq[offset : offset+size])
+			if !isMeaningfulFuzzyFragment(fragment) {
+				continue
+			}
+			replacement, score := bestFuzzyRetrievalTerm(fragment, terms)
+			if replacement == "" || score < 0.72 {
+				continue
+			}
+			globalStart := seqStart + offset
+			globalEnd := globalStart + size
+			rewritten := replaceRuneRange(queryRunes, globalStart, globalEnd, []rune(replacement))
+			rewrittenText := normalizeText(string(rewritten))
+			if rewrittenText == original {
+				continue
+			}
+			if prev, ok := rewrites[rewrittenText]; !ok || score > prev {
+				rewrites[rewrittenText] = score
+			}
+		}
+	}
+}
+
+func bestFuzzyRetrievalTerm(fragment string, terms []preparedRetrievalTerm) (string, float64) {
+	compact := compactText(fragment)
+	if compact == "" {
+		return "", 0
+	}
+
+	bestTerm := ""
+	bestScore := 0.0
+	for _, term := range terms {
+		score := scoreFuzzyTerms(compact, term.Compact)
+		if score > bestScore {
+			bestScore = score
+			bestTerm = term.Text
+		}
+	}
+	if compactText(bestTerm) == compact {
+		return "", 0
+	}
+	return bestTerm, bestScore
+}
+
+func scoreFuzzyTerms(fragment string, candidate string) float64 {
+	a := []rune(fragment)
+	b := []rune(candidate)
+	if len(a) < 2 || len(b) < 2 {
+		return 0
+	}
+
+	lenDiff := len(a) - len(b)
+	if lenDiff < 0 {
+		lenDiff = -lenDiff
+	}
+	if lenDiff > 1 {
+		return 0
+	}
+
+	dist := levenshteinDistance(a, b)
+	if dist == 0 {
+		return 1
+	}
+	if dist > 2 {
+		return 0
+	}
+
+	maxLen := len(a)
+	if len(b) > maxLen {
+		maxLen = len(b)
+	}
+	score := 1 - float64(dist)/float64(maxLen)
+	score -= 0.18 * float64(lenDiff)
+
+	shared := sharedRuneCount(a, b)
+	score += 0.12 * (float64(shared) / float64(maxLen))
+
+	if a[0] == b[0] {
+		score += 0.12
+	}
+	if a[len(a)-1] == b[len(b)-1] {
+		score += 0.12
+	}
+	if len(a) == len(b) && dist == 1 && (a[0] == b[0] || a[len(a)-1] == b[len(b)-1]) {
+		score += 0.08
+	}
+	if score > 0.99 {
+		return 0.99
+	}
+	return score
+}
+
+func levenshteinDistance(a []rune, b []rune) int {
+	if len(a) == 0 {
+		return len(b)
+	}
+	if len(b) == 0 {
+		return len(a)
+	}
+
+	prev := make([]int, len(b)+1)
+	curr := make([]int, len(b)+1)
+	for j := 0; j <= len(b); j++ {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		curr[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 0
+			if a[i-1] != b[j-1] {
+				cost = 1
+			}
+			insertCost := curr[j-1] + 1
+			deleteCost := prev[j] + 1
+			replaceCost := prev[j-1] + cost
+			curr[j] = minInt(insertCost, deleteCost, replaceCost)
+		}
+		prev, curr = curr, prev
+	}
+	return prev[len(b)]
+}
+
+func sharedRuneCount(a []rune, b []rune) int {
+	counts := make(map[rune]int, len(a))
+	for _, r := range a {
+		counts[r]++
+	}
+	shared := 0
+	for _, r := range b {
+		if counts[r] <= 0 {
+			continue
+		}
+		counts[r]--
+		shared++
+	}
+	return shared
+}
+
+func replaceRuneRange(input []rune, start int, end int, replacement []rune) []rune {
+	out := make([]rune, 0, len(input)-(end-start)+len(replacement))
+	out = append(out, input[:start]...)
+	out = append(out, replacement...)
+	out = append(out, input[end:]...)
+	return out
+}
+
+func isMeaningfulFuzzyFragment(fragment string) bool {
+	runes := []rune(compactText(fragment))
+	if len(runes) < 2 {
+		return false
+	}
+	meaningful := 0
+	for _, r := range runes {
+		if !unicode.Is(unicode.Han, r) {
+			return false
+		}
+		switch r {
+		case '你', '我', '他', '她', '它', '们', '的', '了', '吗', '呢', '啊', '呀', '请', '想', '问', '看', '帮', '下', '在', '有', '是', '和', '与', '及':
+			continue
+		default:
+			meaningful++
+		}
+	}
+	return meaningful >= 2 || (len(runes) == 2 && meaningful >= 1)
+}
+
+func containsHanTerm(text string) bool {
+	for _, r := range text {
+		if unicode.Is(unicode.Han, r) {
+			return true
+		}
+	}
+	return false
+}
+
+func minInt(values ...int) int {
+	best := values[0]
+	for _, value := range values[1:] {
+		if value < best {
+			best = value
+		}
+	}
+	return best
 }
 
 func matchPresetReply(query string) (string, bool) {
@@ -668,7 +1090,7 @@ func buildTermContextReply(query string, results []knowledgebase.SearchResult) (
 	}
 }
 
-func buildDeterministicReply(query string, prices []knowledgebase.ProductPrice) (string, bool) {
+func buildDeterministicReply(query string, prices []knowledgebase.ProductPrice, retrievalTerms []string) (string, bool) {
 	if len(prices) == 0 {
 		return "", false
 	}
@@ -715,6 +1137,15 @@ func buildDeterministicReply(query string, prices []knowledgebase.ProductPrice) 
 		}
 	}
 
+	if isFeaturedProductIntent(compact) {
+		return buildFeaturedProductReply(sorted, compact), true
+	}
+	for _, rewritten := range buildFuzzyRewriteQueries(query, retrievalTerms) {
+		if isFeaturedProductIntent(compactText(rewritten)) {
+			return buildFeaturedProductReply(sorted, compactText(rewritten)), true
+		}
+	}
+
 	return "", false
 }
 
@@ -749,6 +1180,31 @@ func isProductCountQuestion(compact string) bool {
 	return containsAny(compact,
 		"多少个主推产品", "多少款主推产品", "一共多少个主推产品", "一共多少款主推产品", "主推产品有多少", "价格表里有多少产品", "价格表里有多少款产品",
 	)
+}
+
+func isFeaturedProductIntent(compact string) bool {
+	if compact == "" {
+		return false
+	}
+	if containsAny(compact, "价格", "售价", "多少钱", "最贵", "最便宜", "最高价", "最低价") {
+		return false
+	}
+	if !(containsAny(compact, "讲讲", "介绍", "说说", "推荐", "看看", "了解", "想买", "想看", "有哪些", "哪个", "哪款", "最好", "最好的", "最推荐", "最值得买", "爆款", "明星", "王牌", "招牌", "主推", "核心") &&
+		containsAny(compact, "产品", "单品", "商品", "款", "系列")) {
+		return false
+	}
+	return true
+}
+
+func buildFeaturedProductReply(prices []knowledgebase.ProductPrice, compact string) string {
+	names := make([]string, 0, len(prices))
+	for _, item := range prices {
+		names = append(names, item.Name)
+	}
+	if containsAny(compact, "最好", "最好的", "最推荐", "最值得买") {
+		return fmt.Sprintf("按当前资料，没有唯一能被定义为“最好”的单一产品；青禾家居当前重点展示和推荐的核心单品包括%s。😊", strings.Join(names, "、"))
+	}
+	return fmt.Sprintf("按当前资料，青禾家居当前重点展示和推荐的核心单品包括%s。😊", strings.Join(names, "、"))
 }
 
 func isTermDefinitionQuestion(query string) bool {

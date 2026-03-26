@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"go.uber.org/zap"
 )
@@ -24,6 +25,13 @@ const (
 )
 
 var priceNumberPattern = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?`)
+
+var (
+	headingIndexPattern = regexp.MustCompile(`^(?:第[0-9一二三四五六七八九十百千]+[章节篇部分]\s*|[0-9]+(?:\.[0-9]+)*\s*)`)
+	asciiLetterPattern  = regexp.MustCompile(`[A-Za-z]`)
+	hanSequencePattern  = regexp.MustCompile(`[\p{Han}]{2,}`)
+	yearHeadingPattern  = regexp.MustCompile(`^(20[0-9]{2})\s*年(?:\s*[:：]\s*(.+))?$`)
+)
 
 type embedder interface {
 	CreateEmbeddings(ctx context.Context, inputs []string) ([][]float64, error)
@@ -51,6 +59,13 @@ type ProductPrice struct {
 	Section    string
 }
 
+type YearMilestone struct {
+	Year    int
+	Title   string
+	Summary string
+	Section string
+}
+
 type Status struct {
 	ChunkCount int
 	LoadedAt   time.Time
@@ -62,11 +77,13 @@ type Manager struct {
 	embedder embedder
 	logger   *zap.Logger
 
-	mu            sync.RWMutex
-	chunks        []Chunk
-	productPrices []ProductPrice
-	loadedAt      time.Time
-	lastError     error
+	mu             sync.RWMutex
+	chunks         []Chunk
+	productPrices  []ProductPrice
+	retrievalTerms []string
+	yearMilestones []YearMilestone
+	loadedAt       time.Time
+	lastError      error
 }
 
 func New(path string, embedder embedder, logger *zap.Logger) *Manager {
@@ -118,6 +135,8 @@ func (m *Manager) Reload(ctx context.Context) (Status, error) {
 	}
 
 	productPrices := extractProductPrices(string(raw))
+	retrievalTerms := extractRetrievalTerms(rawChunks, productPrices)
+	yearMilestones := extractYearMilestones(rawChunks)
 
 	status := Status{
 		ChunkCount: len(chunks),
@@ -127,6 +146,8 @@ func (m *Manager) Reload(ctx context.Context) (Status, error) {
 	m.mu.Lock()
 	m.chunks = chunks
 	m.productPrices = productPrices
+	m.retrievalTerms = retrievalTerms
+	m.yearMilestones = yearMilestones
 	m.loadedAt = status.LoadedAt
 	m.lastError = nil
 	m.mu.Unlock()
@@ -214,6 +235,24 @@ func (m *Manager) ProductPrices() []ProductPrice {
 
 	out := make([]ProductPrice, len(m.productPrices))
 	copy(out, m.productPrices)
+	return out
+}
+
+func (m *Manager) Terms() []string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	out := make([]string, len(m.retrievalTerms))
+	copy(out, m.retrievalTerms)
+	return out
+}
+
+func (m *Manager) YearMilestones() []YearMilestone {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	out := make([]YearMilestone, len(m.yearMilestones))
+	copy(out, m.yearMilestones)
 	return out
 }
 
@@ -378,6 +417,296 @@ func splitLongText(text string, maxChars int, overlap int) []string {
 
 func normalizeText(text string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+}
+
+func compactTermText(text string) string {
+	var builder strings.Builder
+	builder.Grow(len(text))
+	for _, r := range strings.TrimSpace(text) {
+		if unicode.IsSpace(r) || unicode.IsPunct(r) || unicode.IsSymbol(r) {
+			continue
+		}
+		builder.WriteRune(r)
+	}
+	return builder.String()
+}
+
+func extractRetrievalTerms(chunks []rawChunk, prices []ProductPrice) []string {
+	weights := make(map[string]int, 128)
+	for _, chunk := range chunks {
+		if chunk.Section == "" {
+			continue
+		}
+		for _, section := range strings.Split(chunk.Section, " > ") {
+			addHeadingRetrievalTerms(weights, section, 4)
+		}
+	}
+	for _, item := range prices {
+		addRetrievalTerm(weights, item.Name, 6)
+		for _, gram := range extractHanNGrams(item.Name, 2, 4) {
+			addRetrievalTerm(weights, gram, 2)
+		}
+	}
+	addChunkTextRetrievalTerms(weights, chunks)
+
+	type weightedTerm struct {
+		Text   string
+		Weight int
+	}
+	items := make([]weightedTerm, 0, len(weights))
+	for term, weight := range weights {
+		items = append(items, weightedTerm{Text: term, Weight: weight})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Weight == items[j].Weight {
+			ri := len([]rune(items[i].Text))
+			rj := len([]rune(items[j].Text))
+			if ri == rj {
+				return items[i].Text < items[j].Text
+			}
+			return ri > rj
+		}
+		return items[i].Weight > items[j].Weight
+	})
+
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.Text)
+		if len(out) >= 256 {
+			break
+		}
+	}
+	return out
+}
+
+func addChunkTextRetrievalTerms(weights map[string]int, chunks []rawChunk) {
+	docFreq := make(map[string]int, 256)
+	totalFreq := make(map[string]int, 256)
+
+	for _, chunk := range chunks {
+		seen := make(map[string]struct{}, 32)
+		for _, seq := range hanSequencePattern.FindAllString(chunk.Text, -1) {
+			for _, gram := range extractHanNGrams(seq, 2, 4) {
+				if !isUsefulTextRetrievalTerm(gram) {
+					continue
+				}
+				totalFreq[gram]++
+				if _, ok := seen[gram]; ok {
+					continue
+				}
+				seen[gram] = struct{}{}
+				docFreq[gram]++
+			}
+		}
+	}
+
+	for term, docs := range docFreq {
+		runes := []rune(term)
+		total := totalFreq[term]
+		switch {
+		case len(runes) == 2 && total < 3:
+			continue
+		case len(runes) >= 3 && docs < 2:
+			continue
+		}
+		weight := docs + (total / 2)
+		addRetrievalTerm(weights, term, weight)
+	}
+}
+
+func isUsefulTextRetrievalTerm(term string) bool {
+	runes := []rune(compactTermText(term))
+	if len(runes) < 2 || len(runes) > 4 {
+		return false
+	}
+	meaningful := 0
+	for _, r := range runes {
+		if !unicode.Is(unicode.Han, r) {
+			return false
+		}
+		switch r {
+		case '的', '了', '是', '和', '与', '及', '在', '把', '让', '将', '向', '按', '可', '更', '较', '很', '也', '都', '且', '并':
+			continue
+		default:
+			meaningful++
+		}
+	}
+	return meaningful >= 2 || (len(runes) == 2 && meaningful >= 1)
+}
+
+func addHeadingRetrievalTerms(weights map[string]int, section string, weight int) {
+	section = normalizeHeadingTerm(section)
+	if section == "" {
+		return
+	}
+	addRetrievalTerm(weights, section, weight)
+	for _, part := range splitHeadingParts(section) {
+		addRetrievalTerm(weights, part, weight+1)
+		for _, gram := range extractHanNGrams(part, 2, 4) {
+			addRetrievalTerm(weights, gram, 1)
+		}
+	}
+	for _, gram := range extractHanNGrams(section, 2, 4) {
+		addRetrievalTerm(weights, gram, 1)
+	}
+}
+
+func normalizeHeadingTerm(section string) string {
+	section = normalizeText(section)
+	section = headingIndexPattern.ReplaceAllString(section, "")
+	section = strings.Trim(section, ".-:：|/·,，。；、()（）[]【】")
+	return normalizeText(section)
+}
+
+func splitHeadingParts(section string) []string {
+	replacer := strings.NewReplacer(
+		"（", " ",
+		"）", " ",
+		"(", " ",
+		")", " ",
+		"/", " ",
+		"|", " ",
+		"·", " ",
+		"与", " ",
+		"和", " ",
+		"及", " ",
+		"、", " ",
+	)
+	parts := strings.Fields(replacer.Replace(section))
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = normalizeHeadingTerm(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	if len(out) == 0 && section != "" {
+		out = append(out, section)
+	}
+	return out
+}
+
+func addRetrievalTerm(weights map[string]int, term string, weight int) {
+	term = normalizeText(term)
+	term = headingIndexPattern.ReplaceAllString(term, "")
+	term = strings.Trim(term, ".-:：|/·,，。；、()（）[]【】")
+	compact := compactTermText(term)
+	if weight <= 0 || len([]rune(compact)) < 2 {
+		return
+	}
+	if !containsHanRune(compact) && !asciiLetterPattern.MatchString(compact) {
+		return
+	}
+	weights[term] += weight
+}
+
+func extractHanNGrams(text string, minN int, maxN int) []string {
+	compact := compactTermText(text)
+	if compact == "" {
+		return nil
+	}
+	runes := []rune(compact)
+	if len(runes) < minN {
+		return nil
+	}
+	if maxN > len(runes) {
+		maxN = len(runes)
+	}
+	out := make([]string, 0, 8)
+	seen := make(map[string]struct{}, 8)
+	for size := minN; size <= maxN; size++ {
+		for start := 0; start+size <= len(runes); start++ {
+			part := string(runes[start : start+size])
+			if !containsHanRune(part) {
+				continue
+			}
+			if _, ok := seen[part]; ok {
+				continue
+			}
+			seen[part] = struct{}{}
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func containsHanRune(text string) bool {
+	for _, r := range text {
+		if unicode.Is(unicode.Han, r) {
+			return true
+		}
+	}
+	return false
+}
+
+func extractYearMilestones(chunks []rawChunk) []YearMilestone {
+	type milestoneAccumulator struct {
+		Year    int
+		Title   string
+		Section string
+		Summary []string
+	}
+
+	items := make(map[string]*milestoneAccumulator, 8)
+	for _, chunk := range chunks {
+		year, title, section, ok := parseYearMilestoneChunk(chunk)
+		if !ok {
+			continue
+		}
+		key := fmt.Sprintf("%d|%s", year, title)
+		item, exists := items[key]
+		if !exists {
+			item = &milestoneAccumulator{
+				Year:    year,
+				Title:   title,
+				Section: section,
+			}
+			items[key] = item
+		}
+		text := normalizeText(chunk.Text)
+		if text != "" {
+			item.Summary = append(item.Summary, text)
+		}
+	}
+
+	out := make([]YearMilestone, 0, len(items))
+	for _, item := range items {
+		out = append(out, YearMilestone{
+			Year:    item.Year,
+			Title:   item.Title,
+			Summary: normalizeText(strings.Join(item.Summary, " ")),
+			Section: item.Section,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Year == out[j].Year {
+			return out[i].Title < out[j].Title
+		}
+		return out[i].Year < out[j].Year
+	})
+	return out
+}
+
+func parseYearMilestoneChunk(chunk rawChunk) (int, string, string, bool) {
+	section := normalizeText(chunk.Section)
+	if section == "" {
+		return 0, "", "", false
+	}
+	parts := strings.Split(section, " > ")
+	if len(parts) == 0 {
+		return 0, "", "", false
+	}
+	match := yearHeadingPattern.FindStringSubmatch(normalizeText(parts[len(parts)-1]))
+	if len(match) == 0 {
+		return 0, "", "", false
+	}
+	year, err := strconv.Atoi(match[1])
+	if err != nil {
+		return 0, "", "", false
+	}
+	title := normalizeText(match[2])
+	return year, title, section, true
 }
 
 func extractProductPrices(raw string) []ProductPrice {
