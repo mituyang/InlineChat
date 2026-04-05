@@ -59,9 +59,57 @@ cp .env.example .env
 - `SUPER_ADMIN_PASSWORD`
 - `SUPER_ADMIN_DISPLAY_NAME`
 
-如需启用 AI，还需要在 `.env` 中配置模型与向量服务相关参数。
+如需启用 AI，`.env.example` 默认使用宿主机 `llama-server` 暴露的 OpenAI-compatible 接口。
 
-### 2. 启动服务
+### 2. 启动本机 AI 服务（可选，`.env.example` 默认值）
+
+默认模型：
+
+- LLM：`Qwen3-4B-Q4_K_M`，监听 `http://0.0.0.0:8299/v1`
+- Embedding：`Qwen3-Embedding-0.6B`，监听 `http://0.0.0.0:8298/v1`
+
+启动 Embedding 服务：
+
+```bash
+llama-server \
+  -m "<你的 Qwen3-Embedding-0.6B GGUF 路径>" \
+  -a "Qwen3-Embedding-0.6B" \
+  --host 0.0.0.0 \
+  --port 8298 \
+  --embeddings \
+  --pooling last \
+  -ngl all \
+  -c 8192
+```
+
+启动 LLM 服务：
+
+```bash
+llama-server \
+  -m "<你的 Qwen3-4B GGUF 路径>" \
+  -a "Qwen3-4B-Q4_K_M" \
+  --host 0.0.0.0 \
+  --port 8299 \
+  -ngl all \
+  -c 8192 \
+  --jinja
+```
+
+`.env.example` 中与之对应的配置如下：
+
+```env
+AI_LLM_BASE_URL=http://host.docker.internal:8299/v1
+AI_LLM_MODEL=Qwen3-4B-Q4_K_M
+AI_EMBEDDING_BASE_URL=http://host.docker.internal:8298/v1
+AI_EMBEDDING_MODEL=Qwen3-Embedding-0.6B
+```
+
+说明：
+
+- `-m` 需要替换为本机实际 GGUF 文件路径
+- `host.docker.internal` 用于让容器内的 `ai-service` 访问宿主机上的 `llama-server`
+
+### 3. 启动服务
 
 推荐直接使用 `Makefile`：
 
@@ -75,14 +123,14 @@ make up
 docker compose -f infra/docker/docker-compose.yml --env-file .env up --build
 ```
 
-### 3. 验证服务
+### 4. 验证服务
 
 ```bash
 curl http://localhost:8200/healthz
 curl http://localhost:8200/readyz
 ```
 
-### 4. 访问入口
+### 5. 访问入口
 
 - 员工登录页：`http://localhost:8200/app/staff-login/`
 - 客服工作台：`http://localhost:8200/app/agent/`
