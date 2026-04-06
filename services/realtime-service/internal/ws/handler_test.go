@@ -488,6 +488,54 @@ func TestHandlerRejectUnavailableSiteDuringHandshake(t *testing.T) {
 	}
 }
 
+func TestHandlerAllowVisitorOriginBySiteDomains(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	fakeSite := &fakeSiteClient{
+		getSiteByIDFn: func(_ context.Context, _ string) (*adminclient.Site, error) {
+			return &adminclient.Site{
+				SiteID:  "site_demo",
+				Status:  "active",
+				Domains: []string{"yyqw.shop", "www.yyqw.shop"},
+			}, nil
+		},
+	}
+	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, fakeSite, []string{"http://localhost:8200"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	ts := newWSTestServer(t, handler)
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6?visitor_token=vt_1"
+	conn, resp, err := ts.Dial(wsURL, wsDialHeaderWithOrigin("https://yyqw.shop"))
+	if err != nil {
+		t.Fatalf("expected websocket handshake success, got resp=%+v err=%v", resp, err)
+	}
+	defer conn.Close()
+}
+
+func TestHandlerRejectVisitorOriginOutsideSiteDomainsEvenIfStaticAllowed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	fakeSite := &fakeSiteClient{
+		getSiteByIDFn: func(_ context.Context, _ string) (*adminclient.Site, error) {
+			return &adminclient.Site{
+				SiteID:  "site_demo",
+				Status:  "active",
+				Domains: []string{"yyqw.shop"},
+			}, nil
+		},
+	}
+	handler := NewHandler(NewHub(), &fakeChatClient{}, nil, fakeSite, []string{"https://www.yyqw.shop"}, time.Second, "secret", "", "inlinechat-auth", zap.NewNop())
+	ts := newWSTestServer(t, handler)
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws/6?visitor_token=vt_1"
+	_, resp, err := ts.Dial(wsURL, wsDialHeaderWithOrigin("https://www.yyqw.shop"))
+	if err == nil {
+		t.Fatal("expected websocket handshake error")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected 403 handshake response, got %+v err=%v", resp, err)
+	}
+}
+
 func TestHandlerRejectDisallowedOrigin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

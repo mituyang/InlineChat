@@ -62,6 +62,7 @@ type connectionContext struct {
 	Role         string
 	AgentID      uint64
 	SiteID       string
+	SiteDomains  []string
 	VisitorToken string
 }
 
@@ -148,11 +149,13 @@ func (h *Handler) Serve(c *gin.Context) {
 		c.JSON(code, gin.H{"error": err.Error()})
 		return
 	}
+	if !h.isOriginAllowedForConnection(c.GetHeader("Origin"), connCtx) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "origin is not allowed"})
+		return
+	}
 
 	upgrader := websocket.Upgrader{
-		CheckOrigin: func(r *http.Request) bool {
-			return h.isOriginAllowed(r.Header.Get("Origin"))
-		},
+		CheckOrigin: func(_ *http.Request) bool { return true },
 	}
 
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -274,7 +277,8 @@ func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64
 	if siteID == "" {
 		return connectionContext{}, http.StatusConflict, fmt.Errorf("site is unavailable")
 	}
-	if code, err := h.validateConversationSite(ctx, siteID); err != nil {
+	site, code, err := h.validateConversationSite(ctx, siteID)
+	if err != nil {
 		return connectionContext{}, code, err
 	}
 	if connCtx.Role == "agent" {
@@ -287,6 +291,7 @@ func (h *Handler) resolveConnectionContext(c *gin.Context, conversationID uint64
 	}
 
 	connCtx.SiteID = siteID
+	connCtx.SiteDomains = allowedSiteDomains(site)
 	return connCtx, 0, nil
 }
 
@@ -318,6 +323,18 @@ func (h *Handler) isOriginAllowed(origin string) bool {
 	}
 	_, ok := h.allowedOrigins[normalized]
 	return ok
+}
+
+func (h *Handler) isOriginAllowedForConnection(origin string, connCtx connectionContext) bool {
+	if h.allowAllOrigins {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(connCtx.Role), "visitor") {
+		if len(connCtx.SiteDomains) > 0 {
+			return matchesAnySiteDomain(connCtx.SiteDomains, origin)
+		}
+	}
+	return h.isOriginAllowed(origin)
 }
 
 func buildJWTSecrets(primary string, previous string) [][]byte {
@@ -507,7 +524,7 @@ func (h *Handler) onSendMessage(ctx context.Context, conversationID string, raw 
 	}
 	validateCtx, validateCancel := context.WithTimeout(ctx, h.chatCallTimeout)
 	defer validateCancel()
-	if _, err := h.validateConversationSite(validateCtx, connCtx.SiteID); err != nil {
+	if _, _, err := h.validateConversationSite(validateCtx, connCtx.SiteID); err != nil {
 		h.sendNack(client, payload.ClientMsgID, err.Error())
 		return nil
 	}
@@ -576,13 +593,13 @@ func (h *Handler) onSendMessage(ctx context.Context, conversationID string, raw 
 	return nil
 }
 
-func (h *Handler) validateConversationSite(ctx context.Context, siteID string) (int, error) {
+func (h *Handler) validateConversationSite(ctx context.Context, siteID string) (*adminclient.Site, int, error) {
 	if h.siteClient == nil {
-		return 0, nil
+		return nil, 0, nil
 	}
 	siteID = strings.TrimSpace(siteID)
 	if siteID == "" {
-		return http.StatusConflict, fmt.Errorf("site is unavailable")
+		return nil, http.StatusConflict, fmt.Errorf("site is unavailable")
 	}
 
 	site, err := h.siteClient.GetSiteBySiteID(ctx, siteID)
@@ -590,19 +607,125 @@ func (h *Handler) validateConversationSite(ctx context.Context, siteID string) (
 		if st, ok := status.FromError(err); ok {
 			switch st.Code() {
 			case codes.NotFound:
-				return http.StatusConflict, fmt.Errorf("site is unavailable")
+				return nil, http.StatusConflict, fmt.Errorf("site is unavailable")
 			case codes.DeadlineExceeded:
-				return http.StatusGatewayTimeout, fmt.Errorf("upstream timeout")
+				return nil, http.StatusGatewayTimeout, fmt.Errorf("upstream timeout")
 			default:
-				return http.StatusBadGateway, fmt.Errorf("upstream unavailable")
+				return nil, http.StatusBadGateway, fmt.Errorf("upstream unavailable")
 			}
 		}
-		return http.StatusBadGateway, fmt.Errorf("upstream unavailable")
+		return nil, http.StatusBadGateway, fmt.Errorf("upstream unavailable")
 	}
 	if strings.TrimSpace(strings.ToLower(site.Status)) != "active" {
-		return http.StatusConflict, fmt.Errorf("site is not active")
+		return nil, http.StatusConflict, fmt.Errorf("site is not active")
 	}
-	return 0, nil
+	return site, 0, nil
+}
+
+func allowedSiteDomains(site *adminclient.Site) []string {
+	if site == nil {
+		return nil
+	}
+	raw := site.Domains
+	if len(raw) == 0 && strings.TrimSpace(site.Domain) != "" {
+		raw = []string{site.Domain}
+	}
+	out := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, item := range raw {
+		normalized := normalizeHostLike(item)
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func matchesSiteDomain(siteDomain string, raw string) bool {
+	normalizedSiteDomain := normalizeHostLike(siteDomain)
+	normalizedHost := normalizeHostLike(raw)
+	if normalizedSiteDomain == "" || normalizedHost == "" {
+		return false
+	}
+	if normalizedSiteDomain == normalizedHost {
+		return true
+	}
+	return isLocalhostHost(normalizedSiteDomain) && isLocalhostHost(normalizedHost)
+}
+
+func matchesAnySiteDomain(siteDomains []string, raw string) bool {
+	for _, item := range siteDomains {
+		if matchesSiteDomain(item, raw) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeHostLike(raw string) string {
+	parsed, ok := parseURLLike(raw)
+	if ok {
+		return normalizeHostFromURL(parsed)
+	}
+
+	text := strings.TrimSpace(strings.ToLower(raw))
+	text = strings.TrimPrefix(text, ".")
+	text = strings.TrimSuffix(text, ".")
+	if text == "" {
+		return ""
+	}
+
+	hostURL, ok := parseURLLike("https://" + text)
+	if !ok {
+		return ""
+	}
+	return normalizeHostFromURL(hostURL)
+}
+
+func parseURLLike(raw string) (*url.URL, bool) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return nil, false
+	}
+	parsed, err := url.Parse(text)
+	if err == nil && parsed.Host != "" {
+		return parsed, true
+	}
+	return nil, false
+}
+
+func normalizeHostFromURL(parsed *url.URL) string {
+	if parsed == nil {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" {
+		return ""
+	}
+	port := strings.TrimSpace(parsed.Port())
+	switch {
+	case port == "":
+		return host
+	case strings.EqualFold(parsed.Scheme, "http") && port == "80":
+		return host
+	case strings.EqualFold(parsed.Scheme, "https") && port == "443":
+		return host
+	default:
+		return host + ":" + port
+	}
+}
+
+func isLocalhostHost(raw string) bool {
+	hostURL, ok := parseURLLike("https://" + strings.TrimSpace(raw))
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(hostURL.Hostname()), "localhost")
 }
 
 func (h *Handler) sendNack(client *Client, clientMsgID string, reason string) {

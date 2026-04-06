@@ -16,8 +16,10 @@ type Client struct {
 }
 
 type Site struct {
-	SiteID string
-	Status string
+	SiteID  string
+	Status  string
+	Domain  string
+	Domains []string
 }
 
 // New 建立到 admin-service 的 gRPC 连接。
@@ -55,7 +57,9 @@ func (c *Client) GetSiteBySiteID(ctx context.Context, siteID string) (*Site, err
 		return nil, err
 	}
 	return &Site{
-		SiteID: resp.GetSiteId(),
-		Status: resp.GetStatus(),
+		SiteID:  resp.GetSiteId(),
+		Status:  resp.GetStatus(),
+		Domain:  resp.GetDomain(),
+		Domains: append([]string(nil), resp.GetDomains()...),
 	}, nil
 }

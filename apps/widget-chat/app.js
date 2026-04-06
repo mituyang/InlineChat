@@ -1194,7 +1194,7 @@ async function sendMessage() {
       client_msg_id: clientMsgID,
       visitor_token: state.visitorToken,
     };
-    mergeMessages([createLocalOutgoingMessage(content, clientMsgID, "visitor")]);
+    mergeMessages([createLocalOutgoingMessage(content, clientMsgID, "visitor")], { forceScrollBottom: true });
     setStatus("消息发送中...");
     await dispatchOutgoingMessage(payload);
     els.contentInput.value = "";
@@ -1220,7 +1220,7 @@ async function dispatchOutgoingMessage(payload) {
 
   const message = await sendMessageViaHTTP(payload);
   clearPending(payload.client_msg_id, true);
-  mergeMessages([message]);
+  mergeMessages([message], { forceScrollBottom: true });
   setStatus("实时通道不稳定，已切换备用通道发送");
 }
 
@@ -1244,13 +1244,78 @@ async function sendMessageViaHTTP(payload) {
   });
 }
 
-async function refreshMessages() {
+function isNearBottom(container, threshold = 72) {
+  if (!container) {
+    return true;
+  }
+  const gap = container.scrollHeight - container.scrollTop - container.clientHeight;
+  return gap <= threshold;
+}
+
+function captureScrollAnchor(container) {
+  if (!container) {
+    return null;
+  }
+  const nodes = Array.from(container.querySelectorAll("[data-message-key]"));
+  if (nodes.length === 0) {
+    return null;
+  }
+
+  const containerTop = container.getBoundingClientRect().top;
+  for (const node of nodes) {
+    const key = String(node.getAttribute("data-message-key") || "").trim();
+    if (!key) {
+      continue;
+    }
+    const rect = node.getBoundingClientRect();
+    if (rect.bottom > containerTop + 1) {
+      return {
+        key,
+        offset: rect.top - containerTop,
+      };
+    }
+  }
+
+  const fallback = nodes[0];
+  const fallbackKey = String(fallback.getAttribute("data-message-key") || "").trim();
+  if (!fallbackKey) {
+    return null;
+  }
+  return {
+    key: fallbackKey,
+    offset: fallback.getBoundingClientRect().top - containerTop,
+  };
+}
+
+function restoreScrollAnchor(container, anchor, fallbackScrollTop) {
+  if (!container) {
+    return;
+  }
+
+  if (anchor && anchor.key) {
+    const nodes = container.querySelectorAll("[data-message-key]");
+    for (const node of nodes) {
+      if (String(node.getAttribute("data-message-key") || "").trim() !== anchor.key) {
+        continue;
+      }
+      const containerTop = container.getBoundingClientRect().top;
+      const rect = node.getBoundingClientRect();
+      container.scrollTop += rect.top - containerTop - Number(anchor.offset || 0);
+      return;
+    }
+  }
+
+  const maxScrollTop = Math.max(container.scrollHeight - container.clientHeight, 0);
+  container.scrollTop = Math.min(fallbackScrollTop, maxScrollTop);
+}
+
+async function refreshMessages(options = {}) {
   if (!state.conversationID) {
     return;
   }
   const data = await apiRequest(withVisitorToken(`/api/chat/v1/conversations/${state.conversationID}/messages?limit=200`));
   const items = Array.isArray(data.items) ? data.items : [];
-  mergeMessages(items);
+  mergeMessages(items, options);
 }
 
 function hasAIMessage(items) {
@@ -1618,7 +1683,7 @@ async function runBackfillSync(announceError) {
   }
 }
 
-function mergeMessages(items) {
+function mergeMessages(items, options = {}) {
   const byKey = new Map();
   const clientMsgKey = new Map();
 
@@ -1672,7 +1737,7 @@ function mergeMessages(items) {
   }
 
   state.messages = Array.from(byKey.values()).sort(compareMessageOrder);
-  renderMessages(state.messages);
+  renderMessages(state.messages, options);
   updateConversationHistoryFromMessages();
   void reportReadProgress();
 }
@@ -2121,9 +2186,6 @@ async function reportReadProgress() {
       },
     });
     state.lastReadReported = Math.max(Number(state.lastReadReported || 0), maxMessageID);
-    if (Number(resp.updated_count || 0) > 0) {
-      await refreshMessages();
-    }
   } catch {
     // read 上报失败时不前移游标，等待下次继续上报。
   } finally {
@@ -2133,7 +2195,10 @@ async function reportReadProgress() {
   }
 }
 
-function renderMessages(items) {
+function renderMessages(items, options = {}) {
+  const shouldStickBottom = Boolean(options.forceScrollBottom) || isNearBottom(els.messages);
+  const previousScrollTop = els.messages.scrollTop;
+  const scrollAnchor = shouldStickBottom ? null : captureScrollAnchor(els.messages);
   if (!Array.isArray(items) || items.length === 0) {
     if (state.composeMode) {
       els.messages.innerHTML = '<div class="empty">请输入消息，发送后将创建新会话。</div>';
@@ -2165,6 +2230,7 @@ function renderMessages(items) {
     const isSelf = item.sender_type === "visitor";
     const row = document.createElement("article");
     row.className = `message-row ${isSelf ? "self" : "other"}`;
+    row.setAttribute("data-message-key", getMessageKey(item));
 
     const bubble = document.createElement("div");
     bubble.className = "message";
@@ -2199,7 +2265,11 @@ function renderMessages(items) {
     appendAITypingIndicator();
   }
 
-  els.messages.scrollTop = els.messages.scrollHeight;
+  if (shouldStickBottom) {
+    els.messages.scrollTop = els.messages.scrollHeight;
+  } else {
+    restoreScrollAnchor(els.messages, scrollAnchor, previousScrollTop);
+  }
   notifyHostUnreadCount();
 }
 
