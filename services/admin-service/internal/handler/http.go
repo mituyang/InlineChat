@@ -23,9 +23,15 @@ func NewHTTPHandler(adminService *service.AdminService) *HTTPHandler {
 }
 
 type createSiteRequest struct {
-	SiteID string `json:"site_id" binding:"required,min=4,max=64"`
-	Name   string `json:"name" binding:"required,min=1,max=128"`
-	Domain string `json:"domain" binding:"required,min=3,max=255"`
+	SiteID  string   `json:"site_id" binding:"required,min=4,max=64"`
+	Name    string   `json:"name" binding:"required,min=1,max=128"`
+	Domain  string   `json:"domain"`
+	Domains []string `json:"domains"`
+}
+
+type updateSiteRequest struct {
+	Name    string   `json:"name" binding:"required,min=1,max=128"`
+	Domains []string `json:"domains"`
 }
 
 type createAgentRequest struct {
@@ -57,6 +63,7 @@ type resetAgentPasswordRequest struct {
 func (h *HTTPHandler) RegisterRoutes(rg *gin.RouterGroup) {
 	// 管理后台能力：站点管理、坐席管理、审计查询。
 	rg.POST("/sites", h.createSite)
+	rg.PATCH("/sites/:site_id", h.updateSite)
 	rg.GET("/sites", h.listSites)
 	rg.PATCH("/sites/:site_id/status", h.updateSiteStatus)
 	rg.POST("/sites/:site_id/rotate-widget-key", h.rotateSiteWidgetKey)
@@ -78,9 +85,10 @@ func (h *HTTPHandler) createSite(c *gin.Context) {
 	}
 
 	site, err := h.adminService.CreateSiteWithActor(c.Request.Context(), service.CreateSiteInput{
-		SiteID: req.SiteID,
-		Name:   req.Name,
-		Domain: req.Domain,
+		SiteID:  req.SiteID,
+		Name:    req.Name,
+		Domain:  req.Domain,
+		Domains: req.Domains,
 	}, extractActor(c))
 	if err != nil {
 		if errors.Is(err, service.ErrConflict) {
@@ -91,6 +99,33 @@ func (h *HTTPHandler) createSite(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, site)
+}
+
+func (h *HTTPHandler) updateSite(c *gin.Context) {
+	var req updateSiteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	site, err := h.adminService.UpdateSiteWithActor(c.Request.Context(), service.UpdateSiteInput{
+		SiteID:  c.Param("site_id"),
+		Name:    req.Name,
+		Domains: req.Domains,
+	}, extractActor(c))
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, service.ErrConflict) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, site)
 }
 
 func (h *HTTPHandler) updateSiteStatus(c *gin.Context) {

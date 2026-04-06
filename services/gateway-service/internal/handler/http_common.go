@@ -448,7 +448,7 @@ func siteToJSON(item *adminv1.Site) gin.H {
 		"id":         item.GetId(),
 		"site_id":    item.GetSiteId(),
 		"name":       item.GetName(),
-		"domain":     item.GetDomain(),
+		"domains":    append([]string(nil), item.GetDomains()...),
 		"widget_key": item.GetWidgetKey(),
 		"status":     item.GetStatus(),
 		"created_at": item.GetCreatedAt(),

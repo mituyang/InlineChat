@@ -117,11 +117,20 @@ AI_EMBEDDING_MODEL=Qwen3-Embedding-0.6B
 make up
 ```
 
-等价命令：
+默认行为：
 
 ```bash
-docker compose -f infra/docker/docker-compose.yml --env-file .env up --build
+make up        # 自动判断数据库升级或回退重建，再构建并启动
+make up-strict # 在 make up 基础上额外执行 schema-check
 ```
+
+说明：
+
+- `make up` 会先把数据库自动同步到当前仓库里的 migrations
+- 只要检测到需要迁移或回退重建，都会先自动备份当前业务数据库
+- 当代码前进导致 migrations 版本变大时，会自动执行向前迁移
+- 当代码回退导致数据库版本高于当前 migrations 时，会按当前 migrations 重建数据库，并按同名表/同名列自动回填数据
+- 自动备份文件默认保存在 `output/db-backups/`
 
 ### 4. 验证服务
 
@@ -179,10 +188,13 @@ npm --prefix apps/console-web run build
 
 ```bash
 make up             # 启动全部服务
+make up-strict      # 严格校验 schema 后启动
+make db-backup      # 手动备份当前业务数据库
+make db-sync        # 自动同步数据库到当前 migrations
 make down           # 停止并清理容器
 make logs           # 查看日志
 make ps             # 查看容器状态
-make migrate        # 执行全部数据库迁移
+make migrate        # 仅执行向前迁移
 make lint           # Go 静态检查
 make test           # 后端测试
 make quality        # 质量门禁

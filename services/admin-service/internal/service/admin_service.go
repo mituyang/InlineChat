@@ -32,9 +32,16 @@ type AdminService struct {
 }
 
 type CreateSiteInput struct {
-	SiteID string
-	Name   string
-	Domain string
+	SiteID  string
+	Name    string
+	Domain  string
+	Domains []string
+}
+
+type UpdateSiteInput struct {
+	SiteID  string
+	Name    string
+	Domains []string
 }
 
 type CreateAgentInput struct {
@@ -126,9 +133,12 @@ func (s *AdminService) createSite(ctx context.Context, in CreateSiteInput, actor
 		return nil, err
 	}
 	name := strings.TrimSpace(in.Name)
-	domain := strings.TrimSpace(strings.ToLower(in.Domain))
-	if name == "" || domain == "" {
-		return nil, fmt.Errorf("name and domain are required")
+	domains, err := normalizeSiteDomains(in.Domains, in.Domain)
+	if err != nil {
+		return nil, err
+	}
+	if name == "" {
+		return nil, fmt.Errorf("name is required")
 	}
 
 	widgetKey, err := randomHex("wk", 16)
@@ -139,7 +149,7 @@ func (s *AdminService) createSite(ctx context.Context, in CreateSiteInput, actor
 	site := &model.Site{
 		SiteID:    siteID,
 		Name:      name,
-		Domain:    domain,
+		Domains:   domains,
 		WidgetKey: widgetKey,
 		Status:    "active",
 	}
@@ -174,9 +184,9 @@ func (s *AdminService) GetSiteBySiteID(ctx context.Context, siteID string) (*mod
 }
 
 func (s *AdminService) GetSiteByDomain(ctx context.Context, domain string) (*model.Site, error) {
-	normalizedDomain := strings.TrimSpace(strings.ToLower(domain))
-	if normalizedDomain == "" {
-		return nil, fmt.Errorf("domain is required")
+	normalizedDomain, err := normalizeSiteDomain(domain)
+	if err != nil {
+		return nil, err
 	}
 
 	site, err := s.siteRepo.GetByDomain(ctx, normalizedDomain)
@@ -186,6 +196,50 @@ func (s *AdminService) GetSiteByDomain(ctx context.Context, domain string) (*mod
 		}
 		return nil, err
 	}
+	return site, nil
+}
+
+func (s *AdminService) UpdateSite(ctx context.Context, in UpdateSiteInput) (*model.Site, error) {
+	return s.updateSite(ctx, in, ActorContext{})
+}
+
+func (s *AdminService) UpdateSiteWithActor(ctx context.Context, in UpdateSiteInput, actor ActorContext) (*model.Site, error) {
+	return s.updateSite(ctx, in, actor)
+}
+
+func (s *AdminService) updateSite(ctx context.Context, in UpdateSiteInput, actor ActorContext) (*model.Site, error) {
+	siteID := strings.TrimSpace(in.SiteID)
+	if siteID == "" {
+		return nil, fmt.Errorf("site_id is required")
+	}
+
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+
+	domains, err := normalizeSiteDomains(in.Domains, "")
+	if err != nil {
+		return nil, err
+	}
+
+	site, err := s.siteRepo.GetBySiteID(ctx, siteID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	site.Name = name
+	site.Domains = domains
+	if err := s.siteRepo.Save(ctx, site); err != nil {
+		if isDuplicateError(err) {
+			return nil, ErrConflict
+		}
+		return nil, err
+	}
+	_ = s.writeAuditLog(ctx, actor, "site.update", "site", site.SiteID, fmt.Sprintf("更新站点 %s", site.SiteID))
 	return site, nil
 }
 
@@ -598,6 +652,40 @@ func normalizeSiteID(raw string) (string, error) {
 		return "", fmt.Errorf("site_id format is invalid")
 	}
 	return siteID, nil
+}
+
+func normalizeSiteDomains(items []string, fallback string) ([]string, error) {
+	merged := make([]string, 0, len(items)+1)
+	merged = append(merged, items...)
+	if strings.TrimSpace(fallback) != "" {
+		merged = append(merged, fallback)
+	}
+
+	normalized := make([]string, 0, len(merged))
+	seen := make(map[string]struct{}, len(merged))
+	for _, item := range merged {
+		domain, err := normalizeSiteDomain(item)
+		if err != nil {
+			return nil, err
+		}
+		if _, exists := seen[domain]; exists {
+			continue
+		}
+		seen[domain] = struct{}{}
+		normalized = append(normalized, domain)
+	}
+	if len(normalized) == 0 {
+		return nil, fmt.Errorf("at least one domain is required")
+	}
+	return normalized, nil
+}
+
+func normalizeSiteDomain(raw string) (string, error) {
+	domain := strings.TrimSpace(strings.ToLower(raw))
+	if domain == "" {
+		return "", fmt.Errorf("domain is required")
+	}
+	return domain, nil
 }
 
 // normalizeAgentID 固定 4 位数字，便于坐席编号管理。

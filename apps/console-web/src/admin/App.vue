@@ -23,12 +23,14 @@ const selectedAIConfig = ref<SiteAIConfig | null>(null);
 const statusText = ref("正在加载管理后台...");
 const statusError = ref(false);
 const loading = ref(false);
+const savingSite = ref(false);
 const savingAI = ref(false);
 const reloadingAI = ref(false);
+const editingSiteId = ref("");
 const siteForm = ref({
   site_id: "",
   name: "",
-  domain: "",
+  domains_text: "",
 });
 const agentForm = ref({
   agent_id: "",
@@ -40,6 +42,16 @@ const agentForm = ref({
 
 const selectedSite = computed(() => sites.value.find((site) => site.site_id === selectedSiteId.value) ?? null);
 const activeAgentCount = computed(() => agents.value.filter((item) => item.status === "active").length);
+const isEditingSite = computed(() => editingSiteId.value !== "");
+const siteSubmitText = computed(() => {
+  if (savingSite.value) {
+    return isEditingSite.value ? "保存中..." : "创建中...";
+  }
+  return isEditingSite.value ? "保存修改" : "创建站点";
+});
+const sitePanelDescription = computed(() =>
+  isEditingSite.value ? `正在编辑 ${editingSiteId.value}，站点 ID 创建后不可修改。` : "结构化重做站点与 AI 入口，避免一个超长脚本同时维护全部表单。",
+);
 const themeText = computed(() => (theme.value === "dark" ? "亮色模式" : "暗色模式"));
 const userText = computed(() => (me.value ? `${me.value.email}` : "未登录"));
 const roleText = computed(() => {
@@ -86,7 +98,18 @@ async function bootstrap(): Promise<void> {
 
 async function loadSites(): Promise<void> {
   const payload = await apiRequest<{ items: Site[] }>("/api/admin/v1/admin/sites?limit=100", { auth: true });
-  sites.value = payload.items ?? [];
+  sites.value = (payload.items ?? []).map((item) => ({
+    ...item,
+    domains: Array.isArray(item.domains) ? item.domains : [],
+  }));
+  if (editingSiteId.value) {
+    const currentEditingSite = sites.value.find((item) => item.site_id === editingSiteId.value) ?? null;
+    if (currentEditingSite) {
+      applySiteToForm(currentEditingSite);
+    } else {
+      resetSiteForm();
+    }
+  }
   if (!selectedSiteId.value && sites.value.length > 0) {
     selectedSiteId.value = sites.value[0].site_id;
   }
@@ -126,14 +149,35 @@ async function refreshAll(): Promise<void> {
 }
 
 async function createSite(): Promise<void> {
+  savingSite.value = true;
   try {
+    const domains = parseSiteDomains(siteForm.value.domains_text);
+    if (isEditingSite.value) {
+      await apiRequest(`/api/admin/v1/admin/sites/${encodeURIComponent(editingSiteId.value)}`, {
+        method: "PATCH",
+        auth: true,
+        body: {
+          name: siteForm.value.name,
+          domains,
+        },
+      });
+      await loadSites();
+      selectedSiteId.value = editingSiteId.value;
+      setStatus("站点已更新");
+      return;
+    }
+
     const createdSiteID = siteForm.value.site_id.trim();
     await apiRequest("/api/admin/v1/admin/sites", {
       method: "POST",
       auth: true,
-      body: siteForm.value,
+      body: {
+        site_id: siteForm.value.site_id,
+        name: siteForm.value.name,
+        domains,
+      },
     });
-    siteForm.value = { site_id: "", name: "", domain: "" };
+    resetSiteForm();
     await loadSites();
     if (createdSiteID) {
       selectedSiteId.value = createdSiteID;
@@ -141,7 +185,9 @@ async function createSite(): Promise<void> {
     }
     setStatus("站点创建成功");
   } catch (error) {
-    handleError(error, "创建站点失败");
+    handleError(error, isEditingSite.value ? "更新站点失败" : "创建站点失败");
+  } finally {
+    savingSite.value = false;
   }
 }
 
@@ -252,6 +298,53 @@ function handleError(error: unknown, fallback: string): void {
     logout();
   }
 }
+
+function startSiteEdit(site: Site): void {
+  editingSiteId.value = site.site_id;
+  selectedSiteId.value = site.site_id;
+  applySiteToForm(site);
+  setStatus(`正在编辑站点 ${site.site_id}`);
+}
+
+function cancelSiteEdit(): void {
+  resetSiteForm();
+  setStatus("已取消站点编辑");
+}
+
+function applySiteToForm(site: Site): void {
+  siteForm.value = {
+    site_id: site.site_id,
+    name: site.name,
+    domains_text: site.domains.join(", "),
+  };
+}
+
+function resetSiteForm(): void {
+  editingSiteId.value = "";
+  siteForm.value = {
+    site_id: "",
+    name: "",
+    domains_text: "",
+  };
+}
+
+function parseSiteDomains(raw: string): string[] {
+  return Array.from(
+    new Set(
+      raw
+        .split(/[\n,，;；]+/)
+        .map((item) => item.trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function formatSiteDomains(domains: string[]): string {
+  if (!Array.isArray(domains) || domains.length === 0) {
+    return "未绑定域名";
+  }
+  return domains.join("，");
+}
 </script>
 
 <template>
@@ -275,14 +368,15 @@ function handleError(error: unknown, fallback: string): void {
         <MetricCard
           label="AI 当前站点"
           :value="selectedAIConfig?.enabled ? '已启用' : '未启用'"
-          :hint="selectedSite ? `${selectedSite.site_id} · ${selectedSite.domain}` : '未选择站点'"
+          :hint="selectedSite ? `${selectedSite.site_id} · ${formatSiteDomains(selectedSite.domains)}` : '未选择站点'"
         />
       </section>
 
       <section class="workspace admin">
-        <PanelCard title="站点中心" description="结构化重做站点与 AI 入口，避免一个超长脚本同时维护全部表单。">
+        <PanelCard title="站点中心" :description="sitePanelDescription">
           <template #actions>
             <div class="panel-actions">
+              <button v-if="isEditingSite" class="ghost-button" type="button" @click="cancelSiteEdit">取消编辑</button>
               <button class="toolbar-button" type="button" @click="refreshAll">{{ loading ? "刷新中..." : "刷新" }}</button>
             </div>
           </template>
@@ -290,7 +384,13 @@ function handleError(error: unknown, fallback: string): void {
           <form id="createSiteForm" class="form-grid two-column" @submit.prevent="createSite">
             <label class="label-stack">
               <span>站点 ID</span>
-              <input id="siteIdInput" v-model.trim="siteForm.site_id" class="text-field" placeholder="site_shop_main" />
+              <input
+                id="siteIdInput"
+                v-model.trim="siteForm.site_id"
+                class="text-field"
+                :disabled="isEditingSite"
+                placeholder="site_shop_main"
+              />
             </label>
             <label class="label-stack">
               <span>站点名称</span>
@@ -298,11 +398,17 @@ function handleError(error: unknown, fallback: string): void {
             </label>
             <label class="label-stack">
               <span>绑定域名</span>
-              <input id="siteDomainInput" v-model.trim="siteForm.domain" class="text-field" placeholder="shop.example.com" />
+              <textarea
+                id="siteDomainInput"
+                v-model="siteForm.domains_text"
+                class="text-field"
+                rows="3"
+                placeholder="shop.example.com, help.example.com"
+              />
             </label>
             <div class="label-stack">
               <span>操作</span>
-              <button class="primary-button" type="submit">创建站点</button>
+              <button class="primary-button" type="submit" :disabled="savingSite">{{ siteSubmitText }}</button>
             </div>
           </form>
 
@@ -311,18 +417,22 @@ function handleError(error: unknown, fallback: string): void {
               v-for="site in sites"
               :key="site.site_id"
               class="list-card"
-              :class="{ active: site.site_id === selectedSiteId }"
+              :class="{ active: site.site_id === selectedSiteId || site.site_id === editingSiteId }"
             >
               <div class="panel-head">
                 <div>
                   <h4>{{ site.name }}</h4>
                   <div class="meta-row">
                     <span>{{ site.site_id }}</span>
-                    <span>{{ site.domain }}</span>
+                    <span>{{ site.domains.length }} 个域名</span>
+                    <span>{{ formatSiteDomains(site.domains) }}</span>
                     <span>{{ formatTime(site.updated_at) }}</span>
                   </div>
                 </div>
-                <button class="ghost-button" type="button" @click="selectedSiteId = site.site_id">查看 AI</button>
+                <div class="panel-actions">
+                  <button class="ghost-button" type="button" @click="startSiteEdit(site)">编辑</button>
+                  <button class="ghost-button" type="button" @click="selectedSiteId = site.site_id">查看 AI</button>
+                </div>
               </div>
             </article>
             <div v-if="sites.length === 0" class="empty-state">暂无站点数据</div>

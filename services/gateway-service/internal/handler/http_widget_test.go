@@ -24,7 +24,7 @@ func TestServeWidgetAppInjectsWidgetSession(t *testing.T) {
 			getSiteBySiteIDFn: func(_ context.Context, in *adminv1.GetSiteBySiteIDRequest, _ ...grpc.CallOption) (*adminv1.Site, error) {
 				return &adminv1.Site{
 					SiteId:    in.GetSiteId(),
-					Domain:    "shop.example.com",
+					Domains:   []string{"shop.example.com"},
 					WidgetKey: "wk_shop",
 					Status:    "active",
 				}, nil
@@ -62,7 +62,7 @@ func TestServeWidgetAppRejectsMismatchedSource(t *testing.T) {
 			getSiteBySiteIDFn: func(_ context.Context, in *adminv1.GetSiteBySiteIDRequest, _ ...grpc.CallOption) (*adminv1.Site, error) {
 				return &adminv1.Site{
 					SiteId:    in.GetSiteId(),
-					Domain:    "shop.example.com",
+					Domains:   []string{"shop.example.com"},
 					WidgetKey: "wk_shop",
 					Status:    "active",
 				}, nil
@@ -82,6 +82,37 @@ func TestServeWidgetAppRejectsMismatchedSource(t *testing.T) {
 
 	if rr.Code != http.StatusForbidden {
 		t.Fatalf("expected status %d, got %d body=%s", http.StatusForbidden, rr.Code, rr.Body.String())
+	}
+}
+
+func TestServeWidgetAppAllowsAnotherBoundDomain(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	h := NewHTTPHandler(&grpcclient.Clients{
+		Admin: &adminClientStub{
+			getSiteBySiteIDFn: func(_ context.Context, in *adminv1.GetSiteBySiteIDRequest, _ ...grpc.CallOption) (*adminv1.Site, error) {
+				return &adminv1.Site{
+					SiteId:    in.GetSiteId(),
+					Domains:   []string{"shop.example.com", "help.example.com"},
+					WidgetKey: "wk_shop",
+					Status:    "active",
+				}, nil
+			},
+		},
+		Auth: authv1.NewAuthGatewayServiceClient(nil),
+	}, time.Second)
+	h.SetWidgetIndexHTML([]byte(`<!doctype html><html><body><script src="/app/widget/app.js" defer></script></body></html>`))
+
+	r := gin.New()
+	r.GET("/app/widget/", h.ServeWidgetApp)
+
+	req := httptest.NewRequest(http.MethodGet, "/app/widget/?site_id=site_demo&parent_origin=https://help.example.com", nil)
+	req.Header.Set("Referer", "https://help.example.com/docs")
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusOK, rr.Code, rr.Body.String())
 	}
 }
 
@@ -106,7 +137,7 @@ func TestValidateWidgetSessionTokenRejectExpired(t *testing.T) {
 
 func TestValidateWidgetRequestSourceAllowsLocalhostAnyPort(t *testing.T) {
 	parentOrigin, err := validateWidgetRequestSource(
-		"localhost",
+		[]string{"localhost"},
 		"http://localhost:8200",
 		"http://localhost:3000/demo",
 		"",

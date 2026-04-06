@@ -19,12 +19,15 @@ COVERAGE_THRESHOLD_ALL ?= 12
 MIN_COVERED_PACKAGES ?= 10
 MIN_TOTAL_PACKAGES ?= 20
 
-.PHONY: help ensure-env config schema-check prepare-db up up-fg down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover env-lint quality e2e-ui verify-all proto proto-check build-local image-build smoke integration full-regression mvp-release
+.PHONY: help ensure-env ensure-mysql-ready config db-backup db-sync schema-check prepare-db up up-fg up-strict down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover env-lint quality e2e-ui verify-all proto proto-check build-local image-build smoke integration full-regression mvp-release
 
 help:
 	@echo "可用命令:"
-	@echo "  make up             使用 .env 后台启动全部服务"
-	@echo "  make prepare-db     先执行迁移，再校验数据库结构"
+	@echo "  make up             自动同步数据库到当前 migrations 后后台启动全部服务"
+	@echo "  make up-strict      自动同步数据库并执行 schema-check 后后台启动全部服务"
+	@echo "  make prepare-db     自动同步数据库，再校验数据库结构"
+	@echo "  make db-backup      手动备份当前业务数据库"
+	@echo "  make db-sync        自动判断数据库升级或按当前 migrations 重建"
 	@echo "  make build-local    本地编译全部服务二进制（Linux）"
 	@echo "  make image-build    基于本地二进制构建 Docker 镜像"
 	@echo "  make down           停止并删除容器"
@@ -34,8 +37,8 @@ help:
 	@echo "  make monitoring-down 停止监控组件"
 	@echo "  make monitoring-logs 查看监控组件日志"
 	@echo "  make config         校验 docker compose 配置"
-	@echo "  make schema-check   启动前校验当前数据库结构是否与仓库 migrations 一致"
-	@echo "  make migrate        执行全部迁移任务"
+	@echo "  make schema-check   严格校验当前数据库结构是否与仓库 migrations 一致"
+	@echo "  make migrate        仅执行向前迁移（不处理代码回退）"
 	@echo "  make lint           执行格式与静态检查（fmt-check + vet）"
 	@echo "  make test           运行后端 Go 测试"
 	@echo "  make test-race      运行后端 Go race 测试"
@@ -62,6 +65,21 @@ config:
 	docker compose -f $(COMPOSE_FILE) --env-file .env.example config >/tmp/inlinechat-compose-check.txt
 	@echo "compose 配置校验通过"
 
+db-backup: ensure-mysql-ready
+	BACKUP_REASON=manual ENV_FILE=$(ENV_FILE) COMPOSE_FILE=$(COMPOSE_FILE) ./scripts/db-backup.sh
+
+ensure-mysql-ready: ensure-env
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d mysql
+	@attempt=0; \
+	until docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) exec -T mysql sh -lc 'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysqladmin ping -h localhost -uroot --silent' >/dev/null 2>&1; do \
+		attempt=$$((attempt + 1)); \
+		if [ $$attempt -ge 30 ]; then \
+			echo "mysql 未在预期时间内进入可用状态"; \
+			exit 1; \
+		fi; \
+		sleep 2; \
+	done
+
 build-local:
 	@mkdir -p $(GO_BUILD_CACHE) $(GO_MOD_CACHE)
 	@for svc in $(GO_SERVICE_MODULES); do \
@@ -80,26 +98,22 @@ build-local:
 image-build: ensure-env
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) build
 
-schema-check: ensure-env
-	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d mysql
-	@attempt=0; \
-	until docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) exec -T mysql sh -lc 'MYSQL_PWD="$$MYSQL_ROOT_PASSWORD" mysqladmin ping -h localhost -uroot --silent' >/dev/null 2>&1; do \
-		attempt=$$((attempt + 1)); \
-		if [ $$attempt -ge 30 ]; then \
-			echo "mysql 未在预期时间内进入可用状态"; \
-			exit 1; \
-		fi; \
-		sleep 2; \
-	done
+db-sync: ensure-mysql-ready
+	ENV_FILE=$(ENV_FILE) COMPOSE_FILE=$(COMPOSE_FILE) ./scripts/db-sync.sh
+
+schema-check: ensure-mysql-ready
 	ENV_FILE=$(ENV_FILE) COMPOSE_FILE=$(COMPOSE_FILE) ./scripts/schema-drift-check.sh
 
-prepare-db: ensure-env migrate schema-check
+prepare-db: ensure-env db-sync schema-check
 
-up: prepare-db build-local image-build
+up: ensure-env db-sync build-local image-build
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d
 
-up-fg: prepare-db build-local image-build
+up-fg: ensure-env db-sync build-local image-build
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up
+
+up-strict: ensure-env db-sync schema-check build-local image-build
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) up -d
 
 down: ensure-env
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) down
@@ -123,17 +137,30 @@ monitoring-down: ensure-env
 monitoring-logs: ensure-env
 	docker compose -f $(COMPOSE_FILE) -f $(MONITORING_COMPOSE_FILE) --env-file $(ENV_FILE) logs -f --tail=200 prometheus alertmanager grafana blackbox-exporter
 
-migrate: ensure-env migrate-chat migrate-auth migrate-admin
+migrate: ensure-env ensure-mysql-ready
+	BACKUP_REASON=migrate-up ENV_FILE=$(ENV_FILE) COMPOSE_FILE=$(COMPOSE_FILE) ./scripts/db-backup.sh
+	@$(MAKE) SKIP_DB_BACKUP=1 migrate-chat
+	@$(MAKE) SKIP_DB_BACKUP=1 migrate-auth
+	@$(MAKE) SKIP_DB_BACKUP=1 migrate-admin
 	@echo "迁移已执行完成"
 
 migrate-chat: ensure-env
-	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) run --rm chat-migrate
+	@if [ "$(SKIP_DB_BACKUP)" != "1" ]; then \
+		BACKUP_REASON=migrate-chat ENV_FILE=$(ENV_FILE) COMPOSE_FILE=$(COMPOSE_FILE) ./scripts/db-backup.sh; \
+	fi
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) run --rm --no-deps -T chat-migrate
 
 migrate-auth: ensure-env
-	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) run --rm auth-migrate
+	@if [ "$(SKIP_DB_BACKUP)" != "1" ]; then \
+		BACKUP_REASON=migrate-auth ENV_FILE=$(ENV_FILE) COMPOSE_FILE=$(COMPOSE_FILE) ./scripts/db-backup.sh; \
+	fi
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) run --rm --no-deps -T auth-migrate
 
 migrate-admin: ensure-env
-	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) run --rm admin-migrate
+	@if [ "$(SKIP_DB_BACKUP)" != "1" ]; then \
+		BACKUP_REASON=migrate-admin ENV_FILE=$(ENV_FILE) COMPOSE_FILE=$(COMPOSE_FILE) ./scripts/db-backup.sh; \
+	fi
+	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) run --rm --no-deps -T admin-migrate
 
 fmt:
 	@for svc in $(GO_TEST_MODULES); do \

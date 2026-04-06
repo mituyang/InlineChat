@@ -65,3 +65,15 @@ func TestGetSiteBySiteIDValidateRequest(t *testing.T) {
 		t.Fatalf("expected invalid argument, got: %v", err)
 	}
 }
+
+func TestUpdateSiteRequireAuthorization(t *testing.T) {
+	s := New(nil, "secret", "", "issuer")
+	_, err := s.UpdateSite(context.Background(), &adminv1.UpdateSiteRequest{})
+	if err == nil {
+		t.Fatal("expected auth error, got nil")
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.Unauthenticated {
+		t.Fatalf("expected unauthenticated, got: %v", err)
+	}
+}

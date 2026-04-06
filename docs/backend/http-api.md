@@ -58,6 +58,7 @@
 | 方法 | 路径 | 鉴权 | 说明 |
 | --- | --- | --- | --- |
 | `POST` | `/api/admin/v1/admin/sites` | `admin/super_admin` | 创建站点 |
+| `PATCH` | `/api/admin/v1/admin/sites/:site_id` | `admin/super_admin` | 更新站点名称与绑定域名 |
 | `GET` | `/api/admin/v1/admin/sites` | `admin/super_admin` | 站点列表 |
 | `PATCH` | `/api/admin/v1/admin/sites/:site_id/status` | `admin/super_admin`（下游可收紧） | 更新站点状态 |
 | `POST` | `/api/admin/v1/admin/sites/:site_id/rotate-widget-key` | `admin/super_admin`（下游可收紧） | 轮换站点 `widget_key` |

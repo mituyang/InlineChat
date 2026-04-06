@@ -24,6 +24,7 @@ func (r *fakeSiteRepository) Create(_ context.Context, site *model.Site) error {
 	}
 	r.createCalls++
 	copySite := *site
+	copySite.Domains = append([]string(nil), site.Domains...)
 	r.items = append(r.items, copySite)
 	return nil
 }
@@ -31,6 +32,9 @@ func (r *fakeSiteRepository) Create(_ context.Context, site *model.Site) error {
 func (r *fakeSiteRepository) List(_ context.Context, _ int, _ int) ([]model.Site, error) {
 	out := make([]model.Site, len(r.items))
 	copy(out, r.items)
+	for i := range out {
+		out[i].Domains = append([]string(nil), r.items[i].Domains...)
+	}
 	return out, nil
 }
 
@@ -39,10 +43,13 @@ func (r *fakeSiteRepository) Save(_ context.Context, site *model.Site) error {
 	for i := range r.items {
 		if r.items[i].SiteID == site.SiteID {
 			r.items[i] = *site
+			r.items[i].Domains = append([]string(nil), site.Domains...)
 			return nil
 		}
 	}
-	r.items = append(r.items, *site)
+	copySite := *site
+	copySite.Domains = append([]string(nil), site.Domains...)
+	r.items = append(r.items, copySite)
 	return nil
 }
 
@@ -50,6 +57,7 @@ func (r *fakeSiteRepository) GetBySiteID(_ context.Context, siteID string) (*mod
 	for i := range r.items {
 		if r.items[i].SiteID == siteID {
 			out := r.items[i]
+			out.Domains = append([]string(nil), r.items[i].Domains...)
 			return &out, nil
 		}
 	}
@@ -58,8 +66,12 @@ func (r *fakeSiteRepository) GetBySiteID(_ context.Context, siteID string) (*mod
 
 func (r *fakeSiteRepository) GetByDomain(_ context.Context, domain string) (*model.Site, error) {
 	for i := range r.items {
-		if r.items[i].Domain == domain {
+		for _, itemDomain := range r.items[i].Domains {
+			if itemDomain != domain {
+				continue
+			}
 			out := r.items[i]
+			out.Domains = append([]string(nil), r.items[i].Domains...)
 			return &out, nil
 		}
 	}
@@ -384,9 +396,9 @@ func TestCreateSiteNormalizeDomainAndGenerateKeys(t *testing.T) {
 	svc := newTestAdminService(siteRepo, &fakeAgentRepository{})
 
 	site, err := svc.CreateSite(context.Background(), CreateSiteInput{
-		SiteID: "Shop_Main",
-		Name:   " 商城站点 ",
-		Domain: " Shop.Example.COM ",
+		SiteID:  "Shop_Main",
+		Name:    " 商城站点 ",
+		Domains: []string{" Shop.Example.COM ", "help.example.com", "shop.example.com"},
 	})
 	if err != nil {
 		t.Fatalf("CreateSite failed: %v", err)
@@ -398,8 +410,8 @@ func TestCreateSiteNormalizeDomainAndGenerateKeys(t *testing.T) {
 	if site.Name != "商城站点" {
 		t.Fatalf("unexpected normalized name: %q", site.Name)
 	}
-	if site.Domain != "shop.example.com" {
-		t.Fatalf("unexpected normalized domain: %q", site.Domain)
+	if len(site.Domains) != 2 || site.Domains[0] != "shop.example.com" || site.Domains[1] != "help.example.com" {
+		t.Fatalf("unexpected normalized domains: %#v", site.Domains)
 	}
 	if site.SiteID != "shop_main" {
 		t.Fatalf("unexpected site_id: %s", site.SiteID)
@@ -414,9 +426,9 @@ func TestCreateSiteRequireSiteID(t *testing.T) {
 	svc := newTestAdminService(siteRepo, &fakeAgentRepository{})
 
 	_, err := svc.CreateSite(context.Background(), CreateSiteInput{
-		SiteID: "",
-		Name:   "商城站点",
-		Domain: "shop.example.com",
+		SiteID:  "",
+		Name:    "商城站点",
+		Domains: []string{"shop.example.com"},
 	})
 	if err == nil {
 		t.Fatalf("expected error, got nil")
@@ -455,7 +467,7 @@ func TestGetSiteBySiteIDNotFound(t *testing.T) {
 func TestGetSiteByDomain(t *testing.T) {
 	siteRepo := &fakeSiteRepository{
 		items: []model.Site{
-			{SiteID: "site_abc", Domain: "shop.example.com", Name: "测试站点"},
+			{SiteID: "site_abc", Domains: []string{"shop.example.com", "help.example.com"}, Name: "测试站点"},
 		},
 	}
 	svc := newTestAdminService(siteRepo, &fakeAgentRepository{})
@@ -464,8 +476,8 @@ func TestGetSiteByDomain(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSiteByDomain failed: %v", err)
 	}
-	if site.Domain != "shop.example.com" {
-		t.Fatalf("unexpected domain: %s", site.Domain)
+	if len(site.Domains) != 2 || site.Domains[0] != "shop.example.com" {
+		t.Fatalf("unexpected domains: %#v", site.Domains)
 	}
 }
 
@@ -475,6 +487,33 @@ func TestGetSiteByDomainNotFound(t *testing.T) {
 	_, err := svc.GetSiteByDomain(context.Background(), "missing.example.com")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestUpdateSite(t *testing.T) {
+	siteRepo := &fakeSiteRepository{
+		items: []model.Site{
+			{SiteID: "site_demo", Name: "旧名称", Domains: []string{"old.example.com"}, Status: "active", WidgetKey: "wk_demo"},
+		},
+	}
+	svc := newTestAdminService(siteRepo, &fakeAgentRepository{})
+
+	updated, err := svc.UpdateSite(context.Background(), UpdateSiteInput{
+		SiteID:  "site_demo",
+		Name:    "新名称",
+		Domains: []string{"shop.example.com", "help.example.com"},
+	})
+	if err != nil {
+		t.Fatalf("UpdateSite failed: %v", err)
+	}
+	if updated.Name != "新名称" {
+		t.Fatalf("unexpected name: %s", updated.Name)
+	}
+	if len(updated.Domains) != 2 || updated.Domains[0] != "shop.example.com" || updated.Domains[1] != "help.example.com" {
+		t.Fatalf("unexpected domains: %#v", updated.Domains)
+	}
+	if siteRepo.saveCalls != 1 {
+		t.Fatalf("expected saveCalls=1, got %d", siteRepo.saveCalls)
 	}
 }
 

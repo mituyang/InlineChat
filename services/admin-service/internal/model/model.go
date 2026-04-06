@@ -3,14 +3,15 @@ package model
 import "time"
 
 type Site struct {
-	ID        uint64    `gorm:"primaryKey" json:"id"`
-	SiteID    string    `gorm:"size:64;not null;uniqueIndex" json:"site_id"`
-	Name      string    `gorm:"size:128;not null" json:"name"`
-	Domain    string    `gorm:"size:255;not null;index" json:"domain"`
-	WidgetKey string    `gorm:"size:128;not null;uniqueIndex" json:"widget_key"`
-	Status    string    `gorm:"size:32;not null;index" json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          uint64       `gorm:"primaryKey" json:"id"`
+	SiteID      string       `gorm:"size:64;not null;uniqueIndex" json:"site_id"`
+	Name        string       `gorm:"size:128;not null" json:"name"`
+	WidgetKey   string       `gorm:"size:128;not null;uniqueIndex" json:"widget_key"`
+	Status      string       `gorm:"size:32;not null;index" json:"status"`
+	CreatedAt   time.Time    `json:"created_at"`
+	UpdatedAt   time.Time    `json:"updated_at"`
+	DomainItems []SiteDomain `gorm:"foreignKey:SiteID;references:SiteID" json:"-"`
+	Domains     []string     `gorm:"-" json:"domains"`
 }
 
 type SiteAIConfig struct {
@@ -23,6 +24,18 @@ type SiteAIConfig struct {
 
 func (SiteAIConfig) TableName() string {
 	return "site_ai_configs"
+}
+
+type SiteDomain struct {
+	ID        uint64    `gorm:"primaryKey" json:"id"`
+	SiteID    string    `gorm:"size:64;not null;index" json:"site_id"`
+	Domain    string    `gorm:"size:255;not null;uniqueIndex" json:"domain"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (SiteDomain) TableName() string {
+	return "site_domains"
 }
 
 type Agent struct {

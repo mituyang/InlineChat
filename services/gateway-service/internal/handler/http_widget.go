@@ -59,7 +59,7 @@ func (h *HTTPHandler) ServeWidgetApp(c *gin.Context) {
 		return
 	}
 
-	parentOrigin, err := validateWidgetRequestSource(site.GetDomain(), c.Query("parent_origin"), c.GetHeader("Referer"), c.GetHeader("Origin"))
+	parentOrigin, err := validateWidgetRequestSource(allowedSiteDomains(site), c.Query("parent_origin"), c.GetHeader("Referer"), c.GetHeader("Origin"))
 	if err != nil {
 		c.String(http.StatusForbidden, err.Error())
 		return
@@ -97,7 +97,7 @@ func (h *HTTPHandler) requireWidgetSession(c *gin.Context, site *adminv1.Site) e
 		abortForbidden(c, "invalid widget session")
 		return status.Error(codes.PermissionDenied, "invalid widget session")
 	}
-	if claims.SiteDomain != normalizeHostLike(site.GetDomain()) {
+	if !matchesAnySiteDomain(allowedSiteDomains(site), claims.SiteDomain) {
 		abortForbidden(c, "invalid widget session")
 		return status.Error(codes.PermissionDenied, "invalid widget session")
 	}
@@ -106,11 +106,15 @@ func (h *HTTPHandler) requireWidgetSession(c *gin.Context, site *adminv1.Site) e
 
 func (h *HTTPHandler) issueWidgetSession(site *adminv1.Site, parentOrigin string) (string, widgetSessionClaims, error) {
 	now := h.now().UTC()
+	sessionDomain := normalizeHostLike(parentOrigin)
+	if sessionDomain == "" {
+		return "", widgetSessionClaims{}, fmt.Errorf("parent_origin is required")
+	}
 	claims := widgetSessionClaims{
 		SiteID:       strings.TrimSpace(site.GetSiteId()),
-		SiteDomain:   normalizeHostLike(site.GetDomain()),
+		SiteDomain:   sessionDomain,
 		ParentOrigin: normalizeOrigin(parentOrigin),
-		StorageScope: buildWidgetStorageScope(strings.TrimSpace(site.GetSiteId()), site.GetDomain()),
+		StorageScope: buildWidgetStorageScope(strings.TrimSpace(site.GetSiteId()), sessionDomain),
 		IssuedAt:     now.Unix(),
 		ExpiresAt:    now.Add(widgetSessionTTL).Unix(),
 	}
@@ -121,12 +125,12 @@ func (h *HTTPHandler) issueWidgetSession(site *adminv1.Site, parentOrigin string
 	return token, claims, nil
 }
 
-func validateWidgetRequestSource(siteDomain string, parentOrigin string, referer string, origin string) (string, error) {
+func validateWidgetRequestSource(siteDomains []string, parentOrigin string, referer string, origin string) (string, error) {
 	normalizedParentOrigin := normalizeOrigin(parentOrigin)
 	if normalizedParentOrigin == "" {
 		return "", fmt.Errorf("parent_origin is required")
 	}
-	if !matchesSiteDomain(siteDomain, normalizedParentOrigin) {
+	if !matchesAnySiteDomain(siteDomains, normalizedParentOrigin) {
 		return "", fmt.Errorf("parent origin is not allowed")
 	}
 
@@ -134,7 +138,7 @@ func validateWidgetRequestSource(siteDomain string, parentOrigin string, referer
 		if strings.TrimSpace(candidate) == "" {
 			continue
 		}
-		if matchesSiteDomain(siteDomain, candidate) {
+		if matchesSiteDomain(normalizedParentOrigin, candidate) {
 			return normalizedParentOrigin, nil
 		}
 		return "", fmt.Errorf("widget source is not allowed")
@@ -253,6 +257,39 @@ func matchesSiteDomain(siteDomain string, raw string) bool {
 	}
 	// 本地开发时允许 localhost 跨端口调试，避免每次切换 dev server 都改站点配置。
 	return isLocalhostHost(normalizedSiteDomain) && isLocalhostHost(normalizedHost)
+}
+
+func matchesAnySiteDomain(siteDomains []string, raw string) bool {
+	for _, item := range siteDomains {
+		if matchesSiteDomain(item, raw) {
+			return true
+		}
+	}
+	return false
+}
+
+func allowedSiteDomains(site *adminv1.Site) []string {
+	if site == nil {
+		return nil
+	}
+	raw := site.GetDomains()
+	if len(raw) == 0 && strings.TrimSpace(site.GetDomain()) != "" {
+		raw = []string{site.GetDomain()}
+	}
+	out := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, item := range raw {
+		normalized := normalizeHostLike(item)
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
 }
 
 func normalizeOrigin(raw string) string {

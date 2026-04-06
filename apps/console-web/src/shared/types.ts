@@ -33,7 +33,7 @@ export interface Site {
   id: number;
   site_id: string;
   name: string;
-  domain: string;
+  domains: string[];
   widget_key: string;
   status: "active" | "disabled";
   created_at: string;

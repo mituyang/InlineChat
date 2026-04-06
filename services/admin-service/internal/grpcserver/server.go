@@ -37,14 +37,36 @@ func (s *AdminGatewayServer) CreateSite(ctx context.Context, req *adminv1.Create
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(req.GetSiteId()) == "" || strings.TrimSpace(req.GetName()) == "" || strings.TrimSpace(req.GetDomain()) == "" {
-		return nil, status.Error(codes.InvalidArgument, "site_id name and domain are required")
+	if strings.TrimSpace(req.GetSiteId()) == "" || strings.TrimSpace(req.GetName()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "site_id and name are required")
 	}
 
 	site, err := s.adminService.CreateSiteWithActor(ctx, service.CreateSiteInput{
-		SiteID: req.GetSiteId(),
-		Name:   req.GetName(),
-		Domain: req.GetDomain(),
+		SiteID:  req.GetSiteId(),
+		Name:    req.GetName(),
+		Domain:  req.GetDomain(),
+		Domains: req.GetDomains(),
+	}, toActorContext(claims))
+	if err != nil {
+		return nil, mapError(err)
+	}
+
+	return toSitePB(site), nil
+}
+
+func (s *AdminGatewayServer) UpdateSite(ctx context.Context, req *adminv1.UpdateSiteRequest) (*adminv1.Site, error) {
+	claims, err := s.requireAdmin(ctx, req.GetAuthorization())
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(req.GetSiteId()) == "" || strings.TrimSpace(req.GetName()) == "" {
+		return nil, status.Error(codes.InvalidArgument, "site_id and name are required")
+	}
+
+	site, err := s.adminService.UpdateSiteWithActor(ctx, service.UpdateSiteInput{
+		SiteID:  req.GetSiteId(),
+		Name:    req.GetName(),
+		Domains: req.GetDomains(),
 	}, toActorContext(claims))
 	if err != nil {
 		return nil, mapError(err)
@@ -410,12 +432,20 @@ func toSitePB(site *model.Site) *adminv1.Site {
 		Id:        site.ID,
 		SiteId:    site.SiteID,
 		Name:      site.Name,
-		Domain:    site.Domain,
+		Domain:    firstDomain(site.Domains),
+		Domains:   append([]string(nil), site.Domains...),
 		WidgetKey: site.WidgetKey,
 		Status:    site.Status,
 		CreatedAt: site.CreatedAt.Format(time.RFC3339Nano),
 		UpdatedAt: site.UpdatedAt.Format(time.RFC3339Nano),
 	}
+}
+
+func firstDomain(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	return items[0]
 }
 
 func toSiteAIConfigPB(config *model.SiteAIConfig) *adminv1.SiteAIConfig {

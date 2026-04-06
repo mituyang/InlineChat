@@ -344,6 +344,12 @@ func (c *dynamicAdminClient) CreateSite(ctx context.Context, in *adminv1.CreateS
 	})
 }
 
+func (c *dynamicAdminClient) UpdateSite(ctx context.Context, in *adminv1.UpdateSiteRequest, opts ...grpc.CallOption) (*adminv1.Site, error) {
+	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.Site, error) {
+		return client.UpdateSite(ctx, in, opts...)
+	})
+}
+
 func (c *dynamicAdminClient) ListSites(ctx context.Context, in *adminv1.ListSitesRequest, opts ...grpc.CallOption) (*adminv1.ListSitesResponse, error) {
 	return invokeWithRetry(ctx, c.conn, adminv1.NewAdminGatewayServiceClient, func(client adminv1.AdminGatewayServiceClient) (*adminv1.ListSitesResponse, error) {
 		return client.ListSites(ctx, in, opts...)

@@ -472,6 +472,44 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /api/admin/v1/admin/sites/{site_id}:
+    patch:
+      tags: [Admin]
+      summary: 更新站点信息
+      security:
+        - BearerAuth: []
+      parameters:
+        - in: path
+          name: site_id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSiteRequest"
+      responses:
+        "200":
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Site"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /api/admin/v1/admin/sites/{site_id}/status:
     patch:
       tags: [Admin]
@@ -1075,7 +1113,7 @@ components:
 
     CreateSiteRequest:
       type: object
-      required: [site_id, name, domain]
+      required: [site_id, name, domains]
       properties:
         site_id:
           type: string
@@ -1085,14 +1123,33 @@ components:
           type: string
           minLength: 1
           maxLength: 128
-        domain:
+        domains:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 3
+            maxLength: 255
+
+    UpdateSiteRequest:
+      type: object
+      required: [name, domains]
+      properties:
+        name:
           type: string
-          minLength: 3
-          maxLength: 255
+          minLength: 1
+          maxLength: 128
+        domains:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            minLength: 3
+            maxLength: 255
 
     Site:
       type: object
-      required: [id, site_id, name, domain, widget_key, status, created_at, updated_at]
+      required: [id, site_id, name, domains, widget_key, status, created_at, updated_at]
       properties:
         id:
           type: integer
@@ -1101,8 +1158,10 @@ components:
           type: string
         name:
           type: string
-        domain:
-          type: string
+        domains:
+          type: array
+          items:
+            type: string
         widget_key:
           type: string
         status:

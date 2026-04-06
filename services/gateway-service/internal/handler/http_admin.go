@@ -14,6 +14,7 @@ import (
 func (h *HTTPHandler) registerAdminRoutes(r *gin.Engine) {
 	adminV1 := r.Group("/api/admin/v1/admin")
 	adminV1.POST("/sites", h.createSite)
+	adminV1.PATCH("/sites/:site_id", h.updateSite)
 	adminV1.GET("/sites", h.listSites)
 	adminV1.PATCH("/sites/:site_id/status", h.updateSiteStatus)
 	adminV1.POST("/sites/:site_id/rotate-widget-key", h.rotateSiteWidgetKey)
@@ -29,9 +30,15 @@ func (h *HTTPHandler) registerAdminRoutes(r *gin.Engine) {
 }
 
 type createSiteRequest struct {
-	SiteID string `json:"site_id" binding:"required,min=4,max=64"`
-	Name   string `json:"name" binding:"required,min=1,max=128"`
-	Domain string `json:"domain" binding:"required,min=3,max=255"`
+	SiteID  string   `json:"site_id" binding:"required,min=4,max=64"`
+	Name    string   `json:"name" binding:"required,min=1,max=128"`
+	Domain  string   `json:"domain"`
+	Domains []string `json:"domains"`
+}
+
+type updateSiteRequest struct {
+	Name    string   `json:"name" binding:"required,min=1,max=128"`
+	Domains []string `json:"domains"`
 }
 
 func (h *HTTPHandler) createSite(c *gin.Context) {
@@ -57,6 +64,7 @@ func (h *HTTPHandler) createSite(c *gin.Context) {
 		SiteId:        req.SiteID,
 		Name:          req.Name,
 		Domain:        req.Domain,
+		Domains:       req.Domains,
 	})
 	if err != nil {
 		handleGRPCError(c, err)
@@ -64,6 +72,38 @@ func (h *HTTPHandler) createSite(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusCreated, siteToJSON(resp))
+}
+
+func (h *HTTPHandler) updateSite(c *gin.Context) {
+	var req updateSiteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		abortBadRequest(c, err.Error())
+		return
+	}
+	actor, actorErr := h.requireAdminActor(c)
+	if actorErr != nil {
+		handleGRPCError(c, actorErr)
+		return
+	}
+	if !h.applyAdminRateLimit(c, "update_site", actor.GetAgentId()) {
+		return
+	}
+
+	ctx, cancel := h.newCallContext(c)
+	defer cancel()
+
+	resp, err := h.clients.Admin.UpdateSite(ctx, &adminv1.UpdateSiteRequest{
+		Authorization: c.GetHeader("Authorization"),
+		SiteId:        c.Param("site_id"),
+		Name:          req.Name,
+		Domains:       req.Domains,
+	})
+	if err != nil {
+		handleGRPCError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, siteToJSON(resp))
 }
 
 func (h *HTTPHandler) listSites(c *gin.Context) {

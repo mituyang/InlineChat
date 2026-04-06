@@ -279,3 +279,49 @@ func TestCreateConversationRejectMismatchedWidgetSession(t *testing.T) {
 		t.Fatalf("chat create should not be called, got %d", chatCalls)
 	}
 }
+
+func TestCreateConversationAcceptLocalhostWidgetSessionAcrossPort(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	chatCalls := 0
+	h := NewHTTPHandler(&grpcclient.Clients{
+		Admin: &adminClientStub{
+			getSiteBySiteIDFn: func(_ context.Context, _ *adminv1.GetSiteBySiteIDRequest, _ ...grpc.CallOption) (*adminv1.Site, error) {
+				return &adminv1.Site{SiteId: "site_demo", Domains: []string{"localhost"}, WidgetKey: "wk_demo", Status: "active"}, nil
+			},
+		},
+		Chat: &chatClientStub{
+			createConversationFn: func(_ context.Context, _ *chatv1.CreateConversationRequest, _ ...grpc.CallOption) (*chatv1.Conversation, error) {
+				chatCalls++
+				return &chatv1.Conversation{Id: 1, Status: "open"}, nil
+			},
+		},
+		Auth: authv1.NewAuthGatewayServiceClient(nil),
+	}, time.Second)
+
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	token, _, err := h.issueWidgetSession(&adminv1.Site{
+		SiteId:    "site_demo",
+		Domains:   []string{"localhost"},
+		WidgetKey: "wk_demo",
+	}, "http://localhost:8200")
+	if err != nil {
+		t.Fatalf("issue widget session failed: %v", err)
+	}
+
+	body := []byte(`{"site_id":"site_demo","visitor_token":"visitor_xxx"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/chat/v1/conversations", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set(widgetSessionHeader, token)
+	rr := httptest.NewRecorder()
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d body=%s", http.StatusCreated, rr.Code, rr.Body.String())
+	}
+	if chatCalls != 1 {
+		t.Fatalf("expected chat create called once, got %d", chatCalls)
+	}
+}

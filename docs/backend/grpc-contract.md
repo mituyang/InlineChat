@@ -78,7 +78,7 @@
 ## AdminGatewayService
 ### 方法列表
 - 站点：
-  - `CreateSite` / `ListSites` / `GetSiteBySiteID` / `GetSiteByDomain`
+  - `CreateSite` / `UpdateSite` / `ListSites` / `GetSiteBySiteID` / `GetSiteByDomain`
   - `UpdateSiteStatus` / `RotateSiteWidgetKey`
 - 客服：
   - `CreateAgent` / `ListAgents`

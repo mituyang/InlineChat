@@ -23,6 +23,7 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type AdminGatewayServiceClient interface {
 	CreateSite(ctx context.Context, in *CreateSiteRequest, opts ...grpc.CallOption) (*Site, error)
+	UpdateSite(ctx context.Context, in *UpdateSiteRequest, opts ...grpc.CallOption) (*Site, error)
 	ListSites(ctx context.Context, in *ListSitesRequest, opts ...grpc.CallOption) (*ListSitesResponse, error)
 	GetSiteBySiteID(ctx context.Context, in *GetSiteBySiteIDRequest, opts ...grpc.CallOption) (*Site, error)
 	GetSiteByDomain(ctx context.Context, in *GetSiteByDomainRequest, opts ...grpc.CallOption) (*Site, error)
@@ -50,6 +51,15 @@ func NewAdminGatewayServiceClient(cc grpc.ClientConnInterface) AdminGatewayServi
 func (c *adminGatewayServiceClient) CreateSite(ctx context.Context, in *CreateSiteRequest, opts ...grpc.CallOption) (*Site, error) {
 	out := new(Site)
 	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/CreateSite", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *adminGatewayServiceClient) UpdateSite(ctx context.Context, in *UpdateSiteRequest, opts ...grpc.CallOption) (*Site, error) {
+	out := new(Site)
+	err := c.cc.Invoke(ctx, "/inlinechat.admin.v1.AdminGatewayService/UpdateSite", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +197,7 @@ func (c *adminGatewayServiceClient) ListAuditLogs(ctx context.Context, in *ListA
 // for forward compatibility
 type AdminGatewayServiceServer interface {
 	CreateSite(context.Context, *CreateSiteRequest) (*Site, error)
+	UpdateSite(context.Context, *UpdateSiteRequest) (*Site, error)
 	ListSites(context.Context, *ListSitesRequest) (*ListSitesResponse, error)
 	GetSiteBySiteID(context.Context, *GetSiteBySiteIDRequest) (*Site, error)
 	GetSiteByDomain(context.Context, *GetSiteByDomainRequest) (*Site, error)
@@ -210,6 +221,9 @@ type UnimplementedAdminGatewayServiceServer struct {
 
 func (UnimplementedAdminGatewayServiceServer) CreateSite(context.Context, *CreateSiteRequest) (*Site, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateSite not implemented")
+}
+func (UnimplementedAdminGatewayServiceServer) UpdateSite(context.Context, *UpdateSiteRequest) (*Site, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateSite not implemented")
 }
 func (UnimplementedAdminGatewayServiceServer) ListSites(context.Context, *ListSitesRequest) (*ListSitesResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ListSites not implemented")
@@ -280,6 +294,24 @@ func _AdminGatewayService_CreateSite_Handler(srv interface{}, ctx context.Contex
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(AdminGatewayServiceServer).CreateSite(ctx, req.(*CreateSiteRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _AdminGatewayService_UpdateSite_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateSiteRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AdminGatewayServiceServer).UpdateSite(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/inlinechat.admin.v1.AdminGatewayService/UpdateSite",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AdminGatewayServiceServer).UpdateSite(ctx, req.(*UpdateSiteRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -546,6 +578,10 @@ var AdminGatewayService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CreateSite",
 			Handler:    _AdminGatewayService_CreateSite_Handler,
+		},
+		{
+			MethodName: "UpdateSite",
+			Handler:    _AdminGatewayService_UpdateSite_Handler,
 		},
 		{
 			MethodName: "ListSites",
