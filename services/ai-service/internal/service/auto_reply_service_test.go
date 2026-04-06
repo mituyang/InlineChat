@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"inlinechat/services/ai-service/internal/chatclient"
 	"inlinechat/services/ai-service/internal/knowledgebase"
 )
 
@@ -303,11 +304,86 @@ func TestParsePriceThresholdQuery(t *testing.T) {
 }
 
 func TestBuildPromptBody(t *testing.T) {
-	got := buildPromptBody("[1] 价格体系\n暮岚针织四件套 ¥399", "补充结构化事实如下：\n主推产品价格表：\n- 暮岚针织四件套：399元", "最昂贵产品是啥")
-	for _, part := range []string{"/no_think", "知识片段如下", "补充结构化事实如下", "用户问题：最昂贵产品是啥"} {
+	got := buildPromptBody("用户：这款能送杭州吗\nAI客服：可以的，我帮您看下时效。", "[1] 价格体系\n暮岚针织四件套 ¥399", "补充结构化事实如下：\n主推产品价格表：\n- 暮岚针织四件套：399元", "最昂贵产品是啥")
+	for _, part := range []string{"/no_think", "最近对话如下", "知识片段如下", "补充结构化事实如下", "用户问题：最昂贵产品是啥"} {
 		if !strings.Contains(got, part) {
 			t.Fatalf("buildPromptBody() = %q, want contains %q", got, part)
 		}
+	}
+}
+
+func TestBuildConversationHistory(t *testing.T) {
+	got := buildConversationHistory([]*chatclient.Message{
+		{ID: 7, SenderType: "visitor", Content: "那多久发货"},
+		{ID: 6, SenderType: "ai", Content: "杭州仓现货一般48小时内发出。"},
+		{ID: 5, SenderType: "visitor", Content: "能快一点吗"},
+		{ID: 4, SenderType: "system", Content: "system event"},
+		{ID: 3, SenderType: "agent", Content: "您好，我来帮您看下。"},
+		{ID: 2, SenderType: "visitor", Content: "我在杭州。"},
+		{ID: 1, SenderType: "ai", Content: "您好，这里是青禾家居客服。"},
+	}, 7, 4, 300)
+
+	for _, part := range []string{
+		"用户：我在杭州。",
+		"人工客服：您好，我来帮您看下。",
+		"用户：能快一点吗",
+		"AI客服：杭州仓现货一般48小时内发出。",
+	} {
+		if !strings.Contains(got, part) {
+			t.Fatalf("buildConversationHistory() = %q, want contains %q", got, part)
+		}
+	}
+	if strings.Contains(got, "那多久发货") {
+		t.Fatalf("buildConversationHistory() = %q, should exclude current message", got)
+	}
+	if strings.Contains(got, "system event") {
+		t.Fatalf("buildConversationHistory() = %q, should exclude system message", got)
+	}
+	if strings.Contains(got, "您好，这里是青禾家居客服。") {
+		t.Fatalf("buildConversationHistory() = %q, should keep only recent turns", got)
+	}
+
+	order := []string{
+		"用户：我在杭州。",
+		"人工客服：您好，我来帮您看下。",
+		"用户：能快一点吗",
+		"AI客服：杭州仓现货一般48小时内发出。",
+	}
+	lastIndex := -1
+	for _, part := range order {
+		index := strings.Index(got, part)
+		if index <= lastIndex {
+			t.Fatalf("buildConversationHistory() = %q, history order is incorrect", got)
+		}
+		lastIndex = index
+	}
+}
+
+func TestResolveContextualQueryUsesLatestMentionedProduct(t *testing.T) {
+	query := resolveContextualQuery("介绍下", []*chatclient.Message{
+		{ID: 4, SenderType: "visitor", Content: "介绍下"},
+		{ID: 3, SenderType: "ai", Content: "青禾家居当前主推产品里，价格最高的是暮岚针织四件套，建议零售价为¥399 😊"},
+		{ID: 2, SenderType: "visitor", Content: "最贵产品是哪个"},
+	}, []knowledgebase.ProductPrice{
+		{Name: "暮岚针织四件套", PriceText: "¥399", PriceValue: 399},
+		{Name: "云感记忆棉枕", PriceText: "¥159", PriceValue: 159},
+	})
+
+	if query != "介绍一下暮岚针织四件套" {
+		t.Fatalf("resolveContextualQuery() = %q, want %q", query, "介绍一下暮岚针织四件套")
+	}
+}
+
+func TestResolveContextualQueryKeepsExplicitSubject(t *testing.T) {
+	query := resolveContextualQuery("介绍下云感记忆棉枕", []*chatclient.Message{
+		{ID: 2, SenderType: "ai", Content: "价格最高的是暮岚针织四件套"},
+	}, []knowledgebase.ProductPrice{
+		{Name: "暮岚针织四件套", PriceText: "¥399", PriceValue: 399},
+		{Name: "云感记忆棉枕", PriceText: "¥159", PriceValue: 159},
+	})
+
+	if query != "介绍下云感记忆棉枕" {
+		t.Fatalf("resolveContextualQuery() = %q, want unchanged query", query)
 	}
 }
 

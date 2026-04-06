@@ -29,6 +29,8 @@ type RefreshMessagesOptions = {
   conversationID?: string;
   force?: boolean;
   forceScrollBottom?: boolean;
+  markConversationRead?: boolean;
+  autoScroll?: boolean;
 };
 type NormalizedMessage = Message & {
   id: number;
@@ -451,7 +453,7 @@ async function refreshAll(): Promise<void> {
   try {
     await refreshConversations();
     if (activeConversationId.value) {
-      await refreshMessages({ force: true, forceScrollBottom: true });
+      await refreshMessages({ force: true });
     }
     setStatus("会话数据已刷新");
   } catch (error) {
@@ -543,6 +545,7 @@ async function selectConversation(conversation: Conversation): Promise<void> {
   if (!conversationID) {
     return;
   }
+  const entryReadCursor = Number(readCursor.value[conversationID] || 0);
 
   const currentSelectionSeq = selectionSeq.value + 1;
   selectionSeq.value = currentSelectionSeq;
@@ -557,17 +560,19 @@ async function selectConversation(conversation: Conversation): Promise<void> {
   clearWsReconnectTimer();
   wsReconnectTimer = null;
   closeWebSocket();
-  await scrollMessageListToBottom(true);
 
   try {
     await refreshMessages({
       conversationID,
       force: true,
-      forceScrollBottom: true,
+      markConversationRead: false,
+      autoScroll: false,
     });
     if (currentSelectionSeq !== selectionSeq.value || conversationID !== activeConversationId.value) {
       return;
     }
+    await scrollMessageListOnConversationEntry(messages.value, entryReadCursor);
+    markConversationRead(conversationID, messages.value);
     if (activeConversation.value?.status === "open") {
       connectWebSocket();
       scheduleMessageResync(300);
@@ -627,7 +632,9 @@ async function refreshMessages(options: RefreshMessagesOptions = {}): Promise<vo
       return;
     }
     mergeMessages(data.items ?? [], {
+      autoScroll: options.autoScroll,
       forceScrollBottom: Boolean(options.forceScrollBottom),
+      markConversationRead: options.markConversationRead,
     });
   } catch (error) {
     if (isAbortError(error)) {
@@ -649,10 +656,14 @@ function abortMessageRequest(): void {
   messageAbortController.value = null;
 }
 
-function mergeMessages(items: Message[], options: { forceScrollBottom?: boolean } = {}): void {
+function mergeMessages(
+  items: Message[],
+  options: { autoScroll?: boolean; forceScrollBottom?: boolean; markConversationRead?: boolean } = {},
+): void {
   const byKey = new Map<string, NormalizedMessage>();
   const clientMsgKey = new Map<string, string>();
-  const shouldStickBottom = Boolean(options.forceScrollBottom) || isNearBottom(messageListRef.value);
+  const shouldStickBottom =
+    options.autoScroll === false ? false : Boolean(options.forceScrollBottom) || isNearBottom(messageListRef.value);
 
   for (const current of messages.value) {
     const normalized = normalizeMessage(current);
@@ -704,10 +715,12 @@ function mergeMessages(items: Message[], options: { forceScrollBottom?: boolean 
   }
 
   messages.value = Array.from(byKey.values()).sort(compareMessageOrder);
-  if (activeConversationId.value) {
+  if (activeConversationId.value && options.markConversationRead !== false) {
     markConversationRead(activeConversationId.value, messages.value);
   }
-  void scrollMessageListToBottom(shouldStickBottom);
+  if (options.autoScroll !== false) {
+    void scrollMessageListToBottom(shouldStickBottom);
+  }
 }
 
 function normalizeMessage(message: Message | NormalizedMessage | null | undefined): NormalizedMessage | null {
@@ -838,6 +851,29 @@ function isNearBottom(container: HTMLElement | null, threshold = 72): boolean {
   return gap <= threshold;
 }
 
+function findOldestUnreadMessageID(currentMessages: NormalizedMessage[], lastReadMessageID: number): number {
+  return currentMessages
+    .filter((message) => message.sender_type === "visitor" && Number(message.id || 0) > lastReadMessageID)
+    .sort((a, b) => Number(a.id || 0) - Number(b.id || 0))[0]?.id ?? 0;
+}
+
+async function scrollMessageListToMessage(messageID: number): Promise<boolean> {
+  if (!messageID) {
+    return false;
+  }
+  await nextTick();
+  const container = messageListRef.value;
+  if (!container) {
+    return false;
+  }
+  const target = container.querySelector<HTMLElement>(`[data-message-id="${messageID}"]`);
+  if (!target) {
+    return false;
+  }
+  target.scrollIntoView({ block: "start" });
+  return true;
+}
+
 async function scrollMessageListToBottom(force = false): Promise<void> {
   await nextTick();
   const container = messageListRef.value;
@@ -848,6 +884,17 @@ async function scrollMessageListToBottom(force = false): Promise<void> {
     return;
   }
   container.scrollTop = container.scrollHeight;
+}
+
+async function scrollMessageListOnConversationEntry(currentMessages: NormalizedMessage[], lastReadMessageID: number): Promise<void> {
+  const oldestUnreadMessageID = findOldestUnreadMessageID(currentMessages, lastReadMessageID);
+  if (oldestUnreadMessageID > 0) {
+    const scrolled = await scrollMessageListToMessage(oldestUnreadMessageID);
+    if (scrolled) {
+      return;
+    }
+  }
+  await scrollMessageListToBottom(true);
 }
 
 function beginPending(clientMsgID: string): void {
@@ -1632,7 +1679,7 @@ async function claimConversation(): Promise<void> {
     });
     await refreshConversations();
     if (activeConversationId.value) {
-      await refreshMessages({ conversationID: activeConversationId.value, force: true, forceScrollBottom: true });
+      await refreshMessages({ conversationID: activeConversationId.value, force: true });
       markConversationRead(activeConversationId.value, messages.value);
     }
     setStatus("认领成功");
@@ -1667,7 +1714,7 @@ async function transferConversation(): Promise<void> {
       },
     });
     await refreshConversations();
-    await refreshMessages({ conversationID: activeConversationId.value, force: true, forceScrollBottom: true });
+    await refreshMessages({ conversationID: activeConversationId.value, force: true });
     setStatus(`已发起转接到坐席 ${formatAgentID(targetAgentID)}，等待对方确认`);
   } catch (error) {
     handleError(error, "转接失败");
@@ -1696,7 +1743,7 @@ async function confirmTransferConversation(): Promise<void> {
       auth: true,
     });
     await refreshConversations();
-    await refreshMessages({ conversationID: activeConversationId.value, force: true, forceScrollBottom: true });
+    await refreshMessages({ conversationID: activeConversationId.value, force: true });
     setStatus("已确认转接，当前会话已归你接待");
   } catch (error) {
     handleError(error, "确认转接失败");
@@ -1725,7 +1772,7 @@ async function rejectTransferConversation(): Promise<void> {
       auth: true,
     });
     await refreshConversations();
-    await refreshMessages({ conversationID: activeConversationId.value, force: true, forceScrollBottom: true });
+    await refreshMessages({ conversationID: activeConversationId.value, force: true });
     setStatus("已拒绝转接，当前会话维持原坐席接待");
   } catch (error) {
     handleError(error, "拒绝转接失败");
@@ -2361,6 +2408,7 @@ function dedupeReplySuggestions(items: string[]): string[] {
             <article
               v-for="message in messages"
               :key="`${message.id}-${message.client_msg_id}`"
+              :data-message-id="message.id > 0 ? String(message.id) : undefined"
               class="message-bubble"
               :class="{
                 self: isMineMessage(message),

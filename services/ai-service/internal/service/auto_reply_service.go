@@ -23,14 +23,18 @@ import (
 )
 
 const (
-	replyLockTTL      = 10 * time.Minute
-	replySenderType   = "ai"
-	replySenderID     = "ai-service"
-	replyTemperature  = 0.1
-	replyMaxTokens    = 256
-	maxPromptContext  = 4800
-	replyModeAutoOnly = "unassigned_auto_reply"
-	maxFuzzyRewrites  = 3
+	replyLockTTL              = 10 * time.Minute
+	replySenderType           = "ai"
+	replySenderID             = "ai-service"
+	replyTemperature          = 0.1
+	replyMaxTokens            = 256
+	maxPromptContext          = 4800
+	maxPromptHistoryContext   = 1400
+	maxPromptHistoryMessages  = 6
+	promptHistoryFetchLimit   = maxPromptHistoryMessages + 4
+	maxPromptHistoryLineRunes = 180
+	replyModeAutoOnly         = "unassigned_auto_reply"
+	maxFuzzyRewrites          = 3
 )
 
 var thinkTagPattern = regexp.MustCompile(`(?s)<think>.*?</think>`)
@@ -196,27 +200,38 @@ func (s *AutoReplyService) processVisitorMessage(ctx context.Context, event mess
 	if query == "" {
 		return nil
 	}
+	recentMessages, err := s.loadRecentConversationMessages(ctx, event.ConversationID)
+	if err != nil {
+		s.logger.Warn("load recent conversation messages for ai reply failed",
+			zap.Error(err),
+			zap.Uint64("conversation_id", event.ConversationID),
+			zap.Uint64("message_id", event.Message.ID),
+		)
+		recentMessages = nil
+	}
+	effectiveQuery := resolveContextualQuery(query, recentMessages, s.kb.ProductPrices())
 	if reply, ok := matchPresetReply(query); ok {
 		return s.createReply(ctx, event, reply)
 	}
-	if reply, ok := buildYearMilestoneReply(query, s.kb.YearMilestones()); ok {
+	if reply, ok := buildYearMilestoneReply(effectiveQuery, s.kb.YearMilestones()); ok {
 		return s.createReply(ctx, event, reply)
 	}
-	if reply, ok := buildDeterministicReply(query, s.kb.ProductPrices(), s.kb.Terms()); ok {
+	if reply, ok := buildDeterministicReply(effectiveQuery, s.kb.ProductPrices(), s.kb.Terms()); ok {
 		return s.createReply(ctx, event, reply)
 	}
-	structuredFacts := buildStructuredFacts(query, s.kb.ProductPrices())
+	structuredFacts := buildStructuredFacts(effectiveQuery, s.kb.ProductPrices())
 
-	results, err := s.searchKnowledge(ctx, query)
+	results, err := s.searchKnowledge(ctx, effectiveQuery)
 	if err != nil {
 		return err
 	}
-	if reply, ok := buildTermContextReply(query, results); ok {
+	if reply, ok := buildTermContextReply(effectiveQuery, results); ok {
 		return s.createReply(ctx, event, reply)
 	}
 	reply := s.unknownReply
 	if len(results) > 0 || structuredFacts != "" {
-		generatedReply, genErr := s.generateReply(ctx, query, results, structuredFacts)
+		conversationHistory := buildConversationHistory(recentMessages, event.Message.ID, maxPromptHistoryMessages, maxPromptHistoryContext)
+		generatedReply, genErr := s.generateReply(ctx, effectiveQuery, conversationHistory, results, structuredFacts)
 		if genErr != nil {
 			s.logger.Warn("generate ai reply failed, fallback to unknown reply",
 				zap.Error(genErr),
@@ -316,13 +331,21 @@ func (s *AutoReplyService) isLatestVisitorMessage(ctx context.Context, conversat
 	return latest != nil && latest.ID == messageID && latest.SenderType == "visitor"
 }
 
-func (s *AutoReplyService) generateReply(ctx context.Context, question string, results []knowledgebase.SearchResult, structuredFacts string) (string, error) {
+func (s *AutoReplyService) loadRecentConversationMessages(ctx context.Context, conversationID uint64) ([]*chatclient.Message, error) {
+	items, err := s.chatClient.ListMessages(ctx, conversationID, chatclient.ListMessagesInput{Limit: promptHistoryFetchLimit})
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *AutoReplyService) generateReply(ctx context.Context, question string, conversationHistory string, results []knowledgebase.SearchResult, structuredFacts string) (string, error) {
 	if len(results) == 0 && strings.TrimSpace(structuredFacts) == "" {
 		return s.unknownReply, nil
 	}
 
 	contextText := buildContext(results, maxPromptContext)
-	promptBody := buildPromptBody(contextText, structuredFacts, question)
+	promptBody := buildPromptBody(conversationHistory, contextText, structuredFacts, question)
 	reply, err := s.llmClient.ChatCompletion(ctx, []openai.ChatMessage{
 		{
 			Role: "system",
@@ -334,6 +357,7 @@ func (s *AutoReplyService) generateReply(ctx context.Context, question string, r
 					"除产品名称、品牌名、SKU、常见专有名词或必要英文缩写外，回复必须使用自然中文，不得夹杂英文单词或英文短语。"+
 					"像 pricing、price、service 这类表达一律改成中文。"+
 					"你只能根据提供的知识片段回答，不得补全、推断、猜测或编造任何信息。"+
+					"如果提供了最近对话，它只能帮助你理解用户指代、省略和上下文延续，不能把历史对话本身当成事实来源。"+
 					"知识片段明确提到的信息，可以用自然中文直接转述，不要生硬复读。"+
 					"如果提供了结构化事实表，你要先基于该事实表完成比较、筛选、排序或统计，再组织自然回复。"+
 					"当结构化事实表已经足够支持答案时，不要再说“资料未提及”或“无法确认”。"+
@@ -415,6 +439,180 @@ func buildContext(results []knowledgebase.SearchResult, maxChars int) string {
 		builder.WriteString(part)
 	}
 	return strings.TrimSpace(builder.String())
+}
+
+func buildConversationHistory(messages []*chatclient.Message, currentMessageID uint64, maxMessages int, maxChars int) string {
+	if maxMessages <= 0 || maxChars <= 0 || len(messages) == 0 {
+		return ""
+	}
+
+	selected := make([]string, 0, maxMessages)
+	totalChars := 0
+	for _, item := range messages {
+		line := formatConversationHistoryLine(item, currentMessageID)
+		if line == "" {
+			continue
+		}
+		if totalChars+len(line)+1 > maxChars {
+			break
+		}
+		selected = append(selected, line)
+		totalChars += len(line) + 1
+		if len(selected) >= maxMessages {
+			break
+		}
+	}
+
+	if len(selected) == 0 {
+		return ""
+	}
+
+	for left, right := 0, len(selected)-1; left < right; left, right = left+1, right-1 {
+		selected[left], selected[right] = selected[right], selected[left]
+	}
+	return strings.Join(selected, "\n")
+}
+
+func resolveContextualQuery(query string, recentMessages []*chatclient.Message, productPrices []knowledgebase.ProductPrice) string {
+	normalized := normalizeText(query)
+	if normalized == "" || !isFollowUpQuestion(normalized) {
+		return normalized
+	}
+	for _, name := range sortedProductNames(productPrices) {
+		if strings.Contains(normalized, name) {
+			return normalized
+		}
+	}
+	if productName, ok := findLatestMentionedProduct(recentMessages, 0, productPrices); ok {
+		return rewriteFollowUpQuestion(normalized, productName)
+	}
+	return normalized
+}
+
+func isFollowUpQuestion(query string) bool {
+	compact := compactText(query)
+	if compact == "" {
+		return false
+	}
+	if containsAny(compact,
+		"介绍下", "介绍一下", "介绍", "说说", "讲讲", "展开说说", "展开讲讲", "详细说说", "详细介绍",
+		"具体介绍", "展开点", "详细点", "具体点", "多介绍点", "继续说", "继续讲", "接着说",
+		"它呢", "这个呢", "这款呢", "这款介绍下", "这个介绍下",
+	) {
+		return true
+	}
+	return false
+}
+
+func rewriteFollowUpQuestion(query string, subject string) string {
+	query = normalizeText(query)
+	subject = normalizeText(subject)
+	if query == "" || subject == "" {
+		return query
+	}
+	if strings.Contains(query, subject) {
+		return query
+	}
+
+	compact := compactText(query)
+	switch {
+	case containsAny(compact, "介绍下", "介绍一下", "介绍", "这款介绍下", "这个介绍下"):
+		return normalizeText("介绍一下" + subject)
+	case containsAny(compact, "说说", "讲讲", "展开说说", "展开讲讲", "详细说说", "详细介绍", "具体介绍", "展开点", "详细点", "具体点", "多介绍点", "继续说", "继续讲", "它呢", "这个呢", "这款呢"):
+		return normalizeText("说说" + subject)
+	default:
+		return normalizeText(subject + " " + query)
+	}
+}
+
+func findLatestMentionedProduct(messages []*chatclient.Message, currentMessageID uint64, productPrices []knowledgebase.ProductPrice) (string, bool) {
+	if len(messages) == 0 || len(productPrices) == 0 {
+		return "", false
+	}
+
+	names := sortedProductNames(productPrices)
+	for _, item := range messages {
+		if item == nil || item.ID == currentMessageID {
+			continue
+		}
+		content := normalizeText(item.Content)
+		if content == "" {
+			continue
+		}
+		for _, name := range names {
+			if strings.Contains(content, name) {
+				return name, true
+			}
+		}
+	}
+	return "", false
+}
+
+func sortedProductNames(productPrices []knowledgebase.ProductPrice) []string {
+	names := make([]string, 0, len(productPrices))
+	seen := make(map[string]struct{}, len(productPrices))
+	for _, item := range productPrices {
+		name := normalizeText(item.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		names = append(names, name)
+	}
+	sort.Slice(names, func(i, j int) bool {
+		ri := len([]rune(names[i]))
+		rj := len([]rune(names[j]))
+		if ri == rj {
+			return names[i] < names[j]
+		}
+		return ri > rj
+	})
+	return names
+}
+
+func formatConversationHistoryLine(message *chatclient.Message, currentMessageID uint64) string {
+	if message == nil || message.ID == currentMessageID {
+		return ""
+	}
+
+	content := normalizeText(message.Content)
+	if content == "" {
+		return ""
+	}
+
+	role := historySenderLabel(message.SenderType)
+	if role == "" {
+		return ""
+	}
+
+	return fmt.Sprintf("%s：%s", role, truncateRunes(content, maxPromptHistoryLineRunes))
+}
+
+func historySenderLabel(senderType string) string {
+	switch strings.ToLower(strings.TrimSpace(senderType)) {
+	case "visitor":
+		return "用户"
+	case "agent":
+		return "人工客服"
+	case "ai":
+		return "AI客服"
+	default:
+		return ""
+	}
+}
+
+func truncateRunes(text string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	return strings.TrimSpace(string(runes[:limit])) + "…"
 }
 
 func fallbackSection(section string) string {
@@ -1041,9 +1239,14 @@ func needsStructuredPriceFacts(query string, prices []knowledgebase.ProductPrice
 	return false
 }
 
-func buildPromptBody(contextText string, structuredFacts string, question string) string {
+func buildPromptBody(conversationHistory string, contextText string, structuredFacts string, question string) string {
 	var builder strings.Builder
 	builder.WriteString("/no_think\n")
+	if strings.TrimSpace(conversationHistory) != "" {
+		builder.WriteString("最近对话如下：\n")
+		builder.WriteString(conversationHistory)
+		builder.WriteString("\n\n")
+	}
 	if strings.TrimSpace(contextText) != "" {
 		builder.WriteString("知识片段如下：\n")
 		builder.WriteString(contextText)
