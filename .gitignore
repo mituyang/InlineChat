@@ -8,3 +8,4 @@ apps/console-web/node_modules/
 apps/console-web/dist/
 .playwright-cli/
 output/db-backups/
+.inlinechat-state/

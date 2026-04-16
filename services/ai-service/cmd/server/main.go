@@ -23,6 +23,7 @@ import (
 	"inlinechat/services/ai-service/internal/logger"
 	"inlinechat/services/ai-service/internal/openai"
 	"inlinechat/services/ai-service/internal/pubsub"
+	"inlinechat/services/ai-service/internal/reranker"
 	aiservice "inlinechat/services/ai-service/internal/service"
 )
 
@@ -124,28 +125,31 @@ func main() {
 	if processTimeout < 30*time.Second {
 		processTimeout = 30 * time.Second
 	}
-	llmClient := openai.New(cfg.AILLMBaseURL, cfg.AILLMModel, cfg.AILLMAPIKey, httpTimeout)
+
+	chatModelClient := openai.New(cfg.AIChatBaseURL, cfg.AIChatModel, cfg.AIChatAPIKey, httpTimeout)
 	embeddingClient := openai.New(cfg.AIEmbeddingBaseURL, cfg.AIEmbeddingModel, cfg.AIEmbeddingAPIKey, httpTimeout)
-	kbManager := knowledgebase.New(cfg.AIKBPath, embeddingClient, appLogger)
-	if cfg.AIDisableExternalReadiness {
-		appLogger.Warn("ai-service external readiness disabled",
-			zap.Bool("ai_disable_external_readiness", true),
-			zap.String("reason", "skip llm/embedding and knowledge-base readiness for ci or mock environments"),
-		)
-	} else if _, err := kbManager.Reload(context.Background()); err != nil {
-		appLogger.Warn("initial knowledge base load failed", zap.Error(err), zap.String("path", cfg.AIKBPath))
-	}
+	rerankerClient := reranker.New(cfg.AIRerankerBaseURL, httpTimeout)
+	qdrantClient := knowledgebase.NewQdrantClient(cfg.AIQdrantURL, cfg.AIQdrantAPIKey, cfg.AIQdrantCollection, httpTimeout)
+	kbManager := knowledgebase.New(
+		cfg.AIKBRootDir,
+		embeddingClient,
+		rerankerClient,
+		qdrantClient,
+		appLogger,
+		cfg.AIIndexEmbedBatchSize,
+		cfg.AIRetrievalCandidateK,
+		cfg.AIRerankTopK,
+		cfg.AIRerankMinScore,
+	)
 
 	autoReplySvc := aiservice.NewAutoReplyService(
 		redisClient,
 		chatClient,
 		adminClient,
 		kbManager,
-		llmClient,
+		chatModelClient,
 		appLogger,
 		callTimeout,
-		cfg.AIRetrieveTopK,
-		cfg.AIMinSimilarity,
 		cfg.AIUnknownReply,
 	)
 
@@ -196,7 +200,7 @@ func main() {
 	})
 	r.GET("/readyz", func(c *gin.Context) {
 		failures := make(gin.H)
-		checkCtx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		checkCtx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Second)
 		defer cancel()
 
 		if err := redisClient.Ping(checkCtx).Err(); err != nil {
@@ -214,15 +218,21 @@ func main() {
 		} else if strings.TrimSpace(target) == "" {
 			failures["admin_grpc"] = "empty target"
 		}
+		if err := kbManager.Ready(); err != nil {
+			failures["knowledge_base"] = err.Error()
+		}
 		if !cfg.AIDisableExternalReadiness {
-			if err := llmClient.Ready(checkCtx); err != nil {
-				failures["llm"] = err.Error()
+			if err := chatModelClient.Ready(checkCtx); err != nil {
+				failures["chat_model"] = err.Error()
 			}
 			if err := embeddingClient.Ready(checkCtx); err != nil {
 				failures["embedding"] = err.Error()
 			}
-			if err := kbManager.Ready(); err != nil {
-				failures["knowledge_base"] = err.Error()
+			if err := rerankerClient.Ready(checkCtx); err != nil {
+				failures["reranker"] = err.Error()
+			}
+			if err := qdrantClient.Ready(checkCtx); err != nil {
+				failures["qdrant"] = err.Error()
 			}
 		}
 
@@ -235,34 +245,49 @@ func main() {
 			return
 		}
 
-		status := kbManager.Status()
 		c.JSON(http.StatusOK, gin.H{
 			"service":                    "ai-service",
 			"status":                     "ready",
-			"chunk_count":                status.ChunkCount,
-			"loaded_at":                  status.LoadedAt.Format(time.RFC3339Nano),
 			"external_readiness_skipped": cfg.AIDisableExternalReadiness,
 		})
 	})
 	r.GET("/metrics", httpmiddleware.MetricsHandler(nil))
-	r.POST("/reload", func(c *gin.Context) {
-		siteID := strings.TrimSpace(c.Query("site_id"))
+	r.GET("/sites/:site_id/status", func(c *gin.Context) {
+		siteID := strings.TrimSpace(c.Param("site_id"))
 		if siteID == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "site_id is required"})
 			return
 		}
-
-		reloadCtx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
-		defer cancel()
-		status, err := autoReplySvc.ReloadKnowledge(reloadCtx)
+		status, err := autoReplySvc.GetSiteStatus(siteID)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
 			return
 		}
 		c.JSON(http.StatusOK, gin.H{
-			"site_id":     siteID,
-			"chunk_count": status.ChunkCount,
-			"reloaded_at": status.LoadedAt.Format(time.RFC3339Nano),
+			"site_id":          status.SiteID,
+			"knowledge_dir":    status.KnowledgeDir,
+			"index_status":     status.IndexStatus,
+			"indexed_chunks":   status.IndexedChunks,
+			"last_indexed_at":  formatTime(status.LastIndexedAt),
+			"last_index_error": status.LastIndexError,
+			"active_job_id":    status.ActiveJobID,
+		})
+	})
+	r.POST("/sites/:site_id/reindex", func(c *gin.Context) {
+		siteID := strings.TrimSpace(c.Param("site_id"))
+		if siteID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "site_id is required"})
+			return
+		}
+		job, err := autoReplySvc.TriggerReindex(c.Request.Context(), siteID)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{
+			"site_id": job.SiteID,
+			"job_id":  job.JobID,
+			"status":  job.Status,
 		})
 	})
 
@@ -306,4 +331,11 @@ func main() {
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		appLogger.Warn("http shutdown failed", zap.Error(err))
 	}
+}
+
+func formatTime(ts time.Time) string {
+	if ts.IsZero() {
+		return ""
+	}
+	return ts.Format(time.RFC3339Nano)
 }

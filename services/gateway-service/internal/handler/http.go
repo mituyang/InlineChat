@@ -16,7 +16,7 @@ const maxMessageContentChars = 2000
 // HTTPHandler 负责承接网关入口请求，并分发到 chat/auth/admin 三类上游。
 type HTTPHandler struct {
 	clients         *grpcclient.Clients
-	aiClient        aiReloader
+	aiClient        aiClient
 	callTimeout     time.Duration
 	loginLimiter    *ratelimit.Limiter
 	visitorLimiter  *ratelimit.Limiter
@@ -26,8 +26,9 @@ type HTTPHandler struct {
 	now             func() time.Time
 }
 
-type aiReloader interface {
-	Reload(ctx context.Context, siteID string) (*aiclient.ReloadResponse, error)
+type aiClient interface {
+	GetSiteStatus(ctx context.Context, siteID string) (*aiclient.SiteStatus, error)
+	StartReindex(ctx context.Context, siteID string) (*aiclient.ReindexResponse, error)
 }
 
 func NewHTTPHandler(clients *grpcclient.Clients, callTimeout time.Duration) *HTTPHandler {
@@ -59,7 +60,7 @@ func (h *HTTPHandler) SetWidgetIndexHTML(indexHTML []byte) {
 	h.widgetIndexHTML = append([]byte(nil), indexHTML...)
 }
 
-func (h *HTTPHandler) SetAIClient(client aiReloader) {
+func (h *HTTPHandler) SetAIClient(client aiClient) {
 	h.aiClient = client
 }
 

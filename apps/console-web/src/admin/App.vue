@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 import ConsoleHeader from "../shared/components/ConsoleHeader.vue";
 import MetricCard from "../shared/components/MetricCard.vue";
@@ -61,10 +61,12 @@ const roleText = computed(() => {
   return me.value.role === "super_admin" ? "超级管理员" : "管理员";
 });
 const roleTone = computed(() => (me.value?.role === "super_admin" ? "brand" : "default"));
+let aiStatusPollTimer: number | null = null;
 
 watch(
   () => selectedSiteId.value,
   async (siteId) => {
+    stopAIStatusPolling();
     if (!siteId) {
       selectedAIConfig.value = null;
       return;
@@ -75,6 +77,10 @@ watch(
 
 onMounted(async () => {
   await bootstrap();
+});
+
+onBeforeUnmount(() => {
+  stopAIStatusPolling();
 });
 
 async function bootstrap(): Promise<void> {
@@ -128,6 +134,7 @@ async function loadSiteAIConfig(siteId: string): Promise<void> {
     selectedAIConfig.value = await apiRequest<SiteAIConfig>(`/api/admin/v1/admin/sites/${encodeURIComponent(siteId)}/ai-config`, {
       auth: true,
     });
+    scheduleAIStatusPolling();
   } catch (error) {
     handleError(error, "加载站点 AI 配置失败");
   }
@@ -237,6 +244,7 @@ async function saveAIConfig(): Promise<void> {
         },
       },
     );
+    scheduleAIStatusPolling();
     setStatus("AI 配置已保存");
   } catch (error) {
     handleError(error, "保存 AI 配置失败");
@@ -252,7 +260,7 @@ async function reloadAIKnowledge(): Promise<void> {
   }
   reloadingAI.value = true;
   try {
-    const payload = await apiRequest<{ site_id: string; chunk_count: number; reloaded_at: string }>(
+    const payload = await apiRequest<{ site_id: string; job_id: string; status: string }>(
       `/api/admin/v1/admin/sites/${encodeURIComponent(selectedSiteId.value)}/ai/reload`,
       {
         method: "POST",
@@ -265,14 +273,52 @@ async function reloadAIKnowledge(): Promise<void> {
         enabled: false,
         reply_mode: "unassigned_auto_reply",
       }),
-      chunk_count: payload.chunk_count,
-      reloaded_at: payload.reloaded_at,
+      active_job_id: payload.job_id,
+      index_status: payload.status,
     };
-    setStatus(`知识库已重载，分块 ${payload.chunk_count}`);
+    scheduleAIStatusPolling();
+    setStatus("知识库开始重建");
   } catch (error) {
     handleError(error, "重载知识库失败");
   } finally {
     reloadingAI.value = false;
+  }
+}
+
+function scheduleAIStatusPolling(): void {
+  stopAIStatusPolling();
+  if (!selectedAIConfig.value || !selectedSiteId.value) {
+    return;
+  }
+  if (selectedAIConfig.value.index_status !== "indexing") {
+    return;
+  }
+  aiStatusPollTimer = window.setTimeout(async () => {
+    aiStatusPollTimer = null;
+    if (!selectedSiteId.value) {
+      return;
+    }
+    try {
+      await loadSiteAIConfig(selectedSiteId.value);
+      if (selectedAIConfig.value?.index_status === "ready") {
+        setStatus(`知识库索引完成，分块 ${selectedAIConfig.value.indexed_chunks ?? 0}`);
+        return;
+      }
+      if (selectedAIConfig.value?.index_status === "error") {
+        setStatus(selectedAIConfig.value.last_index_error || "知识库索引失败", true);
+        return;
+      }
+      scheduleAIStatusPolling();
+    } catch (error) {
+      handleError(error, "轮询 AI 索引状态失败");
+    }
+  }, 3000);
+}
+
+function stopAIStatusPolling(): void {
+  if (aiStatusPollTimer !== null) {
+    window.clearTimeout(aiStatusPollTimer);
+    aiStatusPollTimer = null;
   }
 }
 
@@ -296,6 +342,33 @@ function handleError(error: unknown, fallback: string): void {
   setStatus(message || fallback, true);
   if (error instanceof APIError && error.status === 401) {
     logout();
+  }
+}
+
+function formatIndexStatus(value?: string): string {
+  switch (value) {
+    case "ready":
+      return "索引就绪";
+    case "indexing":
+      return "索引中";
+    case "error":
+      return "索引失败";
+    case "idle":
+    default:
+      return "未建立索引";
+  }
+}
+
+function indexStatusTone(value?: string): "success" | "warn" | "danger" | "default" {
+  switch (value) {
+    case "ready":
+      return "success";
+    case "indexing":
+      return "warn";
+    case "error":
+      return "danger";
+    default:
+      return "default";
   }
 }
 
@@ -519,6 +592,7 @@ function formatSiteDomains(domains: string[]): string {
                 :tone="selectedAIConfig?.enabled ? 'success' : 'default'"
               />
               <StatusPill :text="selectedAIConfig?.reply_mode ?? 'unassigned_auto_reply'" tone="brand" />
+              <StatusPill :text="formatIndexStatus(selectedAIConfig?.index_status)" :tone="indexStatusTone(selectedAIConfig?.index_status)" />
             </div>
 
             <label class="label-stack">
@@ -540,8 +614,22 @@ function formatSiteDomains(domains: string[]): string {
 
             <div class="meta-row" v-if="selectedAIConfig">
               <span>配置更新时间 {{ formatTime(selectedAIConfig.updated_at) }}</span>
-              <span>最近重载 {{ formatTime(selectedAIConfig.reloaded_at) }}</span>
-              <span>知识库分块 {{ selectedAIConfig.chunk_count ?? "--" }}</span>
+              <span>最近索引 {{ formatTime(selectedAIConfig.last_indexed_at) }}</span>
+              <span>知识库分块 {{ selectedAIConfig.indexed_chunks ?? "--" }}</span>
+            </div>
+
+            <label class="label-stack" v-if="selectedAIConfig">
+              <span>知识库目录</span>
+              <input class="text-field" :value="selectedAIConfig.knowledge_dir || '--'" disabled />
+            </label>
+
+            <label class="label-stack" v-if="selectedAIConfig?.active_job_id">
+              <span>当前任务</span>
+              <input class="text-field" :value="selectedAIConfig.active_job_id" disabled />
+            </label>
+
+            <div class="empty-state" v-if="selectedAIConfig?.last_index_error">
+              {{ selectedAIConfig.last_index_error }}
             </div>
 
             <div class="panel-actions">
@@ -549,7 +637,7 @@ function formatSiteDomains(domains: string[]): string {
                 {{ savingAI ? "保存中..." : "保存 AI 配置" }}
               </button>
               <button class="ghost-button" type="button" :disabled="reloadingAI || !selectedAIConfig" @click="reloadAIKnowledge">
-                {{ reloadingAI ? "重载中..." : "重载知识库" }}
+                {{ reloadingAI ? "提交中..." : "重建知识库索引" }}
               </button>
             </div>
           </div>

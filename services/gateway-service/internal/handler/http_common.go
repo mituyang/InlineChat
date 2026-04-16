@@ -12,6 +12,7 @@ import (
 
 	"inlinechat/services/gateway-service/internal/middleware"
 
+	"inlinechat/services/gateway-service/internal/aiclient"
 	adminv1 "inlinechat/services/gateway-service/internal/gen/adminv1"
 	authv1 "inlinechat/services/gateway-service/internal/gen/authv1"
 	chatv1 "inlinechat/services/gateway-service/internal/gen/chatv1"
@@ -463,6 +464,20 @@ func siteAIConfigToJSON(item *adminv1.SiteAIConfig) gin.H {
 		"reply_mode": item.GetReplyMode(),
 		"updated_at": item.GetUpdatedAt(),
 	}
+}
+
+func mergeSiteAIConfig(item *adminv1.SiteAIConfig, status *aiclient.SiteStatus) gin.H {
+	payload := siteAIConfigToJSON(item)
+	if status == nil {
+		return payload
+	}
+	payload["knowledge_dir"] = status.KnowledgeDir
+	payload["index_status"] = status.IndexStatus
+	payload["indexed_chunks"] = status.IndexedChunks
+	payload["last_indexed_at"] = status.LastIndexedAt
+	payload["last_index_error"] = status.LastIndexError
+	payload["active_job_id"] = status.ActiveJobID
+	return payload
 }
 
 func adminAgentToJSON(item *adminv1.Agent) gin.H {

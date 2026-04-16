@@ -1,12 +1,14 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"inlinechat/services/gateway-service/internal/aiclient"
 	adminv1 "inlinechat/services/gateway-service/internal/gen/adminv1"
 	"inlinechat/services/gateway-service/internal/middleware"
 )
@@ -231,7 +233,7 @@ func (h *HTTPHandler) getSiteAIConfig(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, siteAIConfigToJSON(resp))
+	c.JSON(http.StatusOK, mergeSiteAIConfig(resp, h.fetchSiteAIStatus(ctx, c.Param("site_id"))))
 }
 
 func (h *HTTPHandler) updateSiteAIConfig(c *gin.Context) {
@@ -268,7 +270,7 @@ func (h *HTTPHandler) updateSiteAIConfig(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, siteAIConfigToJSON(resp))
+	c.JSON(http.StatusOK, mergeSiteAIConfig(resp, h.fetchSiteAIStatus(ctx, c.Param("site_id"))))
 }
 
 func (h *HTTPHandler) reloadSiteAIKnowledge(c *gin.Context) {
@@ -288,17 +290,28 @@ func (h *HTTPHandler) reloadSiteAIKnowledge(c *gin.Context) {
 	ctx, cancel := h.newCallContext(c)
 	defer cancel()
 
-	resp, err := h.aiClient.Reload(ctx, c.Param("site_id"))
+	resp, err := h.aiClient.StartReindex(ctx, c.Param("site_id"))
 	if err != nil {
 		middleware.AbortWithError(c, http.StatusBadGateway, "upstream_error", err.Error())
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"site_id":     resp.SiteID,
-		"chunk_count": resp.ChunkCount,
-		"reloaded_at": resp.ReloadedAt,
+	c.JSON(http.StatusAccepted, gin.H{
+		"site_id": resp.SiteID,
+		"job_id":  resp.JobID,
+		"status":  resp.Status,
 	})
+}
+
+func (h *HTTPHandler) fetchSiteAIStatus(ctx context.Context, siteID string) *aiclient.SiteStatus {
+	if h.aiClient == nil {
+		return nil
+	}
+	status, err := h.aiClient.GetSiteStatus(ctx, siteID)
+	if err != nil {
+		return nil
+	}
+	return status
 }
 
 type createAgentRequest struct {

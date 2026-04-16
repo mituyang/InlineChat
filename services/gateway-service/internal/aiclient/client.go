@@ -22,10 +22,20 @@ type Client struct {
 	httpClient     *http.Client
 }
 
-type ReloadResponse struct {
-	SiteID     string `json:"site_id"`
-	ReloadedAt string `json:"reloaded_at"`
-	ChunkCount int    `json:"chunk_count"`
+type SiteStatus struct {
+	SiteID         string `json:"site_id"`
+	KnowledgeDir   string `json:"knowledge_dir"`
+	IndexStatus    string `json:"index_status"`
+	IndexedChunks  int    `json:"indexed_chunks"`
+	LastIndexedAt  string `json:"last_indexed_at"`
+	LastIndexError string `json:"last_index_error"`
+	ActiveJobID    string `json:"active_job_id"`
+}
+
+type ReindexResponse struct {
+	SiteID string `json:"site_id"`
+	JobID  string `json:"job_id"`
+	Status string `json:"status"`
 }
 
 func NewDynamic(resolver endpointResolver, serviceName string, requestTimeout time.Duration) (*Client, error) {
@@ -49,7 +59,48 @@ func NewDynamic(resolver endpointResolver, serviceName string, requestTimeout ti
 	}, nil
 }
 
-func (c *Client) Reload(ctx context.Context, siteID string) (*ReloadResponse, error) {
+func (c *Client) GetSiteStatus(ctx context.Context, siteID string) (*SiteStatus, error) {
+	siteID = strings.TrimSpace(siteID)
+	if siteID == "" {
+		return nil, fmt.Errorf("site_id is required")
+	}
+	target, err := c.resolveTarget(ctx)
+	if err != nil {
+		return nil, err
+	}
+	reqURL, err := buildSiteURL(target, siteID, "/status")
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	var body struct {
+		Error string `json:"error"`
+		SiteStatus
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, fmt.Errorf("decode ai status response failed: %w", err)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if strings.TrimSpace(body.Error) != "" {
+			return nil, errors.New(body.Error)
+		}
+		return nil, fmt.Errorf("ai status failed: %s", resp.Status)
+	}
+
+	return &body.SiteStatus, nil
+}
+
+func (c *Client) StartReindex(ctx context.Context, siteID string) (*ReindexResponse, error) {
 	siteID = strings.TrimSpace(siteID)
 	if siteID == "" {
 		return nil, fmt.Errorf("site_id is required")
@@ -59,7 +110,7 @@ func (c *Client) Reload(ctx context.Context, siteID string) (*ReloadResponse, er
 	if err != nil {
 		return nil, err
 	}
-	reqURL, err := buildReloadURL(target, siteID)
+	reqURL, err := buildSiteURL(target, siteID, "/reindex")
 	if err != nil {
 		return nil, err
 	}
@@ -77,19 +128,18 @@ func (c *Client) Reload(ctx context.Context, siteID string) (*ReloadResponse, er
 
 	var body struct {
 		Error string `json:"error"`
-		ReloadResponse
+		ReindexResponse
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return nil, fmt.Errorf("decode ai reload response failed: %w", err)
+		return nil, fmt.Errorf("decode ai reindex response failed: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		if strings.TrimSpace(body.Error) != "" {
 			return nil, errors.New(body.Error)
 		}
-		return nil, fmt.Errorf("ai reload failed: %s", resp.Status)
+		return nil, fmt.Errorf("ai reindex failed: %s", resp.Status)
 	}
-
-	return &body.ReloadResponse, nil
+	return &body.ReindexResponse, nil
 }
 
 func (c *Client) resolveTarget(ctx context.Context) (string, error) {
@@ -110,14 +160,12 @@ func (c *Client) resolveTarget(ctx context.Context) (string, error) {
 	return target, nil
 }
 
-func buildReloadURL(target string, siteID string) (string, error) {
+func buildSiteURL(target string, siteID string, suffix string) (string, error) {
 	baseURL, err := url.Parse(target)
 	if err != nil {
 		return "", fmt.Errorf("invalid ai-service target: %w", err)
 	}
-	baseURL.Path = strings.TrimRight(baseURL.Path, "/") + "/reload"
-	query := baseURL.Query()
-	query.Set("site_id", siteID)
-	baseURL.RawQuery = query.Encode()
+	baseURL.Path = strings.TrimRight(baseURL.Path, "/") + "/sites/" + url.PathEscape(siteID) + suffix
+	baseURL.RawQuery = ""
 	return baseURL.String(), nil
 }

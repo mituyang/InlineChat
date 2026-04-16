@@ -7,6 +7,8 @@ import (
 	"strings"
 )
 
+const defaultQdrantCollection = "site_knowledge_chunks"
+
 type Config struct {
 	HTTPPort                     string
 	LogLevel                     string
@@ -24,15 +26,21 @@ type Config struct {
 	ServiceAdvertiseHTTPEndpoint string
 	GRPCDialTimeoutSec           int
 	GRPCCallTimeoutSec           int
-	AILLMBaseURL                 string
-	AILLMModel                   string
-	AILLMAPIKey                  string
+	AIChatBaseURL                string
+	AIChatModel                  string
+	AIChatAPIKey                 string
 	AIEmbeddingBaseURL           string
 	AIEmbeddingModel             string
 	AIEmbeddingAPIKey            string
-	AIKBPath                     string
-	AIRetrieveTopK               int
-	AIMinSimilarity              float64
+	AIRerankerBaseURL            string
+	AIQdrantURL                  string
+	AIQdrantAPIKey               string
+	AIQdrantCollection           string
+	AIKBRootDir                  string
+	AIIndexEmbedBatchSize        int
+	AIRetrievalCandidateK        int
+	AIRerankTopK                 int
+	AIRerankMinScore             float64
 	AIUnknownReply               string
 	AIHTTPTimeoutMS              int
 	AIDisableExternalReadiness   bool
@@ -56,15 +64,21 @@ func Load() (Config, error) {
 		ServiceAdvertiseHTTPEndpoint: strings.TrimSpace(os.Getenv("SERVICE_ADVERTISE_HTTP_ENDPOINT")),
 		GRPCDialTimeoutSec:           getIntEnv("AI_GRPC_DIAL_TIMEOUT_SEC", 8),
 		GRPCCallTimeoutSec:           getIntEnv("AI_GRPC_CALL_TIMEOUT_SEC", 8),
-		AILLMBaseURL:                 strings.TrimRight(strings.TrimSpace(os.Getenv("AI_LLM_BASE_URL")), "/"),
-		AILLMModel:                   strings.TrimSpace(os.Getenv("AI_LLM_MODEL")),
-		AILLMAPIKey:                  strings.TrimSpace(os.Getenv("AI_LLM_API_KEY")),
+		AIChatBaseURL:                strings.TrimRight(strings.TrimSpace(firstNonEmptyEnv("AI_CHAT_BASE_URL", "AI_LLM_BASE_URL")), "/"),
+		AIChatModel:                  strings.TrimSpace(firstNonEmptyEnv("AI_CHAT_MODEL", "AI_LLM_MODEL")),
+		AIChatAPIKey:                 strings.TrimSpace(firstNonEmptyEnv("AI_CHAT_API_KEY", "AI_LLM_API_KEY")),
 		AIEmbeddingBaseURL:           strings.TrimRight(strings.TrimSpace(os.Getenv("AI_EMBEDDING_BASE_URL")), "/"),
 		AIEmbeddingModel:             strings.TrimSpace(os.Getenv("AI_EMBEDDING_MODEL")),
 		AIEmbeddingAPIKey:            strings.TrimSpace(os.Getenv("AI_EMBEDDING_API_KEY")),
-		AIKBPath:                     getEnv("AI_KB_PATH", "docs/qinghe-home-customer-knowledge-base.md"),
-		AIRetrieveTopK:               getIntEnv("AI_RETRIEVE_TOP_K", 5),
-		AIMinSimilarity:              getFloatEnv("AI_MIN_SIMILARITY", 0.35),
+		AIRerankerBaseURL:            strings.TrimRight(strings.TrimSpace(os.Getenv("AI_RERANKER_BASE_URL")), "/"),
+		AIQdrantURL:                  strings.TrimRight(strings.TrimSpace(os.Getenv("AI_QDRANT_URL")), "/"),
+		AIQdrantAPIKey:               strings.TrimSpace(os.Getenv("AI_QDRANT_API_KEY")),
+		AIQdrantCollection:           strings.TrimSpace(getEnv("AI_QDRANT_COLLECTION", defaultQdrantCollection)),
+		AIKBRootDir:                  strings.TrimSpace(getEnv("AI_KB_ROOT_DIR", "/app/data/knowledgebases")),
+		AIIndexEmbedBatchSize:        getIntEnv("AI_INDEX_EMBED_BATCH_SIZE", 4),
+		AIRetrievalCandidateK:        getIntEnv("AI_RETRIEVAL_CANDIDATE_K", 12),
+		AIRerankTopK:                 getIntEnv("AI_RERANK_TOP_K", 4),
+		AIRerankMinScore:             getFloatEnv("AI_RERANK_MIN_SCORE", 0.15),
 		AIUnknownReply:               getEnv("AI_UNKNOWN_REPLY", "当前资料未提及，我暂时无法确认，请联系人工客服。"),
 		AIHTTPTimeoutMS:              getIntEnv("AI_HTTP_TIMEOUT_MS", 15000),
 		AIDisableExternalReadiness:   getBoolEnv("AI_DISABLE_EXTERNAL_READINESS", false),
@@ -94,20 +108,38 @@ func Load() (Config, error) {
 	if cfg.GRPCDialTimeoutSec <= 0 || cfg.GRPCCallTimeoutSec <= 0 {
 		return Config{}, fmt.Errorf("AI_GRPC_DIAL_TIMEOUT_SEC and AI_GRPC_CALL_TIMEOUT_SEC must be greater than 0")
 	}
-	if cfg.AILLMBaseURL == "" || cfg.AILLMModel == "" {
-		return Config{}, fmt.Errorf("AI_LLM_BASE_URL and AI_LLM_MODEL are required")
+	if cfg.AIChatBaseURL == "" || cfg.AIChatModel == "" {
+		return Config{}, fmt.Errorf("AI_CHAT_BASE_URL and AI_CHAT_MODEL are required")
 	}
 	if cfg.AIEmbeddingBaseURL == "" || cfg.AIEmbeddingModel == "" {
 		return Config{}, fmt.Errorf("AI_EMBEDDING_BASE_URL and AI_EMBEDDING_MODEL are required")
 	}
-	if cfg.AIKBPath == "" {
-		return Config{}, fmt.Errorf("AI_KB_PATH is required")
+	if cfg.AIRerankerBaseURL == "" {
+		return Config{}, fmt.Errorf("AI_RERANKER_BASE_URL is required")
 	}
-	if cfg.AIRetrieveTopK <= 0 {
-		return Config{}, fmt.Errorf("AI_RETRIEVE_TOP_K must be greater than 0")
+	if cfg.AIQdrantURL == "" {
+		return Config{}, fmt.Errorf("AI_QDRANT_URL is required")
 	}
-	if cfg.AIMinSimilarity < 0 || cfg.AIMinSimilarity > 1 {
-		return Config{}, fmt.Errorf("AI_MIN_SIMILARITY must be between 0 and 1")
+	if cfg.AIQdrantCollection == "" {
+		return Config{}, fmt.Errorf("AI_QDRANT_COLLECTION is required")
+	}
+	if cfg.AIKBRootDir == "" {
+		return Config{}, fmt.Errorf("AI_KB_ROOT_DIR is required")
+	}
+	if cfg.AIIndexEmbedBatchSize <= 0 {
+		return Config{}, fmt.Errorf("AI_INDEX_EMBED_BATCH_SIZE must be greater than 0")
+	}
+	if cfg.AIRetrievalCandidateK <= 0 {
+		return Config{}, fmt.Errorf("AI_RETRIEVAL_CANDIDATE_K must be greater than 0")
+	}
+	if cfg.AIRerankTopK <= 0 {
+		return Config{}, fmt.Errorf("AI_RERANK_TOP_K must be greater than 0")
+	}
+	if cfg.AIRerankTopK > cfg.AIRetrievalCandidateK {
+		return Config{}, fmt.Errorf("AI_RERANK_TOP_K must be less than or equal to AI_RETRIEVAL_CANDIDATE_K")
+	}
+	if cfg.AIRerankMinScore < -1 || cfg.AIRerankMinScore > 1 {
+		return Config{}, fmt.Errorf("AI_RERANK_MIN_SCORE must be between -1 and 1")
 	}
 	if strings.TrimSpace(cfg.AIUnknownReply) == "" {
 		return Config{}, fmt.Errorf("AI_UNKNOWN_REPLY is required")
@@ -117,6 +149,16 @@ func Load() (Config, error) {
 	}
 
 	return cfg, nil
+}
+
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		value := strings.TrimSpace(os.Getenv(key))
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func getEnv(key string, fallback string) string {

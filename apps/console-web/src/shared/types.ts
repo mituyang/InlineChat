@@ -56,6 +56,10 @@ export interface SiteAIConfig {
   enabled: boolean;
   reply_mode: string;
   updated_at?: string;
-  chunk_count?: number;
-  reloaded_at?: string;
+  knowledge_dir?: string;
+  index_status?: string;
+  indexed_chunks?: number;
+  last_indexed_at?: string;
+  last_index_error?: string;
+  active_job_id?: string;
 }
