@@ -75,6 +75,8 @@ func (f *fakeVectorIndex) Search(_ context.Context, siteID string, _ []float64, 
 			Section:    item.Section,
 			Text:       item.Text,
 			SourcePath: item.SourcePath,
+			Kind:       item.Kind,
+			Keywords:   item.Keywords,
 			Score:      0.9,
 		})
 	}
@@ -159,6 +161,37 @@ func TestManagerTriggerReindexAndSearch(t *testing.T) {
 	}
 	if !strings.Contains(results[0].Text, "7 天无理由退换货") {
 		t.Fatalf("unexpected result text = %q", results[0].Text)
+	}
+}
+
+func TestManagerLoadPrimaryDocument(t *testing.T) {
+	rootDir := t.TempDir()
+	siteDir := filepath.Join(rootDir, "site_demo")
+	if err := os.MkdirAll(siteDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(siteDir, "knowledge.md"), []byte("# 品牌故事\n青禾家居成立于 2019 年。"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	manager := New(
+		rootDir,
+		fakeEmbedder{},
+		fakeReranker{},
+		newEmptySearchVectorIndex(),
+		zap.NewNop(),
+		2,
+		8,
+		2,
+		0.5,
+	)
+
+	doc, err := manager.LoadPrimaryDocument("site_demo")
+	if err != nil {
+		t.Fatalf("LoadPrimaryDocument() error = %v", err)
+	}
+	if !strings.Contains(doc, "青禾家居成立于 2019 年") {
+		t.Fatalf("unexpected document = %q", doc)
 	}
 }
 
@@ -306,6 +339,336 @@ func TestManagerSearchFallsBackToKeywordMatchingWhenVectorSearchIsEmpty(t *testi
 		t.Fatal("expected keyword fallback results when vector search is empty")
 	}
 	if !strings.Contains(results[0].Text, "高性价比家居生活品牌") {
+		t.Fatalf("unexpected result text = %q", results[0].Text)
+	}
+}
+
+func TestManagerSearchUsesLiveKnowledgeWithoutReindex(t *testing.T) {
+	rootDir := t.TempDir()
+	siteDir := filepath.Join(rootDir, "site_demo")
+	if err := os.MkdirAll(siteDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(siteDir, "brand.md"), []byte("# 品牌定位\n青禾家居定位为高性价比家居生活品牌。"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	manager := New(
+		rootDir,
+		fakeEmbedder{},
+		fakeReranker{},
+		newEmptySearchVectorIndex(),
+		zap.NewNop(),
+		2,
+		8,
+		2,
+		0.5,
+	)
+
+	results, err := manager.Search(context.Background(), "site_demo", "你们的品牌定位是什么")
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected live knowledge search results without reindex")
+	}
+	if !strings.Contains(results[0].Text, "高性价比家居生活品牌") {
+		t.Fatalf("unexpected result text = %q", results[0].Text)
+	}
+}
+
+func TestManagerSearchPrefersLiveFAQWithoutReindex(t *testing.T) {
+	rootDir := t.TempDir()
+	siteDir := filepath.Join(rootDir, "site_demo")
+	if err := os.MkdirAll(siteDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	content := `# 常见问题
+**Q：青禾家居的主推产品有哪些？**
+A：当前重点展示产品包括云感记忆棉枕、暮岚针织四件套、极简落地灯。
+
+# 产品 SKU 速查表
+| 产品名称 | 规格 |
+| --- | --- |
+| 云感记忆棉枕 | 60 x 35 x 10/12 cm |
+| 暮岚针织四件套 | 1.5m / 1.8m |
+`
+	if err := os.WriteFile(filepath.Join(siteDir, "knowledge.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	manager := New(
+		rootDir,
+		fakeEmbedder{},
+		fakeReranker{},
+		newEmptySearchVectorIndex(),
+		zap.NewNop(),
+		2,
+		8,
+		2,
+		0.5,
+	)
+
+	results, err := manager.Search(context.Background(), "site_demo", "有哪些明星单品")
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected live faq search results without reindex")
+	}
+	if results[0].Kind != ChunkKindFAQ {
+		t.Fatalf("results[0].Kind = %q", results[0].Kind)
+	}
+	if !strings.Contains(results[0].Text, "当前重点展示产品包括云感记忆棉枕") {
+		t.Fatalf("unexpected result text = %q", results[0].Text)
+	}
+}
+
+func TestManagerSearchPrefersLiveOverviewWithoutReindex(t *testing.T) {
+	rootDir := t.TempDir()
+	siteDir := filepath.Join(rootDir, "site_demo")
+	if err := os.MkdirAll(siteDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	content := `# 会员体系与新客权益
+## 禾苗会员
+注册即成为禾苗会员，可领取 88 元券包。
+
+## 青禾会员
+年度消费满 999 元自动升级。
+
+## 禾选会员
+年度消费满 3999 元自动升级。
+`
+	if err := os.WriteFile(filepath.Join(siteDir, "knowledge.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	manager := New(
+		rootDir,
+		fakeEmbedder{},
+		fakeReranker{},
+		newEmptySearchVectorIndex(),
+		zap.NewNop(),
+		2,
+		8,
+		3,
+		0.5,
+	)
+
+	results, err := manager.Search(context.Background(), "site_demo", "介绍会员")
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) < 2 {
+		t.Fatalf("expected overview results, got %d", len(results))
+	}
+	if results[0].Kind != ChunkKindNarrative {
+		t.Fatalf("results[0].Kind = %q", results[0].Kind)
+	}
+	if !strings.Contains(results[0].Section, "会员") {
+		t.Fatalf("unexpected section = %q", results[0].Section)
+	}
+}
+
+func TestManagerSearchPrefersShortTopicOverviewWithoutReindex(t *testing.T) {
+	rootDir := t.TempDir()
+	siteDir := filepath.Join(rootDir, "site_demo")
+	if err := os.MkdirAll(siteDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	content := `# 企业信息总览
+| 项目 | 内容 |
+| --- | --- |
+| 品牌名称 | 青禾家居 |
+
+# 公司简介
+青禾家居是一家围绕日常居住场景展开产品研发与品牌运营的家居生活品牌。
+
+# 品牌发展历程
+品牌于 2019 年成立，并逐步完善产品矩阵与供应链能力。
+`
+	if err := os.WriteFile(filepath.Join(siteDir, "knowledge.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	manager := New(
+		rootDir,
+		fakeEmbedder{},
+		fakeReranker{},
+		newEmptySearchVectorIndex(),
+		zap.NewNop(),
+		2,
+		8,
+		3,
+		0.5,
+	)
+
+	results, err := manager.Search(context.Background(), "site_demo", "品牌故事")
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected short-topic overview results")
+	}
+	if results[0].Kind != ChunkKindNarrative {
+		t.Fatalf("results[0].Kind = %q", results[0].Kind)
+	}
+	if !strings.Contains(results[0].Section, "品牌发展历程") && !strings.Contains(results[0].Section, "公司简介") {
+		t.Fatalf("unexpected section = %q", results[0].Section)
+	}
+}
+
+func TestManagerSearchPrefersStructuredFactChunk(t *testing.T) {
+	rootDir := t.TempDir()
+	siteDir := filepath.Join(rootDir, "site_demo")
+	if err := os.MkdirAll(siteDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	content := `# 明星产品资料
+## 云感记忆棉枕
+云感记忆棉枕适合作为基础舒睡升级款。
+
+### 参考规格
+| 项目 | 参数 |
+| --- | --- |
+| 产品名称 | 云感记忆棉枕 |
+| 尺寸 | 60 x 35 x 10/12 cm |
+`
+	if err := os.WriteFile(filepath.Join(siteDir, "product.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	vectorIndex := newEmptySearchVectorIndex()
+	manager := New(
+		rootDir,
+		fakeEmbedder{},
+		fakeReranker{},
+		vectorIndex,
+		zap.NewNop(),
+		2,
+		8,
+		2,
+		0.5,
+	)
+
+	if _, err := manager.TriggerReindex(context.Background(), "site_demo"); err != nil {
+		t.Fatalf("TriggerReindex() error = %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		status, statusErr := manager.GetStatus("site_demo")
+		if statusErr != nil {
+			t.Fatalf("GetStatus() error = %v", statusErr)
+		}
+		if status.IndexStatus == StatusReady {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	results, err := manager.Search(context.Background(), "site_demo", "云感记忆棉枕尺寸多大")
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected structured fact search results")
+	}
+	if results[0].Kind != ChunkKindFact {
+		t.Fatalf("results[0].Kind = %q", results[0].Kind)
+	}
+	if !strings.Contains(results[0].Text, "尺寸：60 x 35 x 10/12 cm") {
+		t.Fatalf("unexpected result text = %q", results[0].Text)
+	}
+}
+
+func TestManagerSearchPrefersStructuredFactForInvoiceAliasQuestion(t *testing.T) {
+	rootDir := t.TempDir()
+	siteDir := filepath.Join(rootDir, "site_demo")
+	if err := os.MkdirAll(siteDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	content := `# 企业采购与开票
+企业采购客户可申请发票服务。
+
+## 开票说明
+发票支持：支持企业采购客户申请增值税专用发票
+`
+	if err := os.WriteFile(filepath.Join(siteDir, "knowledge.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	manager := New(
+		rootDir,
+		fakeEmbedder{},
+		fakeReranker{},
+		newEmptySearchVectorIndex(),
+		zap.NewNop(),
+		2,
+		8,
+		2,
+		0.5,
+	)
+
+	results, err := manager.Search(context.Background(), "site_demo", "可以开专票吗")
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected structured fact result")
+	}
+	if results[0].Kind != ChunkKindFact {
+		t.Fatalf("results[0].Kind = %q", results[0].Kind)
+	}
+	if !strings.Contains(results[0].Text, "增值税专用发票") {
+		t.Fatalf("unexpected result text = %q", results[0].Text)
+	}
+}
+
+func TestManagerSearchPrefersStructuredFactForHowMuchQuestion(t *testing.T) {
+	rootDir := t.TempDir()
+	siteDir := filepath.Join(rootDir, "site_demo")
+	if err := os.MkdirAll(siteDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	content := `# 明星产品资料
+## 溪木砧板套组
+
+### 基本信息
+| 项目 | 内容 |
+| --- | --- |
+| 产品名称 | 溪木砧板套组 |
+| 建议零售价 | ¥129 |
+| 所属产品线 | 厨房家居 |
+`
+	if err := os.WriteFile(filepath.Join(siteDir, "knowledge.md"), []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	manager := New(
+		rootDir,
+		fakeEmbedder{},
+		fakeReranker{},
+		newEmptySearchVectorIndex(),
+		zap.NewNop(),
+		2,
+		8,
+		2,
+		0.5,
+	)
+
+	results, err := manager.Search(context.Background(), "site_demo", "溪木砧板套组多少钱")
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) == 0 {
+		t.Fatal("expected structured fact result")
+	}
+	if results[0].Kind != ChunkKindFact {
+		t.Fatalf("results[0].Kind = %q", results[0].Kind)
+	}
+	if !strings.Contains(results[0].Text, "建议零售价：¥129") {
 		t.Fatalf("unexpected result text = %q", results[0].Text)
 	}
 }

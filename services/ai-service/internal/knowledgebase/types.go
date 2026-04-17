@@ -7,6 +7,10 @@ const (
 	StatusIndexing = "indexing"
 	StatusReady    = "ready"
 	StatusError    = "error"
+
+	ChunkKindNarrative = "narrative"
+	ChunkKindFact      = "fact"
+	ChunkKindFAQ       = "faq"
 )
 
 type SearchResult struct {
@@ -14,6 +18,8 @@ type SearchResult struct {
 	Section    string
 	Text       string
 	SourcePath string
+	Kind       string
+	Keywords   []string
 	Score      float64
 }
 
@@ -38,6 +44,8 @@ type Chunk struct {
 	Section    string
 	Text       string
 	SourcePath string
+	Kind       string
+	Keywords   []string
 }
 
 type vectorPoint struct {
@@ -46,5 +54,7 @@ type vectorPoint struct {
 	Section    string
 	Text       string
 	SourcePath string
+	Kind       string
+	Keywords   []string
 	SiteID     string
 }

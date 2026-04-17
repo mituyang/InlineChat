@@ -23,6 +23,8 @@ type qdrantSearchResult struct {
 	Section    string
 	Text       string
 	SourcePath string
+	Kind       string
+	Keywords   []string
 	Score      float64
 }
 
@@ -79,6 +81,8 @@ func (c *qdrantClient) ReplaceSite(ctx context.Context, siteID string, points []
 					"section":     item.Section,
 					"text":        item.Text,
 					"source_path": item.SourcePath,
+					"kind":        item.Kind,
+					"keywords":    item.Keywords,
 				},
 			})
 		}
@@ -140,9 +144,11 @@ func (c *qdrantClient) Search(ctx context.Context, siteID string, vector []float
 			ID      any     `json:"id"`
 			Score   float64 `json:"score"`
 			Payload struct {
-				Section    string `json:"section"`
-				Text       string `json:"text"`
-				SourcePath string `json:"source_path"`
+				Section    string   `json:"section"`
+				Text       string   `json:"text"`
+				SourcePath string   `json:"source_path"`
+				Kind       string   `json:"kind"`
+				Keywords   []string `json:"keywords"`
 			} `json:"payload"`
 		} `json:"result"`
 	}
@@ -163,6 +169,8 @@ func (c *qdrantClient) Search(ctx context.Context, siteID string, vector []float
 			Section:    item.Payload.Section,
 			Text:       item.Payload.Text,
 			SourcePath: item.Payload.SourcePath,
+			Kind:       item.Payload.Kind,
+			Keywords:   normalizeKeywords(item.Payload.Keywords),
 			Score:      item.Score,
 		})
 	}
