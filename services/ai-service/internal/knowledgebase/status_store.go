@@ -32,6 +32,9 @@ func (s *statusStore) Load(siteID string) (SiteStatus, error) {
 		}
 		return SiteStatus{}, fmt.Errorf("read status file failed: %w", err)
 	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return status, nil
+	}
 	if err := json.Unmarshal(raw, &status); err != nil {
 		return SiteStatus{}, fmt.Errorf("decode status file failed: %w", err)
 	}
@@ -65,8 +68,28 @@ func (s *statusStore) Save(status SiteStatus) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, raw, 0o644); err != nil {
-		return fmt.Errorf("write status file failed: %w", err)
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp status file failed: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	if _, err := tmpFile.Write(raw); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("write temp status file failed: %w", err)
+	}
+	if err := tmpFile.Chmod(0o644); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("chmod temp status file failed: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close temp status file failed: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("replace status file failed: %w", err)
 	}
 	return nil
 }

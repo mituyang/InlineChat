@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,20 @@ import (
 
 	"go.uber.org/zap"
 )
+
+func newIPv4Server(t *testing.T, handler http.Handler) *httptest.Server {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("listen local tcp failed: %v", err)
+	}
+
+	server := httptest.NewUnstartedServer(handler)
+	server.Listener = listener
+	server.Start()
+	return server
+}
 
 func TestReverseProxy_ErrorHandlerIncludeRequestID(t *testing.T) {
 	handler, err := NewReverseProxy("http://127.0.0.1:1", "/api/chat", "X-Request-ID", zap.NewNop())
@@ -62,13 +77,13 @@ func TestDynamicReverseProxy_ResolveFailed(t *testing.T) {
 }
 
 func TestDynamicReverseProxy_ResolvePerRequest(t *testing.T) {
-	upstreamA := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstreamA := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("upstream_a"))
 	}))
 	defer upstreamA.Close()
 
-	upstreamB := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	upstreamB := newIPv4Server(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("upstream_b"))
 	}))

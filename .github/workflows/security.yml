@@ -38,6 +38,7 @@ jobs:
             services/admin-service
             services/gateway-service
             services/realtime-service
+            services/ai-service
             packages/discovery
             packages/httpmiddleware
           )
