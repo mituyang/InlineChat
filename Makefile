@@ -2,6 +2,7 @@ SHELL := /bin/bash
 
 COMPOSE_FILE := infra/docker/docker-compose.yml
 MONITORING_COMPOSE_FILE := infra/docker/docker-compose.monitoring.yml
+TUNNEL_COMPOSE_FILE := infra/docker/docker-compose.cloudflared.yml
 ENV_FILE ?= .env
 CACHE_DIR ?= $(CURDIR)/.cache
 GO_BUILD_CACHE ?= $(CACHE_DIR)/go-build
@@ -19,7 +20,7 @@ COVERAGE_THRESHOLD_ALL ?= 12
 MIN_COVERED_PACKAGES ?= 10
 MIN_TOTAL_PACKAGES ?= 20
 
-.PHONY: help ensure-env ensure-mysql-ready config db-backup db-sync schema-check prepare-db up up-fg up-strict down restart logs ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover env-lint quality e2e-ui verify-all proto proto-check build-local image-build smoke integration full-regression mvp-release
+.PHONY: help ensure-env ensure-cloudflared-env ensure-mysql-ready config tunnel-config db-backup db-sync schema-check prepare-db up up-fg up-strict down restart logs ps tunnel-up tunnel-down tunnel-restart tunnel-logs tunnel-ps monitoring-up monitoring-down monitoring-logs migrate migrate-chat migrate-auth migrate-admin fmt fmt-check vet lint test test-race test-cover env-lint quality e2e-ui verify-all proto proto-check build-local image-build smoke integration full-regression mvp-release
 
 help:
 	@echo "可用命令:"
@@ -33,6 +34,11 @@ help:
 	@echo "  make down           停止并删除容器"
 	@echo "  make logs           查看服务日志"
 	@echo "  make ps             查看服务状态"
+	@echo "  make tunnel-up      启动 cloudflared 与 watchdog"
+	@echo "  make tunnel-down    停止 cloudflared 与 watchdog"
+	@echo "  make tunnel-restart 重启 cloudflared 与 watchdog"
+	@echo "  make tunnel-logs    查看 cloudflared 与 watchdog 日志"
+	@echo "  make tunnel-ps      查看 cloudflared 与 watchdog 状态"
 	@echo "  make monitoring-up  在现有服务上叠加启动 Prometheus/Alertmanager/Grafana"
 	@echo "  make monitoring-down 停止监控组件"
 	@echo "  make monitoring-logs 查看监控组件日志"
@@ -61,9 +67,25 @@ ensure-env:
 		exit 1; \
 	fi
 
+ensure-cloudflared-env: ensure-env
+	@token="$$(grep -E '^CLOUDFLARED_TOKEN=' "$(ENV_FILE)" | tail -n 1 | cut -d= -f2-)"; \
+	if [ -z "$$token" ]; then \
+		echo "缺少 CLOUDFLARED_TOKEN，请先在 $(ENV_FILE) 中填写 Cloudflare Tunnel token"; \
+		exit 1; \
+	fi; \
+	health_url="$$(grep -E '^CLOUDFLARED_PUBLIC_HEALTH_URL=' "$(ENV_FILE)" | tail -n 1 | cut -d= -f2-)"; \
+	if [ -z "$$health_url" ]; then \
+		echo "缺少 CLOUDFLARED_PUBLIC_HEALTH_URL，请先在 $(ENV_FILE) 中填写公网 /readyz 地址"; \
+		exit 1; \
+	fi
+
 config:
 	docker compose -f $(COMPOSE_FILE) --env-file .env.example config >/tmp/inlinechat-compose-check.txt
 	@echo "compose 配置校验通过"
+
+tunnel-config:
+	docker compose -f $(COMPOSE_FILE) -f $(TUNNEL_COMPOSE_FILE) --env-file .env.example config >/tmp/inlinechat-compose-tunnel-check.txt
+	@echo "cloudflared compose 配置校验通过"
 
 db-backup: ensure-mysql-ready
 	BACKUP_REASON=manual ENV_FILE=$(ENV_FILE) COMPOSE_FILE=$(COMPOSE_FILE) ./scripts/db-backup.sh
@@ -126,6 +148,22 @@ logs: ensure-env
 
 ps: ensure-env
 	docker compose -f $(COMPOSE_FILE) --env-file $(ENV_FILE) ps
+
+tunnel-up: ensure-cloudflared-env
+	docker compose -f $(COMPOSE_FILE) -f $(TUNNEL_COMPOSE_FILE) --env-file $(ENV_FILE) up -d cloudflared cloudflared-watchdog
+
+tunnel-down: ensure-env
+	docker compose -f $(COMPOSE_FILE) -f $(TUNNEL_COMPOSE_FILE) --env-file $(ENV_FILE) stop cloudflared cloudflared-watchdog
+	docker compose -f $(COMPOSE_FILE) -f $(TUNNEL_COMPOSE_FILE) --env-file $(ENV_FILE) rm -f cloudflared cloudflared-watchdog
+
+tunnel-restart: ensure-cloudflared-env
+	docker compose -f $(COMPOSE_FILE) -f $(TUNNEL_COMPOSE_FILE) --env-file $(ENV_FILE) restart cloudflared cloudflared-watchdog
+
+tunnel-logs: ensure-env
+	docker compose -f $(COMPOSE_FILE) -f $(TUNNEL_COMPOSE_FILE) --env-file $(ENV_FILE) logs -f --tail=200 cloudflared cloudflared-watchdog
+
+tunnel-ps: ensure-env
+	docker compose -f $(COMPOSE_FILE) -f $(TUNNEL_COMPOSE_FILE) --env-file $(ENV_FILE) ps cloudflared cloudflared-watchdog
 
 monitoring-up: ensure-env
 	docker compose -f $(COMPOSE_FILE) -f $(MONITORING_COMPOSE_FILE) --env-file $(ENV_FILE) up -d prometheus alertmanager grafana blackbox-exporter

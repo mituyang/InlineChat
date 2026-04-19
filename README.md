@@ -8,7 +8,7 @@ InlineChat 是一个即插即用的在线实时客服系统。业务站点只需
 - WebSocket 实时消息链路，断线自动重连与轮询兜底
 - 客服工作台，支持会话认领、转接、关闭、快捷语和 AI 协作
 - 管理后台，支持站点管理、客服账号管理、审计与 AI 配置
-- AI 客服支持站点知识库、向量检索 + rerank、仅未分配会话自动回复
+- AI 客服基于 Hermes、Qwen3-Embedding、Qwen3-Reranker 与 Qdrant，支持知识库分块、向量检索、rerank 重排和仅未分配会话自动回复
 - 微服务后端拆分，便于独立扩展与部署
 - Docker Compose 一键启动本地完整环境
 
@@ -67,8 +67,8 @@ cp .env.example .env
 当前默认组合：
 
 - Chat：Hermes，监听 `http://0.0.0.0:8642/v1`
-- Embedding：`Qwen3-Embedding-0.6B`，监听 `http://0.0.0.0:8298/v1`
-- Reranker：`Qwen3-Reranker-0.6B-Q4_K_M`，监听 `http://0.0.0.0:8299`
+- Embedding：`Qwen3-Embedding-0.6B`，示例使用 `Q8_0` GGUF，监听 `http://0.0.0.0:8298/v1`
+- Reranker：`Qwen3-Reranker-0.6B`，示例使用 `Q4_K_M` GGUF，监听 `http://0.0.0.0:8299`
 - 向量库：Qdrant，由 `docker compose` 内置启动
 
 启动 Embedding 服务：
@@ -91,13 +91,15 @@ llama-server \
 ```bash
 llama-server \
   -hf giladgd/Qwen3-Reranker-0.6B-GGUF:Q4_K_M \
-  -a "Qwen3-Reranker-0.6B-Q4_K_M" \
+  -a "Qwen3-Reranker-0.6B" \
   --host 0.0.0.0 \
   --port 8299 \
   --rerank \
   -ngl all \
   -c 2048
 ```
+
+`ai-service` 只依赖 Reranker 服务提供 `POST /rerank`，请求体为 `query`、`texts`、`raw_scores`。
 
 `.env.example` 中与之对应的配置如下：
 
@@ -115,9 +117,10 @@ AI_QDRANT_URL=http://qdrant:6333
 
 - `AI_CHAT_*` 是当前 `ai-service` 实际使用的聊天模型配置；代码仍兼容旧名 `AI_LLM_*`
 - `AI_CHAT_API_KEY` 需要与本机 Hermes 服务配置保持一致
+- `AI_EMBEDDING_MODEL` 需要与 Embedding 服务的 `llama-server -a` 保持一致
 - Hermes 需提供 OpenAI-compatible 的 `/v1/models` 与 `/v1/chat/completions`
 - Embedding 服务需提供 `/v1/embeddings`，Reranker 服务需提供 `/rerank`（可选 `/health`）
-- `host.docker.internal` 用于让容器内的 `ai-service` 访问宿主机上的 Hermes / `llama-server`
+- `host.docker.internal` 用于让容器内的 `ai-service` 访问宿主机上的 Hermes / Embedding / Reranker 服务
 - `qdrant` 由本项目 `docker compose` 启动，无需额外手动拉起
 
 ### 2.1 AI 客服实际工作方式
@@ -177,6 +180,45 @@ curl http://localhost:8200/readyz
 - 示例站点：`http://localhost:8200/app/demo/`
 - Swagger UI：`http://localhost:8200/app/api-docs/`
 - Widget SDK：`http://localhost:8200/sdk/inlinechat-widget.js`
+
+### 5.1 Cloudflare Tunnel（可选）
+
+适用于“本机开发环境需要通过公网域名访问”的场景。
+
+先在 `.env` 中补全：
+
+```env
+CLOUDFLARED_TOKEN=<你的 tunnel token>
+CLOUDFLARED_PUBLIC_HEALTH_URL=https://你的公网域名/readyz
+```
+
+说明：
+
+- `CLOUDFLARED_PROTOCOL=auto`：使用 Cloudflare 官方默认推荐值，优先 `quic`，失败时回退 `http2`
+- `CLOUDFLARED_DNS_RESOLVER_PRIMARY/SECONDARY`：显式覆盖 `cloudflared` 的 DNS 解析，避免本机 `Clash / Surge / TUN / Fake-IP` 把 Tunnel Edge 解析到异常地址
+- `cloudflared-watchdog` 会同时检查公网 `/readyz` 和 `cloudflared` metrics 中的 `cloudflared_tunnel_ha_connections`
+- 仅当“公网探测失败”且“Tunnel 活跃连接数低于阈值”时，watchdog 才会自动重启 `cloudflared`
+
+启动：
+
+```bash
+make tunnel-up
+```
+
+查看状态与日志：
+
+```bash
+make tunnel-ps
+make tunnel-logs
+```
+
+停止：
+
+```bash
+make tunnel-down
+```
+
+如果你之前已经手动拉起过独立的 `cloudflared` 容器，验证新方案稳定后再停掉旧实例，避免同时保留两套副本。
 
 ### 6. 启用站点 AI 客服
 

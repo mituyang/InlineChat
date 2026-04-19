@@ -1,0 +1,47 @@
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:${CLOUDFLARED_IMAGE_TAG:-2026.3.0}
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - tunnel
+      - --no-autoupdate
+      - --metrics
+      - 0.0.0.0:${CLOUDFLARED_METRICS_PORT:-20241}
+      - --protocol
+      - ${CLOUDFLARED_PROTOCOL:-auto}
+      - run
+      - --dns-resolver-addrs
+      - ${CLOUDFLARED_DNS_RESOLVER_PRIMARY:-1.1.1.1:53}
+      - --dns-resolver-addrs
+      - ${CLOUDFLARED_DNS_RESOLVER_SECONDARY:-1.0.0.1:53}
+      - --token
+      - ${CLOUDFLARED_TOKEN}
+    labels:
+      inlinechat.role: cloudflared
+
+  cloudflared-watchdog:
+    build:
+      context: ../..
+      dockerfile: infra/cloudflared-watchdog/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      gateway-service:
+        condition: service_healthy
+      cloudflared:
+        condition: service_started
+    environment:
+      WATCHDOG_DOCKER_SOCKET: /var/run/docker.sock
+      WATCHDOG_METRICS_URL: http://cloudflared:${CLOUDFLARED_METRICS_PORT:-20241}/metrics
+      WATCHDOG_PUBLIC_HEALTH_URL: ${CLOUDFLARED_PUBLIC_HEALTH_URL:-}
+      WATCHDOG_EXPECT_STATUS: ${CLOUDFLARED_EXPECT_STATUS:-200}
+      WATCHDOG_CHECK_INTERVAL: ${CLOUDFLARED_CHECK_INTERVAL_SEC:-30}s
+      WATCHDOG_FAIL_THRESHOLD: ${CLOUDFLARED_FAIL_THRESHOLD:-3}
+      WATCHDOG_RESTART_COOLDOWN: ${CLOUDFLARED_RESTART_COOLDOWN_SEC:-120}s
+      WATCHDOG_METRICS_TIMEOUT: ${CLOUDFLARED_METRICS_TIMEOUT_SEC:-5}s
+      WATCHDOG_PUBLIC_TIMEOUT: ${CLOUDFLARED_PUBLIC_TIMEOUT_SEC:-8}s
+      WATCHDOG_MIN_HA_CONNECTIONS: ${CLOUDFLARED_MIN_HA_CONNECTIONS:-1}
+      WATCHDOG_TARGET_CONTAINER_LABELS: com.docker.compose.project=inlinechat,com.docker.compose.service=cloudflared
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

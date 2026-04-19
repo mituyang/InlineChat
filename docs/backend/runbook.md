@@ -93,6 +93,27 @@
    - `make down`
    - `make up`
 
+### 7) 公网域名出现 Cloudflare 1033
+现象：
+- 浏览器显示 `Error 1033 Cloudflare Tunnel error`。
+- 本地业务容器都正常，但公网域名不可访问。
+
+排查步骤：
+1. 查看 Tunnel 容器状态：
+   - `make tunnel-ps`
+2. 查看 Tunnel 与 watchdog 日志：
+   - `make tunnel-logs`
+3. 重点确认以下现象：
+   - `cloudflared` 日志是否出现 `Registered tunnel connection`
+   - watchdog 是否连续记录公网探测失败
+   - watchdog 是否触发自动重启
+4. 检查 `.env` 中 Cloudflare Tunnel 配置：
+   - `CLOUDFLARED_TOKEN`
+   - `CLOUDFLARED_PUBLIC_HEALTH_URL`
+   - `CLOUDFLARED_PROTOCOL=auto`
+   - `CLOUDFLARED_DNS_RESOLVER_PRIMARY/SECONDARY`
+5. 若本机启用了 `Clash / Surge / TUN / Fake-IP`，优先保留 `dns-resolver-addrs` 默认值，不要改回宿主机 DNS。
+
 ## 回归验证
 - 最小链路验证：
   - `make smoke`
