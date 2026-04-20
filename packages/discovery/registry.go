@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -16,9 +18,14 @@ type Registrar struct {
 	client      *clientv3.Client
 	leaseID     clientv3.LeaseID
 	key         string
-	cancelAlive context.CancelFunc
+	endpoint    string
+	ttlSeconds  int64
+	dialTimeout time.Duration
 	done        chan struct{}
+	stopCtx     context.Context
+	stop        context.CancelFunc
 	logger      *zap.Logger
+	mu          sync.RWMutex
 }
 
 type RegisterRequest struct {
@@ -87,27 +94,16 @@ func Register(ctx context.Context, req RegisterRequest) (*Registrar, error) {
 		client:      client,
 		leaseID:     leaseResp.ID,
 		key:         key,
-		cancelAlive: cancelKeep,
+		endpoint:    endpoint,
+		ttlSeconds:  req.TTLSeconds,
+		dialTimeout: req.DialTimeout,
 		done:        make(chan struct{}),
+		stopCtx:     keepCtx,
+		stop:        cancelKeep,
 		logger:      req.Logger,
 	}
 
-	go func() {
-		defer close(reg.done)
-		for {
-			select {
-			case <-keepCtx.Done():
-				return
-			case _, ok := <-ch:
-				if !ok {
-					if reg.logger != nil {
-						reg.logger.Warn("etcd keepalive channel closed", zap.String("key", reg.key))
-					}
-					return
-				}
-			}
-		}
-	}()
+	go reg.keepAliveLoop(ch)
 
 	return reg, nil
 }
@@ -117,8 +113,8 @@ func (r *Registrar) Close(ctx context.Context) error {
 	if r == nil {
 		return nil
 	}
-	if r.cancelAlive != nil {
-		r.cancelAlive()
+	if r.stop != nil {
+		r.stop()
 	}
 	if r.done != nil {
 		select {
@@ -130,15 +126,116 @@ func (r *Registrar) Close(ctx context.Context) error {
 		return nil
 	}
 
+	leaseID := r.currentLeaseID()
 	var closeErr error
 	if _, err := r.client.Delete(ctx, r.key); err != nil {
 		closeErr = err
 	}
-	if _, err := r.client.Revoke(ctx, r.leaseID); err != nil && closeErr == nil {
-		closeErr = err
+	if leaseID != clientv3.NoLease {
+		if _, err := r.client.Revoke(ctx, leaseID); err != nil && !isLeaseNotFound(err) && closeErr == nil {
+			closeErr = err
+		}
 	}
 	if err := r.client.Close(); err != nil && closeErr == nil {
 		closeErr = err
 	}
 	return closeErr
+}
+
+func (r *Registrar) keepAliveLoop(ch <-chan *clientv3.LeaseKeepAliveResponse) {
+	defer close(r.done)
+
+	retryDelay := 500 * time.Millisecond
+	for {
+		if !r.consumeKeepAlive(ch) {
+			return
+		}
+
+		if r.logger != nil {
+			r.logger.Warn("etcd keepalive channel closed", zap.String("key", r.key))
+		}
+
+		for {
+			if !sleepWithContext(r.stopCtx, retryDelay) {
+				return
+			}
+
+			nextCh, err := r.reRegister()
+			if err == nil {
+				if r.logger != nil {
+					r.logger.Info("etcd registration recovered", zap.String("key", r.key))
+				}
+				ch = nextCh
+				retryDelay = 500 * time.Millisecond
+				break
+			}
+
+			if r.logger != nil {
+				r.logger.Warn("etcd registration recovery failed", zap.String("key", r.key), zap.Error(err))
+			}
+			if retryDelay < 5*time.Second {
+				retryDelay *= 2
+				if retryDelay > 5*time.Second {
+					retryDelay = 5 * time.Second
+				}
+			}
+		}
+	}
+}
+
+func (r *Registrar) consumeKeepAlive(ch <-chan *clientv3.LeaseKeepAliveResponse) bool {
+	for {
+		select {
+		case <-r.stopCtx.Done():
+			return false
+		case _, ok := <-ch:
+			if !ok {
+				return r.stopCtx.Err() == nil
+			}
+		}
+	}
+}
+
+func (r *Registrar) reRegister() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+	opCtx, cancel := context.WithTimeout(r.stopCtx, r.dialTimeout)
+	defer cancel()
+
+	leaseResp, err := r.client.Grant(opCtx, r.ttlSeconds)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := r.client.Put(opCtx, r.key, r.endpoint, clientv3.WithLease(leaseResp.ID)); err != nil {
+		return nil, err
+	}
+	ch, err := r.client.KeepAlive(r.stopCtx, leaseResp.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	r.leaseID = leaseResp.ID
+	r.mu.Unlock()
+	return ch, nil
+}
+
+func (r *Registrar) currentLeaseID() clientv3.LeaseID {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.leaseID
+}
+
+func sleepWithContext(ctx context.Context, duration time.Duration) bool {
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func isLeaseNotFound(err error) bool {
+	return rpctypes.Error(err) == rpctypes.ErrLeaseNotFound
 }

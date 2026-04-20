@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
 )
 
 func TestNormalizeEndpoints(t *testing.T) {
@@ -47,6 +49,52 @@ func TestResolverResolveRejectInvalidArguments(t *testing.T) {
 	}
 	if _, err := resolver.Resolve(context.Background(), "chat-service", ""); err == nil {
 		t.Fatal("expected error for empty protocol")
+	}
+}
+
+func TestResolverResolveFromCacheRoundRobin(t *testing.T) {
+	resolver := &Resolver{
+		cacheTTL: 2 * time.Second,
+		cache: map[string]cacheEntry{
+			"chat-service/grpc": {
+				endpoints: []string{"chat-a:8202", "chat-b:8202"},
+				expiresAt: time.Now().Add(time.Second),
+			},
+		},
+		rrState: make(map[string]int),
+	}
+
+	first, ok, err := resolver.resolveFromCache("chat-service/grpc")
+	if !ok || err != nil {
+		t.Fatalf("expected cache hit, ok=%v err=%v", ok, err)
+	}
+	second, ok, err := resolver.resolveFromCache("chat-service/grpc")
+	if !ok || err != nil {
+		t.Fatalf("expected cache hit, ok=%v err=%v", ok, err)
+	}
+	if first != "chat-a:8202" || second != "chat-b:8202" {
+		t.Fatalf("unexpected round robin sequence: first=%s second=%s", first, second)
+	}
+}
+
+func TestResolverResolveFromCacheEvictsExpiredEntry(t *testing.T) {
+	resolver := &Resolver{
+		cacheTTL: 2 * time.Second,
+		cache: map[string]cacheEntry{
+			"chat-service/grpc": {
+				endpoints: []string{"chat-a:8202"},
+				expiresAt: time.Now().Add(-time.Second),
+			},
+		},
+		rrState: make(map[string]int),
+	}
+
+	_, ok, err := resolver.resolveFromCache("chat-service/grpc")
+	if ok || err != nil {
+		t.Fatalf("expected expired cache miss, ok=%v err=%v", ok, err)
+	}
+	if _, exists := resolver.cache["chat-service/grpc"]; exists {
+		t.Fatal("expected expired cache entry removed")
 	}
 }
 
@@ -130,5 +178,14 @@ func TestResolveWithRetryTimeout(t *testing.T) {
 	}
 	if resolver.calls == 0 {
 		t.Fatal("expected resolver called at least once")
+	}
+}
+
+func TestIsLeaseNotFound(t *testing.T) {
+	if !isLeaseNotFound(rpctypes.ErrLeaseNotFound) {
+		t.Fatal("expected lease not found recognized")
+	}
+	if isLeaseNotFound(errors.New("other error")) {
+		t.Fatal("expected non-lease error ignored")
 	}
 }
